@@ -1,0 +1,488 @@
+// ─────────────────────────────────────────────────────────────
+// Kideos for Parents — ChannelsScreen
+//
+// Manages the whitelisted channel list for the selected child.
+// - Shows all whitelisted channels with seeding status
+// - Lets parent add channels by URL / @handle
+// - Shows pending AI channel suggestions
+// - Long-press to remove a channel
+// ─────────────────────────────────────────────────────────────
+
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  SafeAreaView,
+  StatusBar,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+} from "react-native";
+import type { WhitelistedChannel, ChannelSuggestion } from "../../types";
+import {
+  subscribeToWhitelistedChannels,
+  subscribeToChannelSuggestions,
+  addChannel,
+  removeChannel,
+  respondToSuggestion,
+} from "../../services/firebase";
+import { useStore, useSelectedChild } from "../../store/useStore";
+
+const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  pending: { label: "Analyzing…", color: "#FF9800" },
+  ready: { label: "Ready", color: "#4CAF50" },
+  error: { label: "Error", color: "#FF5252" },
+};
+
+export default function ChannelsScreen() {
+  const user = useStore((s) => s.user);
+  const selectedChildId = useStore((s) => s.selectedChildId);
+  const selectedChild = useSelectedChild();
+
+  const [channels, setChannels] = useState<WhitelistedChannel[]>([]);
+  const [suggestions, setSuggestions] = useState<ChannelSuggestion[]>([]);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [input, setInput] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const parentId = user?.uid;
+
+  useEffect(() => {
+    if (!parentId || !selectedChildId) return;
+    const unsub1 = subscribeToWhitelistedChannels(
+      parentId,
+      selectedChildId,
+      setChannels
+    );
+    const unsub2 = subscribeToChannelSuggestions(
+      parentId,
+      selectedChildId,
+      setSuggestions
+    );
+    return () => {
+      unsub1();
+      unsub2();
+    };
+  }, [parentId, selectedChildId]);
+
+  const handleAdd = useCallback(async () => {
+    const trimmed = input.trim();
+    if (!trimmed || !parentId || !selectedChildId) return;
+    setAdding(true);
+    try {
+      await addChannel(parentId, selectedChildId, trimmed);
+      setInput("");
+      setAddModalVisible(false);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Could not find that channel.";
+      Alert.alert("Not Found", msg);
+    } finally {
+      setAdding(false);
+    }
+  }, [input, parentId, selectedChildId]);
+
+  const handleRemove = useCallback(
+    (channel: WhitelistedChannel) => {
+      Alert.alert(
+        "Remove Channel",
+        `Remove "${channel.name}" from ${selectedChild?.profile.name ?? "this child"}'s list?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              if (!parentId || !selectedChildId) return;
+              await removeChannel(parentId, selectedChildId, channel.channelId);
+            },
+          },
+        ]
+      );
+    },
+    [parentId, selectedChildId, selectedChild]
+  );
+
+  const handleSuggestion = useCallback(
+    async (suggestion: ChannelSuggestion, response: "approved" | "denied") => {
+      if (!parentId || !selectedChildId) return;
+      try {
+        await respondToSuggestion(
+          parentId,
+          selectedChildId,
+          suggestion.channelId,
+          response
+        );
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Action failed.";
+        Alert.alert("Error", msg);
+      }
+    },
+    [parentId, selectedChildId]
+  );
+
+  const renderChannel = ({ item }: { item: WhitelistedChannel }) => {
+    const status = STATUS_LABELS[item.seedingStatus] ?? STATUS_LABELS.pending;
+    return (
+      <TouchableOpacity
+        style={styles.channelCard}
+        onLongPress={() => handleRemove(item)}
+        activeOpacity={0.85}
+      >
+        {item.thumbnail ? (
+          <Image
+            source={{ uri: item.thumbnail }}
+            style={styles.channelThumb}
+          />
+        ) : (
+          <View style={[styles.channelThumb, styles.channelThumbPlaceholder]}>
+            <Text style={styles.channelThumbPlaceholderText}>📺</Text>
+          </View>
+        )}
+        <View style={styles.channelInfo}>
+          <Text style={styles.channelName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <View style={styles.channelMeta}>
+            <View
+              style={[styles.statusDot, { backgroundColor: status.color }]}
+            />
+            <Text style={[styles.statusLabel, { color: status.color }]}>
+              {status.label}
+            </Text>
+            {item.seedingStatus === "ready" && (
+              <Text style={styles.videoCount}> · {item.videoCount} videos</Text>
+            )}
+          </View>
+        </View>
+        <Text style={styles.removeHint}>hold to remove</Text>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F7F7FF" />
+
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.heading}>Channels</Text>
+          {selectedChild && (
+            <Text style={styles.subheading}>
+              {selectedChild.profile.avatar} {selectedChild.profile.name}
+            </Text>
+          )}
+        </View>
+        <TouchableOpacity
+          style={styles.addBtn}
+          onPress={() => setAddModalVisible(true)}
+        >
+          <Text style={styles.addBtnText}>+ Add</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* AI Suggestions */}
+      {suggestions.length > 0 && (
+        <View style={styles.suggestionsSection}>
+          <Text style={styles.suggestionsTitle}>
+            ✨ AI Suggestions for {selectedChild?.profile.name}
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {suggestions.map((s) => (
+              <View key={s.channelId} style={styles.suggestionCard}>
+                {s.thumbnail ? (
+                  <Image
+                    source={{ uri: s.thumbnail }}
+                    style={styles.suggestionThumb}
+                  />
+                ) : (
+                  <View style={[styles.suggestionThumb, styles.channelThumbPlaceholder]}>
+                    <Text>📺</Text>
+                  </View>
+                )}
+                <Text style={styles.suggestionName} numberOfLines={1}>
+                  {s.channelName}
+                </Text>
+                <Text style={styles.suggestionReason} numberOfLines={2}>
+                  {s.reason}
+                </Text>
+                <View style={styles.suggestionActions}>
+                  <TouchableOpacity
+                    style={styles.denyBtn}
+                    onPress={() => handleSuggestion(s, "denied")}
+                  >
+                    <Text style={styles.denyBtnText}>✕</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.approveBtn}
+                    onPress={() => handleSuggestion(s, "approved")}
+                  >
+                    <Text style={styles.approveBtnText}>✓ Add</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Channel list */}
+      {channels.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyEmoji}>📺</Text>
+          <Text style={styles.emptyTitle}>No channels yet</Text>
+          <Text style={styles.emptyText}>
+            Add a YouTube channel by URL or @handle and our AI will start
+            analyzing videos automatically.
+          </Text>
+          <TouchableOpacity
+            style={styles.emptyAddBtn}
+            onPress={() => setAddModalVisible(true)}
+          >
+            <Text style={styles.emptyAddBtnText}>+ Add First Channel</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={channels}
+          renderItem={renderChannel}
+          keyExtractor={(item) => item.channelId}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+
+      {/* Add Channel Modal */}
+      <Modal
+        visible={addModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setAddModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add Channel</Text>
+            <TouchableOpacity onPress={() => setAddModalVisible(false)}>
+              <Text style={styles.modalClose}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalSub}>
+              Paste a YouTube channel URL, @handle, or channel name. Our AI
+              will analyze every video and only show the approved ones.
+            </Text>
+            <Text style={styles.exampleLabel}>Examples:</Text>
+            {[
+              "youtube.com/@NationalGeographic",
+              "@SciShow",
+              "SciShow",
+            ].map((ex) => (
+              <TouchableOpacity key={ex} onPress={() => setInput(ex)}>
+                <Text style={styles.example}>{ex}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TextInput
+              style={styles.modalInput}
+              value={input}
+              onChangeText={setInput}
+              placeholder="Paste URL or @handle"
+              placeholderTextColor="#aaa"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+            />
+
+            <TouchableOpacity
+              style={[styles.confirmBtn, adding && styles.btnDisabled]}
+              onPress={handleAdd}
+              disabled={adding}
+            >
+              {adding ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.confirmBtnText}>Add Channel</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F7F7FF" },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  heading: { fontSize: 28, fontWeight: "800", color: "#1A1A2E" },
+  subheading: { fontSize: 14, color: "#888", marginTop: 2 },
+  addBtn: {
+    backgroundColor: "#6C63FF",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  addBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+
+  suggestionsSection: { paddingLeft: 20, marginBottom: 16 },
+  suggestionsTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#333",
+    marginBottom: 10,
+  },
+  suggestionCard: {
+    width: 160,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    marginRight: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  suggestionThumb: {
+    width: "100%",
+    height: 90,
+    borderRadius: 8,
+    backgroundColor: "#E0E0FF",
+    marginBottom: 8,
+  },
+  suggestionName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 4,
+  },
+  suggestionReason: { fontSize: 11, color: "#888", lineHeight: 16, marginBottom: 10 },
+  suggestionActions: { flexDirection: "row", gap: 8 },
+  denyBtn: {
+    flex: 1,
+    backgroundColor: "#FFF0F0",
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  denyBtnText: { fontSize: 14, color: "#FF5252", fontWeight: "700" },
+  approveBtn: {
+    flex: 2,
+    backgroundColor: "#6C63FF",
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  approveBtnText: { fontSize: 13, color: "#fff", fontWeight: "700" },
+
+  list: { paddingHorizontal: 20, paddingBottom: 24 },
+  channelCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: 12,
+  },
+  channelThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#E0E0FF",
+  },
+  channelThumbPlaceholder: { alignItems: "center", justifyContent: "center" },
+  channelThumbPlaceholderText: { fontSize: 24 },
+  channelInfo: { flex: 1 },
+  channelName: { fontSize: 15, fontWeight: "700", color: "#1A1A2E", marginBottom: 4 },
+  channelMeta: { flexDirection: "row", alignItems: "center" },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
+  statusLabel: { fontSize: 12, fontWeight: "600" },
+  videoCount: { fontSize: 12, color: "#888" },
+  removeHint: { fontSize: 10, color: "#ccc" },
+
+  emptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+  },
+  emptyEmoji: { fontSize: 56, marginBottom: 16 },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  emptyAddBtn: {
+    backgroundColor: "#6C63FF",
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+  },
+  emptyAddBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+
+  modal: { flex: 1, backgroundColor: "#F7F7FF" },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E8E8F0",
+  },
+  modalTitle: { fontSize: 18, fontWeight: "700", color: "#1A1A2E" },
+  modalClose: { fontSize: 16, color: "#6C63FF", fontWeight: "600" },
+  modalContent: { padding: 24 },
+  modalSub: { fontSize: 15, color: "#666", lineHeight: 22, marginBottom: 20 },
+  exampleLabel: { fontSize: 13, fontWeight: "600", color: "#333", marginBottom: 8 },
+  example: {
+    fontSize: 14,
+    color: "#6C63FF",
+    marginBottom: 6,
+    textDecorationLine: "underline",
+  },
+  modalInput: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    color: "#1A1A2E",
+    borderWidth: 1,
+    borderColor: "#E8E8F0",
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  confirmBtn: {
+    backgroundColor: "#6C63FF",
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: "center",
+  },
+  btnDisabled: { opacity: 0.6 },
+  confirmBtnText: { color: "#fff", fontSize: 17, fontWeight: "700" },
+});
