@@ -1,0 +1,140 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ──────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isParent(parentId) {
+      return isSignedIn() && request.auth.uid == parentId;
+    }
+
+    // ── Parent profile ────────────────────────────────────────
+
+    match /users/{parentId} {
+      allow read, write: if isParent(parentId);
+
+      match /devices/{doc} {
+        allow read, write: if isParent(parentId);
+      }
+
+      // Weekly digests live at parent level (not child level)
+      match /digests/{date} {
+        // Written by generateWeeklyDigest Cloud Function only
+        allow read: if isParent(parentId);
+        allow write: if false;
+      }
+
+      // ── Child profiles ───────────────────────────────────────
+
+      match /children/{childId} {
+        // Parent manages child profiles; kid app reads its own profile
+        allow read: if isParent(parentId) || isSignedIn();
+        allow write: if isParent(parentId);
+
+        // Content filter settings — path: valueFilters/current
+        match /valueFilters/{doc} {
+          // Cloud Functions and parent app both read; parent app writes
+          allow read: if isParent(parentId) || isSignedIn();
+          allow write: if isParent(parentId);
+        }
+
+        // Whitelisted channels — kid app reads for subscription list
+        match /whitelistedChannels/{channelId} {
+          allow read: if isParent(parentId) || isSignedIn();
+          // Only parent or Cloud Functions (resolveAndAddChannel) write
+          allow write: if isParent(parentId);
+        }
+
+        // Watch history — COPPA 90-day retention
+        match /watchHistory/{sessionId} {
+          allow read: if isParent(parentId);
+          // Kid app writes via anonymous auth; only start/end fields allowed
+          allow create: if isSignedIn();
+          allow update: if isSignedIn()
+            && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(["endedAt", "durationSeconds"]);
+          // Hard delete only via deleteChildData Cloud Function
+          allow delete: if false;
+        }
+
+        // Flagged content — written by Cloud Functions during analysis
+        match /flaggedContent/{flagId} {
+          allow read: if isParent(parentId);
+          allow update: if isParent(parentId)
+            && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(["parentViewed"]);
+          allow create, delete: if false;
+        }
+
+        // AI channel suggestions
+        match /suggestions/{suggestionId} {
+          allow read: if isParent(parentId);
+          allow update: if isParent(parentId)
+            && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(["parentResponse"]);
+          allow create, delete: if false;
+        }
+
+        // Real-time session: nowPlaying (kid → parent) + parentCommand + playSignal
+        match /currentSession/{doc} {
+          // Both parent and kid app read this (live now-watching + commands)
+          allow read: if isParent(parentId) || isSignedIn();
+
+          // Kid app writes nowPlaying (any authenticated user — anonymous auth)
+          // Parent app writes parentCommand
+          // playSignal is written by the handleParentCommand Cloud Function only
+          allow write: if
+            (doc == "nowPlaying"    && isSignedIn())   ||
+            (doc == "parentCommand" && isParent(parentId));
+        }
+      }
+    }
+
+    // ── Pairing codes ─────────────────────────────────────────
+    // Kid app creates the code (may be anonymous auth or unauthenticated).
+    // Parent app reads and claims it once.
+    match /pairingCodes/{code} {
+      allow create: if true;     // kid writes before it has auth
+      allow read:   if true;     // parent reads to verify code
+      allow update: if isSignedIn()
+        && request.resource.data.claimed == true
+        && resource.data.claimed == false;   // one-time claim
+      allow delete: if false;
+    }
+
+    // ── Channel library cache ─────────────────────────────────
+    // Kid app reads approved videos for its feed.
+    // Written only by Cloud Functions (seed + refresh pipeline).
+    match /channelLibraryCache/{channelId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      match /videos/{videoId} {
+        allow read: if isSignedIn();
+        allow write: if false;
+      }
+    }
+
+    // ── Shared AI analysis cache ──────────────────────────────
+    // Shared across all users. Written only by Cloud Functions.
+    match /videoAnalysisCache/{videoId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      match /results/{filterHash} {
+        allow read: if isSignedIn();
+        allow write: if false;
+      }
+    }
+
+    // ── Default deny ──────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

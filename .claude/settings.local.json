@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(firebase --version)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(firebase use *)",
+      "Bash(firebase functions:secrets:set YOUTUBE_API_KEY)",
+      "Bash(npm run *)",
+      "Bash(firebase functions:secrets:set SUPADATA_API_KEY)",
+      "Bash(firebase deploy *)",
+      "Bash(npx react-native@latest init Kideos --package-name com.kideos.app --skip-install)",
+      "Bash(npx react-native@latest init KideosParent --package-name com.kideos.parent --skip-install)",
+      "Bash(npx @react-native-community/cli@latest init Kideos --package-name com.kideos.app --skip-install)",
+      "Bash(read f *)"
+    ]
+  }
+}
