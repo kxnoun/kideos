@@ -8,11 +8,10 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# Required for @react-native-firebase v24 + Firebase 12 with static frameworks.
+$RNFirebaseAsStaticFramework = true
+
+use_frameworks! :linkage => :static
 
 target 'KideosParent' do
   config = use_native_modules!
@@ -23,6 +22,10 @@ target 'KideosParent' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
+  # Use pre-compiled Firestore XCFramework to avoid source-compiling ~400 files of
+  # Firestore + gRPC + Protobuf which causes Clang module ownership conflicts.
+  pod 'FirebaseFirestore', :git => 'https://github.com/invertase/firestore-ios-sdk-frameworks.git', :tag => '12.10.0'
+
   post_install do |installer|
     react_native_post_install(
       installer,
@@ -30,5 +33,93 @@ target 'KideosParent' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        # Allow RNFB pods to include React-Core headers non-modularly.
+        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
+    end
+
+    # THE FIX: make React headers modular for RNFB pods via xcconfig patch.
+    # The VFS overlay provides React header paths but not the React clang module.
+    # Without the module, #import <React/RCTBridgeModule.h> inside RNFBApp's module
+    # context pins React types to RNFBApp.RNFBSharedUtils — downstream pods fail with:
+    #   "declaration of 'RCTBridgeModule' must be imported from module 'RNFBApp.RNFBSharedUtils'"
+    # -fmodule-map-file= loads React's module map (from the extracted xcframework slice),
+    # making all React imports modular and owned by the React module instead.
+    react_modmap = '${PODS_XCFRAMEWORKS_BUILD_DIR}/React-Core-prebuilt/React.framework/Modules/module.modulemap'
+    modmap_cflag  = "-fmodule-map-file=#{react_modmap}"
+    modmap_swift  = "-Xcc -fmodule-map-file=#{react_modmap}"
+
+    Dir.glob(
+      File.join(installer.sandbox.root, 'Target Support Files', 'RNFB*', '*.xcconfig')
+    ) do |xcconfig_path|
+      content = File.read(xcconfig_path)
+      changed = false
+
+      if content.include?('OTHER_CFLAGS') && !content.include?(modmap_cflag)
+        content.gsub!(/^OTHER_CFLAGS = (.*)$/, "OTHER_CFLAGS = \\1 #{modmap_cflag}")
+        changed = true
+      end
+      if content.include?('OTHER_CPLUSPLUSFLAGS') && !content.include?(modmap_cflag)
+        content.gsub!(/^OTHER_CPLUSPLUSFLAGS = (.*)$/, "OTHER_CPLUSPLUSFLAGS = \\1 #{modmap_cflag}")
+        changed = true
+      end
+      if content.include?('OTHER_SWIFT_FLAGS') && !content.include?(modmap_swift)
+        content.gsub!(/^OTHER_SWIFT_FLAGS = (.*)$/, "OTHER_SWIFT_FLAGS = \\1 #{modmap_swift}")
+        changed = true
+      end
+
+      if changed
+        File.write(xcconfig_path, content)
+        puts "Patched React module map into #{File.basename(xcconfig_path)}"
+      end
+    end
+
+    # Fix missing PrivacyInfo.xcprivacy and roots.pem files in Firebase/gRPC pods (safety net).
+    privacy_info_content = <<~XML
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+          <key>NSPrivacyTracking</key>
+          <false/>
+          <key>NSPrivacyTrackingDomains</key>
+          <array/>
+          <key>NSPrivacyCollectedDataTypes</key>
+          <array/>
+          <key>NSPrivacyAccessedAPITypes</key>
+          <array/>
+      </dict>
+      </plist>
+    XML
+
+    missing_privacy_files = [
+      'nanopb/spm_resources/PrivacyInfo.xcprivacy',
+      'leveldb-library/Resources/PrivacyInfo.xcprivacy',
+      'gRPC-Core/src/objective-c/PrivacyInfo.xcprivacy',
+      'gRPC-C++/src/objective-c/PrivacyInfo.xcprivacy',
+    ]
+
+    missing_privacy_files.each do |relative_path|
+      full_path = File.join(installer.sandbox.root, relative_path)
+      unless File.exist?(full_path)
+        FileUtils.mkdir_p(File.dirname(full_path))
+        File.write(full_path, privacy_info_content)
+        puts "Created missing #{relative_path}"
+      end
+    end
+
+    # Copy roots.pem if missing
+    roots_dst = File.join(installer.sandbox.root, 'gRPC-C++/etc/roots.pem')
+    roots_src = File.join(installer.sandbox.root, 'gRPC-C++ 2/etc/roots.pem')
+    unless File.exist?(roots_dst)
+      if File.exist?(roots_src)
+        FileUtils.mkdir_p(File.dirname(roots_dst))
+        FileUtils.cp(roots_src, roots_dst)
+        puts "Copied roots.pem"
+      end
+    end
   end
 end
