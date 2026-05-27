@@ -1,4 +1,3 @@
-# Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
     "react-native/scripts/react_native_pods.rb",
@@ -8,27 +7,46 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# Required so RNFB pods build as static frameworks.
+$RNFirebaseAsStaticFramework = true
+
+# Required for Firebase 11.x Swift pods (FirebaseAuth, FirebaseCoreInternal)
+# to place FirebaseAuth-Swift.h where Firebase/Firebase.h can find it.
+use_frameworks! :linkage => :static
 
 target 'Kideos' do
   config = use_native_modules!
 
   use_react_native!(
     :path => config[:reactNativePath],
-    # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
+
+  # Pre-compiled Firestore avoids source-compiling gRPC-Core.
+  pod 'FirebaseFirestore', :git => 'https://github.com/invertase/firestore-ios-sdk-frameworks.git', :tag => '11.15.0'
 
   post_install do |installer|
     react_native_post_install(
       installer,
       config[:reactNativePath],
-      :mac_catalyst_enabled => false,
-      # :ccache_enabled => true
+      :mac_catalyst_enabled => false
     )
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+
+        # RNFB 22.4.0 is pure ObjC — no Swift files, no module interface needed.
+        # Setting DEFINES_MODULE = NO prevents Clang from pinning React types
+        # (RCTBridgeModule etc.) to an RNFB module submodule, which would cause
+        # "declaration of X must be imported from module RNFBApp.Y" errors.
+        # This works in v22.4.0 because (unlike v24) the podspecs do NOT write
+        # DEFINES_MODULE = YES into xcconfig — so the pbxproj setting sticks.
+        if target.name.start_with?('RNFB')
+          config.build_settings['DEFINES_MODULE'] = 'NO'
+        end
+      end
+    end
   end
 end

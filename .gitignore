@@ -1,8 +1,13 @@
-# Firebase
+# Firebase — never commit sensitive config files
 .firebase/
 firebase-debug.log
 firebase-debug.*.log
 .firebaserc.local
+GoogleService-Info.plist
+google-services.json
+
+# Claude Code local settings
+.claude/
 
 # Functions build output
 functions/lib/
