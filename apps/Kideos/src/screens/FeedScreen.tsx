@@ -13,7 +13,7 @@
 //   4. Render a simple thumbnail grid
 // ─────────────────────────────────────────────────────────────
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -63,12 +63,19 @@ export default function FeedScreen({
     return unsub;
   }, [parentId, childId]);
 
+  // Stable string key — only changes when the actual channel IDs change,
+  // not on every Firestore snapshot (which creates a new array reference).
+  const channelIdsKey = useMemo(
+    () => channels.map((c) => c.channelId).sort().join(","),
+    [channels]
+  );
+
   // Subscribe to approved videos for all ready channels
   useEffect(() => {
-    const channelIds = channels.map((c) => c.channelId);
+    const channelIds = channelIdsKey ? channelIdsKey.split(",") : [];
     const unsub = subscribeToApprovedVideos(channelIds, setVideos);
     return unsub;
-  }, [channels]);
+  }, [channelIdsKey]);
 
   // Listen for parent remote commands (pause / stop)
   useEffect(() => {

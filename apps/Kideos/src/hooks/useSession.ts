@@ -1,7 +1,7 @@
 // Kideos Kid App — child session management
 // Reads the paired session from AsyncStorage.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ChildSession } from "../types";
 
@@ -24,15 +24,15 @@ export function useSession() {
     });
   }, []);
 
-  const saveSession = async (s: ChildSession) => {
+  const saveSession = useCallback(async (s: ChildSession) => {
     await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(s));
     setSession(s);
-  };
+  }, []);
 
-  const clearSession = async () => {
+  const clearSession = useCallback(async () => {
     await AsyncStorage.removeItem(SESSION_KEY);
     setSession(null);
-  };
+  }, []);
 
   return { session, loading, saveSession, clearSession };
 }
