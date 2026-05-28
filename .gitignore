@@ -18,6 +18,9 @@ functions/node_modules/
 .env.*
 *.local
 
+# Android — machine-specific, never commit
+local.properties
+
 # OS
 .DS_Store
 Thumbs.db

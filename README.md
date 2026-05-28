@@ -13,6 +13,7 @@ Two React Native apps that work together:
 
 ## Getting started
 
-See **[docs/ios-setup.md](docs/ios-setup.md)** for full iOS dev setup instructions.
+- **iOS** — see [docs/ios-setup.md](docs/ios-setup.md)
+- **Android** — see [docs/android-setup.md](docs/android-setup.md)
 
-> ⚠️ `GoogleService-Info.plist` files are not in this repo. Get them from a teammate — see the setup guide.
+> ⚠️ Firebase config files (`GoogleService-Info.plist`, `google-services.json`) are not in this repo. Get them from a teammate — see the relevant setup guide.
