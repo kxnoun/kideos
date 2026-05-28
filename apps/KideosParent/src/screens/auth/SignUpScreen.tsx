@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../types";
-import { signUp } from "../../services/firebase";
+import { signUp, createUserProfile } from "../../services/firebase";
 
 interface Props {
   navigation: NativeStackNavigationProp<RootStackParamList, "SignUp">;
@@ -45,10 +45,19 @@ export default function SignUpScreen({ navigation }: Props) {
     }
     setLoading(true);
     try {
-      await signUp(email.trim(), password);
+      const cred = await signUp(email.trim(), password);
+      await createUserProfile(cred.user.uid, email.trim());
       // Auth state change in App.tsx triggers onboarding flow
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Could not create account.";
+      const code = (e as { code?: string })?.code;
+      const friendly: Record<string, string> = {
+        "auth/email-already-in-use": "An account with this email already exists.",
+        "auth/invalid-email": "Please enter a valid email address.",
+        "auth/weak-password": "Password is too weak. Please choose a stronger one.",
+        "auth/network-request-failed": "Network error. Check your connection and try again.",
+        "auth/operation-not-allowed": "Sign-up is currently unavailable. Please try again later.",
+      };
+      const msg = (code && friendly[code]) ?? (e instanceof Error ? e.message : "Could not create account.");
       Alert.alert("Sign Up Failed", msg);
     } finally {
       setLoading(false);

@@ -33,6 +33,13 @@ export const signOut = () => auth().signOut();
 
 export const onAuthStateChanged = auth().onAuthStateChanged.bind(auth());
 
+export async function createUserProfile(uid: string, email: string): Promise<void> {
+  await firestore().doc(`users/${uid}`).set(
+    { email, createdAt: firestore.FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+}
+
 // ─── Helper: call a Gen-2 callable Cloud Function ────────────
 
 async function callFunction<T>(name: string, data: object): Promise<T> {
@@ -84,13 +91,20 @@ export function subscribeToChildren(
 ): () => void {
   return firestore()
     .collection(`users/${parentId}/children`)
-    .onSnapshot((snap) => {
-      const children = snap.docs.map((doc) => ({
-        id: doc.id,
-        profile: doc.data() as ChildProfile,
-      }));
-      onUpdate(children);
-    });
+    .onSnapshot(
+      (snap) => {
+        const children = snap.docs.map((doc) => ({
+          id: doc.id,
+          profile: doc.data() as ChildProfile,
+        }));
+        onUpdate(children);
+      },
+      (_err) => {
+        // Unblock the loading state so the app doesn't hang if Firestore
+        // is temporarily unavailable or rules are not yet deployed.
+        onUpdate([]);
+      }
+    );
 }
 
 // ─── Value Filters ───────────────────────────────────────────
