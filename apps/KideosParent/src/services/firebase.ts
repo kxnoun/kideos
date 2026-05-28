@@ -21,7 +21,7 @@ import type {
 
 // TODO: paste your Web Client ID from Firebase Console →
 //       Project Settings → Your apps → Web app → OAuth 2.0 client_id
-const GOOGLE_WEB_CLIENT_ID = "YOUR_WEB_CLIENT_ID_FROM_FIREBASE_CONSOLE";
+const GOOGLE_WEB_CLIENT_ID = "530175410554-ma7s33gove3f3esp8l1o2ckdtuu9snrv.apps.googleusercontent.com";
 
 const REGION = "us-central1";
 const PROJECT_ID = "kideos-io";
