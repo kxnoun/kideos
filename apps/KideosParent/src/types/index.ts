@@ -84,8 +84,7 @@ export interface NowPlaying {
 // Navigation
 export type RootStackParamList = {
   // Auth
-  SignIn: undefined;
-  SignUp: undefined;
+  Auth: undefined;
   // Onboarding
   CreateChild: undefined;
   SetFilters: { childId: string; childAge: number };

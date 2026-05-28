@@ -21,9 +21,8 @@ import { useAuth } from "./src/hooks/useAuth";
 import { useStore } from "./src/store/useStore";
 import { subscribeToChildren } from "./src/services/firebase";
 
-// Auth screens
-import SignInScreen from "./src/screens/auth/SignInScreen";
-import SignUpScreen from "./src/screens/auth/SignUpScreen";
+// Auth screen
+import AuthScreen from "./src/screens/auth/AuthScreen";
 
 // Onboarding screens
 import CreateChildScreen from "./src/screens/onboarding/CreateChildScreen";
@@ -118,8 +117,7 @@ export default function App() {
           {!isSignedIn ? (
             // ── Auth stack ──────────────────────────────────────
             <>
-              <Stack.Screen name="SignIn" component={SignInScreen} />
-              <Stack.Screen name="SignUp" component={SignUpScreen} />
+              <Stack.Screen name="Auth" component={AuthScreen} />
             </>
           ) : inOnboarding ? (
             // ── Onboarding stack ─────────────────────────────────

@@ -7,6 +7,8 @@
 
 import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import appleAuth from "@invertase/react-native-apple-authentication";
 import type {
   ValueFilters,
   ChildProfile,
@@ -16,6 +18,10 @@ import type {
   WeeklyDigest,
   NowPlaying,
 } from "../types";
+
+// TODO: paste your Web Client ID from Firebase Console →
+//       Project Settings → Your apps → Web app → OAuth 2.0 client_id
+const GOOGLE_WEB_CLIENT_ID = "YOUR_WEB_CLIENT_ID_FROM_FIREBASE_CONSOLE";
 
 const REGION = "us-central1";
 const PROJECT_ID = "kideos-io";
@@ -38,6 +44,42 @@ export async function createUserProfile(uid: string, email: string): Promise<voi
     { email, createdAt: firestore.FieldValue.serverTimestamp() },
     { merge: true }
   );
+}
+
+export async function signInWithGoogle() {
+  GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  const response = await GoogleSignin.signIn();
+  // v13+ returns { data: { idToken } }; v10-12 returns { idToken } directly
+  const idToken =
+    (response as { data?: { idToken?: string } }).data?.idToken ??
+    (response as { idToken?: string }).idToken;
+  if (!idToken) throw new Error("Google Sign-In failed — no ID token returned.");
+  const credential = auth.GoogleAuthProvider.credential(idToken);
+  const userCred = await auth().signInWithCredential(credential);
+  if (userCred.additionalUserInfo?.isNewUser) {
+    await createUserProfile(userCred.user.uid, userCred.user.email ?? "");
+  }
+  return userCred;
+}
+
+export async function signInWithApple() {
+  const response = await appleAuth.performRequest({
+    requestedOperation: appleAuth.Operation.LOGIN,
+    requestedScopes: [appleAuth.Scope.EMAIL, appleAuth.Scope.FULL_NAME],
+  });
+  if (!response.identityToken) {
+    throw new Error("Apple Sign-In failed — no identity token returned.");
+  }
+  const credential = auth.AppleAuthProvider.credential(
+    response.identityToken,
+    response.nonce
+  );
+  const userCred = await auth().signInWithCredential(credential);
+  if (userCred.additionalUserInfo?.isNewUser) {
+    await createUserProfile(userCred.user.uid, userCred.user.email ?? "");
+  }
+  return userCred;
 }
 
 // ─── Helper: call a Gen-2 callable Cloud Function ────────────
