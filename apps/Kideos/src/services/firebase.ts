@@ -63,7 +63,7 @@ export function subscribeToApprovedVideos(
             return {
               videoId: doc.id,
               channelId,
-              channelName: "", // enriched below
+              channelName: "", // filled in by FeedScreen from whitelist names
               title: data.title,
               thumbnail: data.thumbnail,
               publishedAt: data.publishedAt,

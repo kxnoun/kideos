@@ -77,6 +77,12 @@ export default function FeedScreen({
     return unsub;
   }, [channelIdsKey]);
 
+  // Video docs don't store channel name — fill it from the whitelist entries
+  const namedVideos = useMemo(() => {
+    const names = new Map(channels.map((c) => [c.channelId, c.name]));
+    return videos.map((v) => ({ ...v, channelName: names.get(v.channelId) ?? "" }));
+  }, [videos, channels]);
+
   // Listen for parent remote commands (pause / stop)
   useEffect(() => {
     const unsub = subscribeToPlaySignal(parentId, childId, (signal) => {
@@ -117,7 +123,7 @@ export default function FeedScreen({
         <Text style={styles.subtitle}>What do you want to watch?</Text>
       </View>
 
-      {videos.length === 0 ? (
+      {namedVideos.length === 0 ? (
         <View style={styles.emptyState}>
           {channels.length === 0 ? (
             <>
@@ -139,7 +145,7 @@ export default function FeedScreen({
         </View>
       ) : (
         <FlatList
-          data={videos}
+          data={namedVideos}
           renderItem={renderVideo}
           keyExtractor={(item) => item.videoId}
           numColumns={COLUMNS}
