@@ -113,7 +113,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator key={inOnboarding ? 'onboarding' : 'main'} screenOptions={{ headerShown: false }}>
           {!isSignedIn ? (
             // ── Auth stack ──────────────────────────────────────
             <>

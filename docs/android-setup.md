@@ -82,6 +82,19 @@ Both apps share the same Firebase project so it's the same file. Download it fro
 
 Do **not** commit these files — they're in `.gitignore`.
 
+### ⚠️ Google Sign-In requires SHA fingerprint registration
+
+KideosParent uses Google Sign-In. Android requires your debug (and release) signing certificate fingerprint to be registered in the Firebase Console, otherwise sign-in silently fails.
+
+Run this to get your debug fingerprint:
+```powershell
+& "$env:JAVA_HOME\bin\keytool.exe" -list -v -keystore "$env:USERPROFILE\.android\debug.keystore" -alias androiddebugkey -storepass android -keypass android
+```
+
+Register the SHA-1 and SHA-256 in Firebase Console → Project Settings → Your apps → Android app → Add fingerprint. Then re-download `google-services.json` and replace both copies above.
+
+See [`docs/auth-setup.md`](auth-setup.md) for the full walkthrough.
+
 ---
 
 ## Running Kideos (kid app)

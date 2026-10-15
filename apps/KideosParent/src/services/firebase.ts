@@ -23,6 +23,9 @@ import type {
 //       Project Settings → Your apps → Web app → OAuth 2.0 client_id
 const GOOGLE_WEB_CLIENT_ID = "530175410554-ma7s33gove3f3esp8l1o2ckdtuu9snrv.apps.googleusercontent.com";
 
+// Configure once at module load — must happen before any GoogleSignin call
+GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
+
 const REGION = "us-central1";
 const PROJECT_ID = "kideos-io";
 const CF_BASE = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
@@ -47,7 +50,6 @@ export async function createUserProfile(uid: string, email: string): Promise<voi
 }
 
 export async function signInWithGoogle() {
-  GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
   const response = await GoogleSignin.signIn();
   // v13+ returns { data: { idToken } }; v10-12 returns { idToken } directly

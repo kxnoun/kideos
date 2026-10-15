@@ -54,6 +54,15 @@ These files are secret and not in the repo. You need one per app:
 
 Do **not** commit these files — they're in `.gitignore`.
 
+### ⚠️ Auth setup required for KideosParent
+
+KideosParent uses Google Sign-In and Sign in with Apple. Both require one-time Xcode configuration:
+
+- **Google Sign-In** — add the `REVERSED_CLIENT_ID` from `GoogleService-Info.plist` as a URL scheme in the KideosParent target (Info tab → URL Types)
+- **Sign in with Apple** — add the Sign In with Apple capability in Signing & Capabilities
+
+See [`docs/auth-setup.md`](auth-setup.md) for the full walkthrough. Apple Sign-In only works on a **physical device** — it does not work in the Simulator.
+
 ---
 
 ## Running Kideos (kid app)
