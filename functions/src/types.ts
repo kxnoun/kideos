@@ -27,11 +27,12 @@ export interface ParentProfile {
 export type ViolenceLevel = "none" | "mild" | "moderate";
 export type LanguageLevel = "none" | "mild" | "anything";
 export type PoliticalLevel = "block_all" | "allow_educational" | "allow_all";
+export type SexualLevel = "none" | "innuendo";
 
 export interface ValueFilters {
   violence: ViolenceLevel;
   language: LanguageLevel;
-  sexualContent: "none"; // always none — not user-configurable
+  sexualContent: SexualLevel; // "innuendo" allows passing jokes; default by age
   religiousSensitivity: boolean;
   religion: string; // e.g. "Islamic values — avoid music, mixed gender content"
   political: PoliticalLevel;
@@ -114,24 +115,47 @@ export interface ChannelSuggestion {
   parentResponse: SuggestionResponse;
 }
 
-// ── Video Analysis Cache ───────────────────────────────────────
-// Path: videoAnalysisCache/{videoId}/results/{filterHash}
-// Shared across all users — any parent benefits from prior analysis.
+// ── Content Profile ────────────────────────────────────────────
+// Path: videoProfiles/{videoId}
+// What a video contains, on fixed scales. Filter-independent: generated once
+// per video by AI and shared by every family. Server-only (rules deny clients).
+// status "no_transcript" / "unavailable" are stored only when permanent.
 
-export interface VideoAnalysisResult {
-  approved: boolean;
-  confidence: number; // 0–100
-  flags: string[];
-  reason: string; // plain English for parent notification / digest
-  severity: Severity | null;
-  analyzedAt: Timestamp;
-  expiresAt: Timestamp; // 30-day TTL
-  // Pipeline metadata
-  hadTranscript: boolean;
-  metadataOnly: boolean;
-  videoTitle: string;
+export interface ContentProfile {
+  version: number;
+  status: "ok" | "no_transcript" | "unavailable";
+  title: string;
   channelName: string;
-  madeForKids: boolean | null;
+  violence: "none" | "cartoon" | "mild" | "moderate" | "graphic";
+  language: "none" | "mild" | "strong";
+  sexual: "none" | "innuendo" | "suggestive" | "explicit";
+  political: "none" | "educational" | "opinion";
+  religiousThemes: string[];
+  topics: string[];
+  summary: string;
+  evidence: { violence: string; language: string; sexual: string; political: string };
+  createdAt: Timestamp;
+}
+
+// Path: videoProfiles/{videoId}/valuesChecks/{rulesHash}
+// Cached religion / custom-rules check (AI on the summary, not the transcript).
+
+// ── Per-child verdict ──────────────────────────────────────────
+// Path: users/{parentId}/children/{childId}/videoVerdicts/{videoId}
+// Computed from the profile + that child's filters. Kid feed reads approved == true.
+
+export interface VideoVerdict {
+  videoId: string;
+  channelId: string;
+  approved: boolean;
+  reason: string; // empty when approved
+  flags: string[];
+  severity: Severity | null;
+  title: string;
+  thumbnail: string;
+  publishedAt: Timestamp;
+  durationSeconds: number | null;
+  evaluatedAt: Timestamp;
 }
 
 // ── Channel Library Cache ──────────────────────────────────────
@@ -149,8 +173,8 @@ export interface ChannelMetadata {
 }
 
 // Path: channelLibraryCache/{channelId}/videos/{videoId}
-// `approved` and `analyzedAt` written by batch analysis for each parent.
-// Kid's feed query: approved: true, filtered to channels in whitelist.
+// Shared metadata only. (`approved` is legacy and no longer written —
+// approvals are per child, in videoVerdicts.)
 
 export interface CachedVideo {
   videoId: string;

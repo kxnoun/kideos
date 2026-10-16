@@ -1,37 +1,36 @@
 // ─────────────────────────────────────────────────────────────
-// Kideos — analyzeAndTagVideo (internal function, NOT a Cloud Function)
+// Kideos — per-video pipeline (internal, NOT a Cloud Function)
 //
-// Called by seedChannelLibrary and refreshChannelLibraries for
-// every video in a whitelisted channel's library.
+// Called by onChannelWhitelisted / refreshChannelLibraries for every video in
+// a whitelisted channel, once per child:
+//   1. Get the video's content profile (videoProfiles/{videoId}) — shared by
+//      every family. Only on a miss: YouTube details → cached transcript →
+//      one AI call. Each video is profiled once, ever (per PROFILE_VERSION).
+//   2. Apply this child's filters in code (+ cached religion/custom-rules check).
+//   3. Write the child's verdict to users/{p}/children/{c}/videoVerdicts/{videoId}.
+//      The kid feed reads approved == true from there.
+//   4. If blocked for content: log to flaggedContent + push to parent.
 //
-// Pipeline (cache-first):
-//   1. Check videoAnalysisCache — if hit, use it immediately (0 cost)
-//   2. Cache miss: fire Supadata + videos.list IN PARALLEL
-//   3. Send to GPT-4o-mini with parent's value filters
-//   4. Store result in shared cache (30-day TTL)
-//   5. Write approved/analyzedAt to channelLibraryCache/{channelId}/videos/{videoId}
-//   6. If flagged: log to flaggedContent + push FCM notification to parent
-//
-// The kid's feed is a Firestore query: approved == true.
-// A child cannot encounter a video they are not allowed to watch.
+// reapplyFiltersForChild re-runs steps 2–3 for all of a child's videos when
+// their filters change — no transcripts, no profile AI calls.
 // ─────────────────────────────────────────────────────────────
 
 import { logger } from "firebase-functions/v2";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
-import { APP_CONFIG } from "./config";
 import { getVideoDetails } from "./youtube";
 import { fetchTranscript, type TranscriptResult } from "./supadata";
-import { analyzeVideoContent, hashValueFilters } from "./aiAnalysis";
-import type {
-  ValueFilters,
-  VideoAnalysisResult,
-  FlaggedContent,
-  CachedVideo,
-} from "./types";
+import {
+  PROFILE_VERSION,
+  generateContentProfile,
+  needsValuesCheck,
+  hashValuesRules,
+  checkValuesRules,
+} from "./aiAnalysis";
+import { evaluateProfile, type FilterDecision } from "./contentFilter";
+import type { ValueFilters, FlaggedContent, ContentProfile, VideoVerdict } from "./types";
 
-// ── Params passed in from batch callers ────────────────────────
-// Loaded once per batch (not per video) for efficiency.
+type Db = FirebaseFirestore.Firestore;
 
 export interface AnalyzeAndTagParams {
   videoId: string;
@@ -41,7 +40,6 @@ export interface AnalyzeAndTagParams {
   childName: string;
   parentFcmToken: string | null;
   filters: ValueFilters;
-  filterHash: string;
   youtubeApiKey: string;
   supadataApiKey: string;
   openAiApiKey: string;
@@ -49,132 +47,213 @@ export interface AnalyzeAndTagParams {
 
 export interface AnalyzeAndTagResult {
   approved: boolean;
-  confidence: number;
-  fromCache: boolean;
 }
+
+// Blocks that aren't about content — not logged as flagged content / no push
+const NON_CONTENT_FLAGS = new Set(["no_transcript", "unavailable", "analysis_pending", "values_check_failed"]);
 
 // ── Core function ──────────────────────────────────────────────
 
-export async function analyzeAndTagVideo(
-  params: AnalyzeAndTagParams
-): Promise<AnalyzeAndTagResult> {
-  const {
-    videoId,
-    channelId,
-    parentId,
-    childId,
-    childName,
-    parentFcmToken,
-    filters,
-    filterHash,
-    youtubeApiKey,
-    supadataApiKey,
-    openAiApiKey,
-  } = params;
-
+export async function analyzeAndTagVideo(params: AnalyzeAndTagParams): Promise<AnalyzeAndTagResult> {
+  const { videoId, channelId, parentId, childId, childName, parentFcmToken, filters } = params;
   const db = getFirestore();
 
-  // ── 1. Check shared AI cache ───────────────────────────────
-  const cacheRef = db.doc(`videoAnalysisCache/${videoId}/results/${filterHash}`);
-  const cacheSnap = await cacheRef.get();
+  const profile = await getOrCreateProfile(db, videoId, params);
+  const decision: FilterDecision = profile
+    ? await decideForChild(db, videoId, profile, filters, params.openAiApiKey)
+    : {
+        approved: false,
+        reason: "Couldn't analyze this video yet — it will be retried.",
+        flags: ["analysis_pending"],
+        severity: "low",
+      };
 
-  if (cacheSnap.exists) {
-    const cached = cacheSnap.data() as VideoAnalysisResult;
-    if (cached.expiresAt.toDate() > new Date()) {
-      logger.info(`[analyzeAndTagVideo] Cache hit: ${videoId} approved=${cached.approved}`);
+  const stub = (await db.doc(`channelLibraryCache/${channelId}/videos/${videoId}`).get()).data() ?? {};
+  await writeVerdict(db, parentId, childId, channelId, videoId, stub, decision);
 
-      // Write the approved status to the video doc (feed query reads this)
-      await tagVideoInLibrary(db, channelId, videoId, cached.approved);
+  if (!decision.approved && !decision.flags.some((f) => NON_CONTENT_FLAGS.has(f))) {
+    await handleFlagged(db, parentId, childId, childName, videoId, channelId, profile!, decision, parentFcmToken);
+  }
+  return { approved: decision.approved };
+}
 
-      // If previously flagged during another parent's analysis, also log here
-      if (!cached.approved) {
-        await handleFlagged(db, parentId, childId, childName, videoId, channelId, cached, parentFcmToken);
-      }
+// ── Content profile (shared, cached) ───────────────────────────
+// Returns null only on a transient failure (rate limit, AI error) — nothing is
+// stored then, so a later run retries.
 
-      return { approved: cached.approved, confidence: cached.confidence, fromCache: true };
-    }
+async function getOrCreateProfile(
+  db: Db,
+  videoId: string,
+  keys: Pick<AnalyzeAndTagParams, "youtubeApiKey" | "supadataApiKey" | "openAiApiKey">
+): Promise<ContentProfile | null> {
+  const ref = db.doc(`videoProfiles/${videoId}`);
+  const snap = await ref.get();
+  if (snap.exists && snap.data()!.version === PROFILE_VERSION) {
+    logger.info(`[videoProfiles] Hit: ${videoId}`);
+    return snap.data() as ContentProfile;
   }
 
-  // ── 2. Cache miss — fetch metadata + transcript in parallel ─
-  logger.info(`[analyzeAndTagVideo] Cache miss: ${videoId} — running pipeline`);
-
-  // Video details first (YouTube API, free quota) — only fetch the transcript
-  // (Supadata, paid) once we know the video exists and isn't auto-blocked.
-  const videoDetails = await getVideoDetails(videoId, youtubeApiKey);
-
-  if (!videoDetails) {
-    // Video unavailable — mark as not approved, don't crash the batch
-    logger.warn(`[analyzeAndTagVideo] Video ${videoId} not found — skipping`);
-    await tagVideoInLibrary(db, channelId, videoId, false);
-    return { approved: false, confidence: 0, fromCache: false };
+  // YouTube details first (free quota) — only fetch the transcript (Supadata,
+  // paid) once we know the video exists and isn't auto-blocked.
+  const video = await getVideoDetails(videoId, keys.youtubeApiKey);
+  if (!video || video.isPrivateOrRestricted) {
+    if (!video) logger.warn(`[analyzeAndTagVideo] Video ${videoId} not found`);
+    // Not cached: a missing video may be a transient API error, and a private one may go public
+    return placeholderProfile("unavailable", video?.title ?? "", video?.channelTitle ?? "");
   }
 
-  // Auto-block private / age-restricted
-  if (videoDetails.isPrivateOrRestricted) {
-    logger.info(`[analyzeAndTagVideo] Auto-blocking private/restricted: ${videoId}`);
-    await tagVideoInLibrary(db, channelId, videoId, false);
-    return { approved: false, confidence: 100, fromCache: false };
+  const transcript = await getTranscriptCached(db, videoId, keys.supadataApiKey);
+  if (!transcript.available || !transcript.transcript) {
+    if (!transcript.definitive) return null; // transient — retry later
+    const p = placeholderProfile("no_transcript", video.title, video.channelTitle);
+    await ref.set(p);
+    return p;
   }
 
-  const transcriptResult = await getTranscriptCached(db, videoId, supadataApiKey);
+  const generated = await generateContentProfile(video, transcript.transcript, keys.openAiApiKey);
+  if (!generated) return null;
+  const profile: ContentProfile = { ...generated, createdAt: Timestamp.now() };
+  await ref.set(profile);
+  return profile;
+}
 
-  // ── 3. Run AI analysis ──────────────────────────────────────
-  const aiResult = await analyzeVideoContent(
-    videoDetails,
-    transcriptResult,
-    filters,
-    openAiApiKey
-  );
-
-  // ── 4. Store in shared cache ────────────────────────────────
-  const now = Timestamp.now();
-  const analysisDoc: VideoAnalysisResult = {
-    approved: aiResult.approved,
-    confidence: aiResult.confidence,
-    flags: aiResult.flags,
-    reason: aiResult.reason,
-    severity: aiResult.severity,
-    analyzedAt: now,
-    expiresAt: Timestamp.fromDate(
-      new Date(Date.now() + APP_CONFIG.VIDEO_ANALYSIS_CACHE_DAYS * 86400 * 1000)
-    ),
-    hadTranscript: aiResult.hadTranscript,
-    metadataOnly: aiResult.metadataOnly,
-    videoTitle: videoDetails.title,
-    channelName: videoDetails.channelTitle,
-    madeForKids: videoDetails.madeForKids,
+function placeholderProfile(
+  status: "no_transcript" | "unavailable",
+  title: string,
+  channelName: string
+): ContentProfile {
+  return {
+    version: PROFILE_VERSION,
+    status,
+    title,
+    channelName,
+    violence: "none",
+    language: "none",
+    sexual: "none",
+    political: "none",
+    religiousThemes: [],
+    topics: [],
+    summary: "",
+    evidence: { violence: "", language: "", sexual: "", political: "" },
+    createdAt: Timestamp.now(),
   };
+}
 
-  // Don't cache AI failures or missing transcripts — the next run should retry
-  if (!aiResult.flags.includes("ai_analysis_error") && !aiResult.flags.includes("no_transcript")) {
-    await cacheRef.set(analysisDoc);
+// ── Apply one child's filters ──────────────────────────────────
+
+async function decideForChild(
+  db: Db,
+  videoId: string,
+  profile: ContentProfile,
+  filters: ValueFilters,
+  openAiApiKey: string
+): Promise<FilterDecision> {
+  const base = evaluateProfile(profile, filters);
+  // Values check only matters if the video otherwise passes
+  if (!base.approved || profile.status !== "ok" || !needsValuesCheck(filters)) return base;
+
+  const ref = db.doc(`videoProfiles/${videoId}/valuesChecks/${hashValuesRules(filters)}`);
+  const snap = await ref.get();
+  let check = snap.exists ? (snap.data() as { violates: boolean; reason: string }) : null;
+  if (!check) {
+    check = await checkValuesRules(profile, filters, openAiApiKey);
+    if (!check) {
+      return {
+        approved: false,
+        reason: "Couldn't check this video against your religion/custom rules yet — it will be retried.",
+        flags: ["values_check_failed"],
+        severity: "low",
+      };
+    }
+    await ref.set({ ...check, createdAt: Timestamp.now() });
   }
+  return evaluateProfile(profile, filters, check.violates ? check.reason : null);
+}
 
-  // ── 5. Write approved status to video doc in channel library ─
-  await tagVideoInLibrary(db, channelId, videoId, aiResult.approved);
+async function writeVerdict(
+  db: Db,
+  parentId: string,
+  childId: string,
+  channelId: string,
+  videoId: string,
+  stub: FirebaseFirestore.DocumentData,
+  decision: FilterDecision,
+  batch?: FirebaseFirestore.WriteBatch
+): Promise<void> {
+  const verdict: VideoVerdict = {
+    videoId,
+    channelId,
+    approved: decision.approved,
+    reason: decision.reason,
+    flags: decision.flags,
+    severity: decision.severity,
+    title: stub.title ?? "",
+    thumbnail: stub.thumbnail ?? "",
+    publishedAt: stub.publishedAt ?? Timestamp.now(),
+    durationSeconds: stub.durationSeconds ?? null,
+    evaluatedAt: Timestamp.now(),
+  };
+  const ref = db.doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`);
+  if (batch) batch.set(ref, verdict);
+  else await ref.set(verdict);
+}
 
-  // ── 6. If flagged: log + notify parent ──────────────────────
-  if (!aiResult.approved) {
-    await handleFlagged(
-      db, parentId, childId, childName, videoId, channelId, analysisDoc, parentFcmToken
-    );
+// ── Re-apply filters after a change ────────────────────────────
+// Profiles are reused: no Supadata, no profile AI calls. Only religion /
+// custom-rules checks for rule sets not seen before call the AI (on summaries).
+
+export async function reapplyFiltersForChild(
+  parentId: string,
+  childId: string,
+  openAiApiKey: string
+): Promise<{ approved: number; blocked: number }> {
+  const db = getFirestore();
+  const filters = await loadValueFiltersForChild(parentId, childId);
+  const channels = await db
+    .collection(`users/${parentId}/children/${childId}/whitelistedChannels`)
+    .where("seedingStatus", "==", "ready")
+    .get();
+
+  let approved = 0;
+  let blocked = 0;
+  for (const channelDoc of channels.docs) {
+    const channelId = channelDoc.id;
+    const videos = await db.collection(`channelLibraryCache/${channelId}/videos`).get();
+    let channelApproved = 0;
+
+    for (let i = 0; i < videos.docs.length; i += 100) {
+      const chunk = videos.docs.slice(i, i + 100);
+      const profileSnaps = await db.getAll(...chunk.map((v) => db.doc(`videoProfiles/${v.id}`)));
+      const batch = db.batch();
+      // Values checks may call the AI — run in small parallel groups
+      for (let j = 0; j < chunk.length; j += 5) {
+        await Promise.all(
+          chunk.slice(j, j + 5).map(async (videoDoc, k) => {
+            const snap = profileSnaps[j + k];
+            if (!snap.exists || snap.data()!.version !== PROFILE_VERSION) return; // not analyzed yet — leave as is
+            const decision = await decideForChild(db, videoDoc.id, snap.data() as ContentProfile, filters, openAiApiKey);
+            await writeVerdict(db, parentId, childId, channelId, videoDoc.id, videoDoc.data(), decision, batch);
+            if (decision.approved) channelApproved++;
+            else blocked++;
+          })
+        );
+      }
+      await batch.commit();
+    }
+    approved += channelApproved;
+    await channelDoc.ref.set({ videoCount: channelApproved }, { merge: true });
   }
-
-  return { approved: aiResult.approved, confidence: aiResult.confidence, fromCache: false };
+  logger.info(`[reapplyFilters] ${parentId}/${childId}: approved=${approved} blocked=${blocked}`);
+  return { approved, blocked };
 }
 
 // ── Transcript cache ───────────────────────────────────────────
 // Transcripts don't change and don't depend on filters, so each video's
 // transcript is fetched from Supadata (paid, per request) at most once.
-// Separate from videoAnalysisCache so clearing verdicts keeps transcripts.
 // Stores transcripts AND confirmed "no transcript" results (Supadata still bills
 // those). Only transient failures (rate limit, network) are left uncached.
 
-async function getTranscriptCached(
-  db: FirebaseFirestore.Firestore,
-  videoId: string,
-  supadataApiKey: string
-): Promise<TranscriptResult> {
+async function getTranscriptCached(db: Db, videoId: string, supadataApiKey: string): Promise<TranscriptResult> {
   const ref = db.doc(`transcriptCache/${videoId}`);
   const snap = await ref.get();
   if (snap.exists) {
@@ -201,53 +280,33 @@ async function getTranscriptCached(
   return result;
 }
 
-// ── Write approved status to channelLibraryCache video doc ────
-
-async function tagVideoInLibrary(
-  db: FirebaseFirestore.Firestore,
-  channelId: string,
-  videoId: string,
-  approved: boolean
-): Promise<void> {
-  const videoRef = db.doc(`channelLibraryCache/${channelId}/videos/${videoId}`);
-  const update: Partial<CachedVideo> = {
-    approved,
-    analyzedAt: Timestamp.now(),
-  };
-  // merge: true preserves title, thumbnail, publishedAt etc.
-  await videoRef.set(update, { merge: true });
-}
-
 // ── Log flagged content + push FCM to parent ───────────────────
 
 async function handleFlagged(
-  db: FirebaseFirestore.Firestore,
+  db: Db,
   parentId: string,
   childId: string,
   childName: string,
   videoId: string,
   channelId: string,
-  analysis: VideoAnalysisResult,
+  profile: ContentProfile,
+  decision: FilterDecision,
   fcmToken: string | null
 ): Promise<void> {
-  // Log to flaggedContent for parent to review in app
   const flaggedDoc: FlaggedContent = {
     videoId,
-    title: analysis.videoTitle,
-    channel: analysis.channelName,
+    title: profile.title,
+    channel: profile.channelName,
     channelId,
     timestamp: Timestamp.now(),
-    reason: analysis.reason,
-    flags: analysis.flags,
-    severity: analysis.severity ?? "low",
+    reason: decision.reason,
+    flags: decision.flags,
+    severity: decision.severity ?? "low",
     parentViewed: false,
   };
 
-  await db
-    .collection(`users/${parentId}/children/${childId}/flaggedContent`)
-    .add(flaggedDoc);
+  await db.collection(`users/${parentId}/children/${childId}/flaggedContent`).add(flaggedDoc);
 
-  // Push notification to parent
   if (!fcmToken) return;
 
   try {
@@ -260,8 +319,8 @@ async function handleFlagged(
       data: {
         type: "video_flagged",
         videoId,
-        videoTitle: analysis.videoTitle.slice(0, 100),
-        reason: analysis.reason.slice(0, 200),
+        videoTitle: profile.title.slice(0, 100),
+        reason: decision.reason.slice(0, 200),
         childId,
       },
       apns: {
@@ -273,19 +332,11 @@ async function handleFlagged(
   }
 }
 
-// ── Exported helper: load value filters for a child ───────────
-// Used by both seedChannelLibrary and refreshChannelLibraries.
+// ── Load value filters for a child ─────────────────────────────
 
-export async function loadValueFiltersForChild(
-  parentId: string,
-  childId: string
-): Promise<{ filters: ValueFilters; filterHash: string }> {
-  const db = getFirestore();
-  const snap = await db
-    .doc(`users/${parentId}/children/${childId}/valueFilters/current`)
-    .get();
-
-  const filters: ValueFilters = snap.exists
+export async function loadValueFiltersForChild(parentId: string, childId: string): Promise<ValueFilters> {
+  const snap = await getFirestore().doc(`users/${parentId}/children/${childId}/valueFilters/current`).get();
+  return snap.exists
     ? (snap.data() as ValueFilters)
     : {
         violence: "none",
@@ -297,9 +348,4 @@ export async function loadValueFiltersForChild(
         customRules: "",
         ageGroup: 7,
       };
-
-  return { filters, filterHash: hashValueFilters(filters) };
 }
-
-// ── Re-export hashValueFilters for external use ────────────────
-export { hashValueFilters } from "./aiAnalysis";

@@ -14,6 +14,7 @@ initializeApp();
 export {
   resolveAndAddChannel,
   onChannelWhitelisted,
+  onFiltersChanged,
   seedChannelLibrary,
   refreshChannelLibraries,
 } from "./seedChannelLibrary";
