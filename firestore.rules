@@ -50,6 +50,13 @@ service cloud.firestore {
           allow write: if isParent(parentId);
         }
 
+        // Per-child video verdicts — kid feed reads approved == true.
+        // Written only by Cloud Functions (analysis pipeline / filter re-apply).
+        match /videoVerdicts/{videoId} {
+          allow read: if isParent(parentId) || isSignedIn();
+          allow write: if false;
+        }
+
         // Watch history — COPPA 90-day retention
         match /watchHistory/{sessionId} {
           allow read: if isParent(parentId);
