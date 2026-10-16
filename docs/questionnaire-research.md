@@ -71,7 +71,7 @@ God's name, occult), USCCB (ridicule of faith); Hindu — beef, mocking portraya
 - Transcripts can't show visuals: nudity, gore, music, who is singing are best effort.
 - Clickbait was left out: even trained human coders couldn't agree on it (Common Sense/Michigan study).
 - **Before launch:** label 300–500 videos with 2–3 raters; only use dimensions with weighted κ ≥ 0.7 as
-  hard filters, default the rest to "Ask me".
+  hard filters, default the rest to "Ask me". Plan: [backlog.md](backlog.md) → *Check the AI against people*.
 
 ## Sources
 

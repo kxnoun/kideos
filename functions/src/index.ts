@@ -6,11 +6,14 @@ import { initializeApp } from "firebase-admin/app";
 
 initializeApp();
 
-// ── Channel Management ─────────────────────────────────────────
-// resolveAndAddChannel: parent adds channel by URL/handle
-//   → channels.list lookup (1 unit) → whitelist → seed + batch analyze
-// seedChannelLibrary: explicit seed trigger (also called internally)
-// refreshChannelLibraries: nightly — detects new uploads, analyzes only new videos
+// Full overview: docs/architecture.md
+//
+// ── Channels & analysis ────────────────────────────────────────
+// resolveAndAddChannel: parent adds channel by URL/handle → channels.list (1 unit) → whitelist doc
+// onChannelWhitelisted: trigger on that doc → seed 50 videos → profile + verdict per video
+// onFiltersChanged: trigger on questionnaire save → re-apply answers to all the child's videos
+// seedChannelLibrary: legacy callable, unused by the app
+// refreshChannelLibraries: nightly — new uploads only (pacing bug: see docs/backlog.md)
 export {
   resolveAndAddChannel,
   onChannelWhitelisted,
@@ -25,10 +28,11 @@ export {
 // weeklyChannelSuggestions: every Monday, generates for all Premium families
 export { suggestChannels, weeklyChannelSuggestions } from "./suggestChannels";
 
+// parseCustomRules: questionnaire free text → concrete settings (parent confirms)
 export { parseCustomRules } from "./customRules";
 
 // ── Scheduled Jobs + Triggers ──────────────────────────────────
-// cleanupExpiredData: nightly — COPPA 90-day watch history + 30-day AI cache
+// cleanupExpiredData: nightly — COPPA 90-day watch history (+ legacy analysis cache)
 // generateWeeklyDigest: Monday 8am — GPT-4o-mini weekly summary + FCM push
 // handleParentCommand: Firestore trigger — remote pause/stop → kid app
 // deleteChildData: COPPA hard delete — wipes all records for a child
@@ -39,6 +43,5 @@ export {
   deleteChildData,
 } from "./scheduledJobs";
 
-// Note: analyzeAndTagVideo is an INTERNAL function — not a deployed Cloud Function.
-// It is called by seedChannelLibrary and refreshChannelLibraries during batch analysis.
-// The kid app never calls it directly — the kid app only reads Firestore.
+// Note: analyzeAndTagVideo (analyzeVideo.ts) is INTERNAL — not a deployed Cloud Function.
+// It runs inside onChannelWhitelisted / refreshChannelLibraries. The kid app only reads Firestore.

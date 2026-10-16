@@ -1,11 +1,14 @@
 // ─────────────────────────────────────────────────────────────
-// Kideos — seedChannelLibrary + resolveAndAddChannel + refreshChannelLibraries
+// Kideos — channel functions (see docs/architecture.md → Flows)
 //
-// Flow when a channel is whitelisted:
-//   1. resolveAndAddChannel — channels.list lookup (1 unit), writes to whitelist
-//   2. seedChannelLibrary — playlistItems.list (1-5 units), seeds video metadata
-//   3. batchAnalyzeChannel (internal) — analyzes every video against parent's filters
-//      Concurrent batches of 5 — respects API rate limits
+// Flow when a parent adds a channel:
+//   1. resolveAndAddChannel (callable) — channels.list (1 unit), creates the
+//      whitelist doc with seedingStatus "pending", returns immediately
+//   2. onChannelWhitelisted (trigger on that create) — seedVideoMetadata
+//      (playlistItems.list, 1-5 units) + batchAnalyzeChannel (5 videos at a time,
+//      analyzeAndTagVideo each) → seedingStatus "ready"
+// Also here: onFiltersChanged (re-apply answers), refreshChannelLibraries
+// (nightly new uploads), seedChannelLibrary (legacy callable, unused by the app).
 //
 // Each video gets a shared content profile; each child gets their own verdict in
 // users/{p}/children/{c}/videoVerdicts (the kid feed reads approved == true there).

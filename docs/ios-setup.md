@@ -131,6 +131,14 @@ Kill Metro (`Ctrl+C`) in one terminal before starting the other app's Metro. Onl
 
 ---
 
+### Seeing logs
+
+Since React Native 0.77, `console.log` output is no longer printed in the Metro terminal. Press **`j`** in
+Metro to open React Native DevTools (Console tab), or use Xcode's console. Backend logs: see
+[development.md](development.md).
+
+---
+
 ## Troubleshooting
 
 ### `pod install` fails

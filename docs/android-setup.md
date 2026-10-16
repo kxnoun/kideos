@@ -84,11 +84,13 @@ Do **not** commit these files — they're in `.gitignore`.
 
 ### ⚠️ Google Sign-In requires SHA fingerprint registration
 
-KideosParent uses Google Sign-In. Android requires your debug (and release) signing certificate fingerprint to be registered in the Firebase Console, otherwise sign-in silently fails.
+KideosParent uses Google Sign-In. Android requires the signing certificate fingerprint to be registered in the Firebase Console, otherwise sign-in silently fails. Both apps sign debug builds with the keystore checked into the project (`android/app/debug.keystore`), so for development the fingerprint is the same on every machine and is already registered — you only need this when it changes (or for release builds).
 
-Run this to get your debug fingerprint:
+Run this to get the debug fingerprint:
 ```powershell
-& "$env:JAVA_HOME\bin\keytool.exe" -list -v -keystore "$env:USERPROFILE\.android\debug.keystore" -alias androiddebugkey -storepass android -keypass android
+# Run from apps/KideosParent/android — debug builds are signed with the project's
+# app/debug.keystore, NOT ~/.android/debug.keystore
+& "$env:JAVA_HOME\bin\keytool.exe" -list -v -keystore "app\debug.keystore" -alias androiddebugkey -storepass android -keypass android
 ```
 
 Register the SHA-1 and SHA-256 in Firebase Console → Project Settings → Your apps → Android app → Add fingerprint. Then re-download `google-services.json` and replace both copies above.
@@ -119,7 +121,16 @@ Then launch the app on the emulator:
 & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" shell am start -n com.kideos.app/.MainActivity
 ```
 
-The app shows a **pairing screen** with a 6-character code. A parent enters this code in the KideosParent app to link the two.
+The app shows a **pairing screen** with a 6-character code. A parent enters this code in the KideosParent app (Home → pair a device) to link the two.
+
+### Running on a physical phone (USB)
+
+The phone can't reach Metro on your computer by itself. After plugging in (and every time you reconnect), forward the app's Metro port:
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8082 tcp:8082   # Kideos
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8083 tcp:8083   # KideosParent
+```
+Without this the app shows "Unable to load script". The error mentions port 8081 — that's just the default text.
 
 ---
 
@@ -163,6 +174,17 @@ cd android && .\gradlew app:installDebug -PreactNativeDevServerPort=8082
 
 For JS-only changes, Metro hot-reloads automatically. Press **`r`** in the Metro terminal to force a full reload.
 
+> After changes that add or remove React hooks/state, fully close and reopen the app. Hot reload can't
+> reconcile the change and shows "Should have a queue… calling Hooks conditionally" — it's not a real bug.
+
+### Seeing logs
+
+Since React Native 0.77, app logs (`console.log` / `console.warn`) **no longer appear in the Metro terminal**. Use:
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" logcat -s ReactNativeJS | Select-String -NotMatch "deprecated"
+```
+(The filter hides the React Native Firebase "namespaced API is deprecated" noise.) Or press **`j`** in Metro to open React Native DevTools. See [development.md](development.md) for backend logs.
+
 ---
 
 ## Troubleshooting
@@ -178,6 +200,9 @@ The wrong `google-services.json` is in the directory. Download the correct file 
 
 ### `'gradlew.bat' is not recognized`
 Don't use `npx react-native run-android` on Windows — it has a known shell issue. Use the two-terminal approach (Metro + `.\gradlew app:installDebug`) described above.
+
+### "Unable to load script" on a physical phone
+Run the `adb reverse` command for the app's port (see *Running on a physical phone*).
 
 ### App shows "Could not connect to development server"
 Metro isn't running or is on the wrong port. Make sure Metro is started with `--port 8082` (Kideos) or `--port 8083` (KideosParent), and that you passed `-PreactNativeDevServerPort=` to the same port in Gradle.
