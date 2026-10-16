@@ -33,7 +33,7 @@ function defaultFilters(ageGroup: number): ValueFilters {
   return {
     violence: "none",
     language: "none",
-    sexualContent: "none",
+    sexualContent: ageGroup >= 13 ? "innuendo" : "none",
     religiousSensitivity: false,
     religion: "",
     political: "block_all",
@@ -133,6 +133,16 @@ export default function SetFiltersScreen({ navigation, route }: Props) {
           ]}
           value={filters.language}
           onChange={(v) => set("language", v)}
+        />
+
+        <SegmentControl
+          label="Sexual references"
+          options={[
+            { value: "none", label: "None" },
+            { value: "innuendo", label: "Mild jokes OK" },
+          ]}
+          value={filters.sexualContent}
+          onChange={(v) => set("sexualContent", v)}
         />
 
         <SegmentControl

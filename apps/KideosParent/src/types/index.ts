@@ -9,12 +9,13 @@ export type SuggestionResponse = "approved" | "denied" | "pending";
 export type ViolenceLevel = "none" | "mild" | "moderate";
 export type LanguageLevel = "none" | "mild" | "anything";
 export type PoliticalLevel = "block_all" | "allow_educational" | "allow_all";
+export type SexualLevel = "none" | "innuendo";
 export type ChildMode = "young" | "older";
 
 export interface ValueFilters {
   violence: ViolenceLevel;
   language: LanguageLevel;
-  sexualContent: "none";
+  sexualContent: SexualLevel; // "innuendo" = passing jokes OK
   religiousSensitivity: boolean;
   religion: string;
   political: PoliticalLevel;

@@ -110,7 +110,8 @@ export default function SettingsScreen() {
         } else {
           // First time: use child's actual age as the ageGroup default
           const child = children.find((c) => c.id === childId);
-          setFilters({ ...DEFAULT_FILTERS, ageGroup: child?.profile.age ?? 8 });
+          const age = child?.profile.age ?? 8;
+          setFilters({ ...DEFAULT_FILTERS, ageGroup: age, sexualContent: age >= 13 ? "innuendo" : "none" });
         }
       } finally {
         setLoadingFilters(false);
@@ -125,7 +126,7 @@ export default function SettingsScreen() {
     try {
       await saveValueFilters(user.uid, filtersModalChildId, filters);
       setFiltersModalChildId(null);
-      Alert.alert("Saved", "Filters updated. New videos will be analyzed with the new settings.");
+      Alert.alert("Saved", "Filters updated. Your child's feed will update with the new settings in a moment.");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to save.";
       Alert.alert("Error", msg);
@@ -285,6 +286,15 @@ export default function SettingsScreen() {
                 ]}
                 value={filters.language}
                 onChange={(v) => set("language", v)}
+              />
+              <SegmentControl
+                label="Sexual references"
+                options={[
+                  { value: "none", label: "None" },
+                  { value: "innuendo", label: "Mild jokes OK" },
+                ]}
+                value={filters.sexualContent}
+                onChange={(v) => set("sexualContent", v)}
               />
               <SegmentControl
                 label="Political content"
