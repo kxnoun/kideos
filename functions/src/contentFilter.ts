@@ -1,103 +1,114 @@
 // ─────────────────────────────────────────────────────────────
-// Kideos — apply a child's filters to a content profile (pure code, no AI)
+// Kideos — apply a child's questionnaire answers to a content profile
+// (pure code, no AI). Changing answers only re-runs this — instant and free.
 //
-// Profiles are filter-independent, so changing filters only re-runs this —
-// instant and free. Religion / custom rules are the one exception (see
-// checkValuesRules in aiAnalysis.ts); their result is passed in here.
+// Result status:
+//   approved        → in the kid's feed
+//   pending_review  → hidden until the parent approves it ("Ask me")
+//   hidden          → not shown
 // ─────────────────────────────────────────────────────────────
 
-import type { ContentProfile, Severity, SexualLevel, ValueFilters } from "./types";
+import { DIMS, LEVEL_LABELS, type Dim } from "./prefs";
+import type { ContentProfile, Severity, ValueFilters } from "./types";
+
+export type VerdictStatus = "approved" | "hidden" | "pending_review";
 
 export interface FilterDecision {
-  approved: boolean;
+  status: VerdictStatus;
   reason: string; // empty when approved
   flags: string[];
   severity: Severity | null;
 }
 
-const VIOLENCE = ["none", "cartoon", "mild", "moderate", "graphic"];
-const LANGUAGE = ["none", "mild", "strong"];
-const SEXUAL = ["none", "innuendo", "suggestive", "explicit"];
-const POLITICAL = ["none", "educational", "opinion"];
+// Clearly educational videos may go one level higher on these (if the parent allows)
+const EDU_BOOST: Dim[] = ["violence", "scary", "substances", "politics"];
+// Glamorized versions of these are hidden even at low levels (if the parent allows)
+const GLORIFIABLE = ["violence", "substances", "selfHarm", "meanness"] as const;
+// Never allowed for anyone under 18, whatever the answers
+const HARD_LIMIT: Partial<Record<Dim, number>> = { selfHarm: 2, sexual: 3 };
 
-// Highest profile level each filter setting allows
-const MAX_VIOLENCE: Record<string, string> = { none: "none", mild: "mild", moderate: "moderate" };
-const MAX_LANGUAGE: Record<string, string> = { none: "none", mild: "mild", anything: "strong" };
-const MAX_SEXUAL: Record<string, string> = { none: "none", innuendo: "innuendo" };
-const MAX_POLITICAL: Record<string, string> = {
-  block_all: "none",
-  allow_educational: "educational",
-  allow_all: "opinion",
-};
+const RANK: Record<Severity, number> = { low: 1, medium: 2, high: 3 };
 
-const LABELS: Record<string, Record<string, string>> = {
-  violence: { cartoon: "Cartoon violence", mild: "Violence", moderate: "Intense violence", graphic: "Graphic violence" },
-  language: { mild: "Mild language", strong: "Strong language" },
-  sexual: { innuendo: "Sexual innuendo", suggestive: "Suggestive sexual content", explicit: "Explicit sexual content" },
-  political: { educational: "Political content", opinion: "Political opinion content" },
-};
-
-// Filters saved before the sexual-content setting existed have no value: default by age.
-export function effectiveSexualLevel(filters: ValueFilters): SexualLevel {
-  if (filters.sexualContent === "none" || filters.sexualContent === "innuendo") return filters.sexualContent;
-  return filters.ageGroup >= 13 ? "innuendo" : "none";
+function severityFor(excess: number, level: number): Severity {
+  if (level === 4 || excess >= 3) return "high";
+  return excess === 2 ? "medium" : "low";
 }
 
-function severityFor(excess: number, level: string): Severity {
-  if (level === "graphic" || level === "explicit" || excess >= 3) return "high";
-  return excess === 2 ? "medium" : "low";
+function reasonText(dim: Dim, level: number, evidence: string): string {
+  return `${LEVEL_LABELS[dim][level]}${evidence ? ` (${evidence})` : ""}`;
 }
 
 export function evaluateProfile(
   profile: ContentProfile,
-  filters: ValueFilters,
-  valuesViolation?: string | null // reason from checkValuesRules, if it found a violation
+  prefs: ValueFilters,
+  valuesViolation?: string | null // from checkValuesRules (religion text / custom rules)
 ): FilterDecision {
-  if (profile.status === "no_transcript") {
-    return {
-      approved: false,
-      reason: "Couldn't verify — no transcript was available for this video.",
-      flags: ["no_transcript"],
-      severity: "low",
-    };
-  }
   if (profile.status === "unavailable") {
     return {
-      approved: false,
+      status: "hidden",
       reason: "This video is private, age-restricted or no longer available.",
       flags: ["unavailable"],
       severity: "low",
     };
   }
+  if (profile.status === "no_transcript") {
+    if (prefs.unknown === "allow") return { status: "approved", reason: "", flags: [], severity: null };
+    return {
+      status: prefs.unknown === "hide" ? "hidden" : "pending_review",
+      reason: "Couldn't check this video — no transcript was available.",
+      flags: ["no_transcript"],
+      severity: "low",
+    };
+  }
 
-  const checks: Array<[string, string[], string, string]> = [
-    ["violence", VIOLENCE, profile.violence, MAX_VIOLENCE[filters.violence] ?? "none"],
-    ["language", LANGUAGE, profile.language, MAX_LANGUAGE[filters.language] ?? "none"],
-    ["sexual", SEXUAL, profile.sexual, MAX_SEXUAL[effectiveSexualLevel(filters)]],
-    ["political", POLITICAL, profile.political, MAX_POLITICAL[filters.political] ?? "none"],
-  ];
-
-  const reasons: string[] = [];
+  const hides: string[] = [];
+  const reviews: string[] = [];
   const flags: string[] = [];
   let worst: Severity | null = null;
-  const rank = { low: 1, medium: 2, high: 3 };
+  const note = (bucket: string[], reason: string, flag: string, sev: Severity) => {
+    bucket.push(reason);
+    flags.push(flag);
+    if (!worst || RANK[sev] > RANK[worst]) worst = sev;
+  };
 
-  for (const [category, scale, level, max] of checks) {
-    const excess = scale.indexOf(level) - scale.indexOf(max);
-    if (excess <= 0) continue;
-    const evidence = profile.evidence[category as keyof ContentProfile["evidence"]];
-    reasons.push(`${LABELS[category][level]}${evidence ? ` (${evidence})` : ""}`);
-    flags.push(`${category}:${level}`);
-    const sev = severityFor(excess, level);
-    if (!worst || rank[sev] > rank[worst]) worst = sev;
+  for (const dim of DIMS) {
+    const { level, evidence } = profile.dims[dim];
+    const rule = prefs.rules[dim];
+
+    if (level === null) {
+      if (prefs.unknown !== "allow") {
+        note(prefs.unknown === "hide" ? hides : reviews, `Couldn't tell ${dim} level from the transcript`, `${dim}:unknown`, "low");
+      }
+      continue;
+    }
+
+    const hardLimit = HARD_LIMIT[dim];
+    if (hardLimit !== undefined && level > hardLimit) {
+      note(hides, reasonText(dim, level, evidence), `${dim}:${level}`, "high");
+      continue;
+    }
+
+    const framing = (GLORIFIABLE as readonly string[]).includes(dim)
+      ? profile.framing[dim as (typeof GLORIFIABLE)[number]]
+      : "neutral";
+    if (prefs.blockGlorified && framing === "glorified" && level >= 1) {
+      note(hides, `Glamorized: ${reasonText(dim, level, evidence)}`, `${dim}:glorified`, "medium");
+      continue;
+    }
+
+    let max = rule.max;
+    if (prefs.educationalBoost && profile.purpose === "educational" && EDU_BOOST.includes(dim)) {
+      max = Math.min(4, max + 1);
+    }
+    const excess = level - max;
+    if (excess > 0) {
+      note(rule.action === "hide" ? hides : reviews, reasonText(dim, level, evidence), `${dim}:${level}`, severityFor(excess, level));
+    }
   }
 
-  if (valuesViolation) {
-    reasons.push(valuesViolation);
-    flags.push("values");
-    if (!worst) worst = "medium";
-  }
+  if (valuesViolation) note(hides, valuesViolation, "values", "medium");
 
-  if (reasons.length === 0) return { approved: true, reason: "", flags: [], severity: null };
-  return { approved: false, reason: reasons.join("; "), flags, severity: worst };
+  if (hides.length) return { status: "hidden", reason: [...hides, ...reviews].join("; "), flags, severity: worst };
+  if (reviews.length) return { status: "pending_review", reason: reviews.join("; "), flags, severity: worst };
+  return { status: "approved", reason: "", flags: [], severity: null };
 }

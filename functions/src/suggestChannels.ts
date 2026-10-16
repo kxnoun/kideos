@@ -21,6 +21,7 @@ import OpenAI from "openai";
 import { YOUTUBE_API_KEY, OPENAI_API_KEY } from "./config";
 import { APP_CONFIG } from "./config";
 import { verifyChannelHandles } from "./youtube";
+import { describePrefs, normalizePrefs } from "./prefs";
 import type {
   ValueFilters,
   ChannelSuggestion,
@@ -46,13 +47,8 @@ async function generateChannelHandles(
 
 ${queryContext}
 
-Parent's value filters:
-- Violence: ${filters.violence}
-- Language: ${filters.language}
-- Sexual content: none (always)
-- Religious sensitivity: ${filters.religiousSensitivity ? `Yes — ${filters.religion} values` : "No"}
-- Political content: ${filters.political}
-${filters.customRules ? `- Custom rules: ${filters.customRules}` : ""}
+Parent's content preferences:
+${describePrefs(filters)}
 
 Return a JSON array of 8 specific YouTube channel handles (with @ prefix) that would be appropriate for this child.
 Base your recommendations on your training knowledge of real YouTube channels.
@@ -101,7 +97,7 @@ async function generateSuggestionReason(
     messages: [
       {
         role: "user",
-        content: `In one sentence (max 20 words), explain why "${channelName}" is appropriate for a ${filters.ageGroup}-year-old with these filters: violence=${filters.violence}, language=${filters.language}${filters.religiousSensitivity ? `, religion=${filters.religion}` : ""}.`,
+        content: `In one sentence (max 20 words), explain why "${channelName}" is appropriate for a ${filters.ageGroup}-year-old with these preferences:\n${describePrefs(filters)}`,
       },
     ],
     max_tokens: 64,
@@ -208,7 +204,7 @@ export const suggestChannels = onCall(
       throw new HttpsError("failed-precondition", "Value filters not configured");
     }
 
-    const filters = filtersSnap.data() as ValueFilters;
+    const filters = normalizePrefs(filtersSnap.data());
 
     const count = await generateSuggestionsForChild(
       parentId,
@@ -270,7 +266,7 @@ export const weeklyChannelSuggestions = onSchedule(
 
           if (!filtersSnap.exists) continue;
 
-          const filters = filtersSnap.data() as ValueFilters;
+          const filters = normalizePrefs(filtersSnap.data());
 
           await generateSuggestionsForChild(
             parentId,

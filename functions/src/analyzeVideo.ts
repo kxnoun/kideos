@@ -7,9 +7,11 @@
 //      every family. Only on a miss: YouTube details → cached transcript →
 //      one AI call. Each video is profiled once, ever (per PROFILE_VERSION).
 //   2. Apply this child's filters in code (+ cached religion/custom-rules check).
-//   3. Write the child's verdict to users/{p}/children/{c}/videoVerdicts/{videoId}.
-//      The kid feed reads approved == true from there.
-//   4. If blocked for content: log to flaggedContent + push to parent.
+//   3. Write the child's verdict to users/{p}/children/{c}/videoVerdicts/{videoId}
+//      (approved / hidden / pending_review). The kid feed reads approved == true.
+//      A parentDecision set from the parent app always wins and is never overwritten.
+//   4. Keep flaggedContent/{videoId} in sync (the parent's review queue); push a
+//      notification only for videos waiting on the parent's review.
 //
 // reapplyFiltersForChild re-runs steps 2–3 for all of a child's videos when
 // their filters change — no transcripts, no profile AI calls.
@@ -28,6 +30,7 @@ import {
   checkValuesRules,
 } from "./aiAnalysis";
 import { evaluateProfile, type FilterDecision } from "./contentFilter";
+import { DIMS, normalizePrefs } from "./prefs";
 import type { ValueFilters, FlaggedContent, ContentProfile, VideoVerdict } from "./types";
 
 type Db = FirebaseFirestore.Firestore;
@@ -49,8 +52,8 @@ export interface AnalyzeAndTagResult {
   approved: boolean;
 }
 
-// Blocks that aren't about content — not logged as flagged content / no push
-const NON_CONTENT_FLAGS = new Set(["no_transcript", "unavailable", "analysis_pending", "values_check_failed"]);
+// Hidden for technical reasons (retried / not reviewable) — kept out of the review queue
+const NON_CONTENT_FLAGS = new Set(["unavailable", "analysis_pending", "values_check_failed"]);
 
 // ── Core function ──────────────────────────────────────────────
 
@@ -62,19 +65,24 @@ export async function analyzeAndTagVideo(params: AnalyzeAndTagParams): Promise<A
   const decision: FilterDecision = profile
     ? await decideForChild(db, videoId, profile, filters, params.openAiApiKey)
     : {
-        approved: false,
+        status: "hidden",
         reason: "Couldn't analyze this video yet — it will be retried.",
         flags: ["analysis_pending"],
         severity: "low",
       };
 
   const stub = (await db.doc(`channelLibraryCache/${channelId}/videos/${videoId}`).get()).data() ?? {};
-  await writeVerdict(db, parentId, childId, channelId, videoId, stub, decision);
+  const verdictRef = db.doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`);
+  const parentDecision = (await verdictRef.get()).data()?.parentDecision;
+  const batch = db.batch();
+  const approved = writeVerdict(db, parentId, childId, channelId, videoId, stub, decision, parentDecision, batch);
+  syncReviewQueue(db, parentId, childId, channelId, videoId, profile, decision, parentDecision, batch);
+  await batch.commit();
 
-  if (!decision.approved && !decision.flags.some((f) => NON_CONTENT_FLAGS.has(f))) {
-    await handleFlagged(db, parentId, childId, childName, videoId, channelId, profile!, decision, parentFcmToken);
+  if (decision.status === "pending_review" && !parentDecision && parentFcmToken) {
+    await notifyParent(parentFcmToken, parentId, childId, childName, videoId, profile?.title ?? "", decision.reason);
   }
-  return { approved: decision.approved };
+  return { approved };
 }
 
 // ── Content profile (shared, cached) ───────────────────────────
@@ -122,19 +130,21 @@ function placeholderProfile(
   title: string,
   channelName: string
 ): ContentProfile {
+  const dims = {} as ContentProfile["dims"];
+  for (const dim of DIMS) dims[dim] = { level: 0, evidence: "" };
   return {
     version: PROFILE_VERSION,
     status,
     title,
     channelName,
-    violence: "none",
-    language: "none",
-    sexual: "none",
-    political: "none",
+    purpose: "entertainment",
+    dims,
+    violenceRealism: "none",
+    framing: { violence: "neutral", substances: "neutral", selfHarm: "neutral", meanness: "neutral" },
+    religionTraditions: [],
     religiousThemes: [],
     topics: [],
     summary: "",
-    evidence: { violence: "", language: "", sexual: "", political: "" },
     createdAt: Timestamp.now(),
   };
 }
@@ -149,8 +159,8 @@ async function decideForChild(
   openAiApiKey: string
 ): Promise<FilterDecision> {
   const base = evaluateProfile(profile, filters);
-  // Values check only matters if the video otherwise passes
-  if (!base.approved || profile.status !== "ok" || !needsValuesCheck(filters)) return base;
+  // Values check only matters if the video isn't already hidden
+  if (base.status === "hidden" || profile.status !== "ok" || !needsValuesCheck(filters)) return base;
 
   const ref = db.doc(`videoProfiles/${videoId}/valuesChecks/${hashValuesRules(filters)}`);
   const snap = await ref.get();
@@ -159,7 +169,7 @@ async function decideForChild(
     check = await checkValuesRules(profile, filters, openAiApiKey);
     if (!check) {
       return {
-        approved: false,
+        status: "hidden",
         reason: "Couldn't check this video against your religion/custom rules yet — it will be retried.",
         flags: ["values_check_failed"],
         severity: "low",
@@ -170,7 +180,8 @@ async function decideForChild(
   return evaluateProfile(profile, filters, check.violates ? check.reason : null);
 }
 
-async function writeVerdict(
+// Returns whether the video is in the kid feed. Never overwrites parentDecision.
+function writeVerdict(
   db: Db,
   parentId: string,
   childId: string,
@@ -178,12 +189,15 @@ async function writeVerdict(
   videoId: string,
   stub: FirebaseFirestore.DocumentData,
   decision: FilterDecision,
-  batch?: FirebaseFirestore.WriteBatch
-): Promise<void> {
-  const verdict: VideoVerdict = {
+  parentDecision: "approved" | "hidden" | undefined,
+  batch: FirebaseFirestore.WriteBatch
+): boolean {
+  const approved = parentDecision ? parentDecision === "approved" : decision.status === "approved";
+  const verdict: Omit<VideoVerdict, "parentDecision"> = {
     videoId,
     channelId,
-    approved: decision.approved,
+    approved,
+    status: decision.status,
     reason: decision.reason,
     flags: decision.flags,
     severity: decision.severity,
@@ -193,9 +207,42 @@ async function writeVerdict(
     durationSeconds: stub.durationSeconds ?? null,
     evaluatedAt: Timestamp.now(),
   };
-  const ref = db.doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`);
-  if (batch) batch.set(ref, verdict);
-  else await ref.set(verdict);
+  batch.set(db.doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`), verdict, { merge: true });
+  return approved;
+}
+
+// The parent's review queue: one flaggedContent doc per video (id = videoId).
+// Videos the parent already decided on are left alone.
+function syncReviewQueue(
+  db: Db,
+  parentId: string,
+  childId: string,
+  channelId: string,
+  videoId: string,
+  profile: ContentProfile | null,
+  decision: FilterDecision,
+  parentDecision: string | undefined,
+  batch: FirebaseFirestore.WriteBatch
+): void {
+  if (parentDecision) return;
+  const ref = db.doc(`users/${parentId}/children/${childId}/flaggedContent/${videoId}`);
+  if (decision.status === "approved" || !profile || decision.flags.some((f) => NON_CONTENT_FLAGS.has(f))) {
+    batch.delete(ref);
+    return;
+  }
+  // parentViewed is not written here, so re-runs don't resurface items the parent dismissed
+  const entry: Omit<FlaggedContent, "parentViewed"> = {
+    videoId,
+    title: profile.title,
+    channel: profile.channelName,
+    channelId,
+    timestamp: Timestamp.now(),
+    reason: decision.reason,
+    flags: decision.flags,
+    severity: decision.severity ?? "low",
+    status: decision.status === "pending_review" ? "pending_review" : "hidden",
+  };
+  batch.set(ref, entry, { merge: true });
 }
 
 // ── Re-apply filters after a change ────────────────────────────
@@ -224,6 +271,9 @@ export async function reapplyFiltersForChild(
     for (let i = 0; i < videos.docs.length; i += 100) {
       const chunk = videos.docs.slice(i, i + 100);
       const profileSnaps = await db.getAll(...chunk.map((v) => db.doc(`videoProfiles/${v.id}`)));
+      const verdictSnaps = await db.getAll(
+        ...chunk.map((v) => db.doc(`users/${parentId}/children/${childId}/videoVerdicts/${v.id}`))
+      );
       const batch = db.batch();
       // Values checks may call the AI — run in small parallel groups
       for (let j = 0; j < chunk.length; j += 5) {
@@ -231,9 +281,12 @@ export async function reapplyFiltersForChild(
           chunk.slice(j, j + 5).map(async (videoDoc, k) => {
             const snap = profileSnaps[j + k];
             if (!snap.exists || snap.data()!.version !== PROFILE_VERSION) return; // not analyzed yet — leave as is
-            const decision = await decideForChild(db, videoDoc.id, snap.data() as ContentProfile, filters, openAiApiKey);
-            await writeVerdict(db, parentId, childId, channelId, videoDoc.id, videoDoc.data(), decision, batch);
-            if (decision.approved) channelApproved++;
+            const profile = snap.data() as ContentProfile;
+            const decision = await decideForChild(db, videoDoc.id, profile, filters, openAiApiKey);
+            const parentDecision = verdictSnaps[j + k].data()?.parentDecision;
+            const ok = writeVerdict(db, parentId, childId, channelId, videoDoc.id, videoDoc.data(), decision, parentDecision, batch);
+            syncReviewQueue(db, parentId, childId, channelId, videoDoc.id, profile, decision, parentDecision, batch);
+            if (ok) channelApproved++;
             else blocked++;
           })
         );
@@ -280,52 +333,32 @@ async function getTranscriptCached(db: Db, videoId: string, supadataApiKey: stri
   return result;
 }
 
-// ── Log flagged content + push FCM to parent ───────────────────
+// ── Push to parent: a video is waiting for their review ────────
 
-async function handleFlagged(
-  db: Db,
+async function notifyParent(
+  fcmToken: string,
   parentId: string,
   childId: string,
   childName: string,
   videoId: string,
-  channelId: string,
-  profile: ContentProfile,
-  decision: FilterDecision,
-  fcmToken: string | null
+  title: string,
+  reason: string
 ): Promise<void> {
-  const flaggedDoc: FlaggedContent = {
-    videoId,
-    title: profile.title,
-    channel: profile.channelName,
-    channelId,
-    timestamp: Timestamp.now(),
-    reason: decision.reason,
-    flags: decision.flags,
-    severity: decision.severity ?? "low",
-    parentViewed: false,
-  };
-
-  await db.collection(`users/${parentId}/children/${childId}/flaggedContent`).add(flaggedDoc);
-
-  if (!fcmToken) return;
-
   try {
     await getMessaging().send({
       token: fcmToken,
       notification: {
-        title: "⚠️ Heads up",
-        body: `A video was blocked from ${childName}'s feed. Tap to see why.`,
+        title: "👀 Video needs your review",
+        body: `A video is waiting for your OK before it shows in ${childName}'s feed.`,
       },
       data: {
-        type: "video_flagged",
+        type: "video_review",
         videoId,
-        videoTitle: profile.title.slice(0, 100),
-        reason: decision.reason.slice(0, 200),
+        videoTitle: title.slice(0, 100),
+        reason: reason.slice(0, 200),
         childId,
       },
-      apns: {
-        payload: { aps: { sound: "default" } },
-      },
+      apns: { payload: { aps: { sound: "default" } } },
     });
   } catch (err) {
     logger.error(`[analyzeAndTagVideo] FCM notification failed for parent ${parentId}:`, err);
@@ -336,16 +369,5 @@ async function handleFlagged(
 
 export async function loadValueFiltersForChild(parentId: string, childId: string): Promise<ValueFilters> {
   const snap = await getFirestore().doc(`users/${parentId}/children/${childId}/valueFilters/current`).get();
-  return snap.exists
-    ? (snap.data() as ValueFilters)
-    : {
-        violence: "none",
-        language: "none",
-        sexualContent: "none",
-        religiousSensitivity: false,
-        religion: "",
-        political: "block_all",
-        customRules: "",
-        ageGroup: 7,
-      };
+  return normalizePrefs(snap.data());
 }

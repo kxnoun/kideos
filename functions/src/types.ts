@@ -24,21 +24,9 @@ export interface ParentProfile {
 
 // ── Value Filters ──────────────────────────────────────────────
 
-export type ViolenceLevel = "none" | "mild" | "moderate";
-export type LanguageLevel = "none" | "mild" | "anything";
-export type PoliticalLevel = "block_all" | "allow_educational" | "allow_all";
-export type SexualLevel = "none" | "innuendo";
-
-export interface ValueFilters {
-  violence: ViolenceLevel;
-  language: LanguageLevel;
-  sexualContent: SexualLevel; // "innuendo" allows passing jokes; default by age
-  religiousSensitivity: boolean;
-  religion: string; // e.g. "Islamic values — avoid music, mixed gender content"
-  political: PoliticalLevel;
-  customRules: string; // free text injected into AI prompt
-  ageGroup: number; // child's age in years
-}
+// Defined with the questionnaire logic in prefs.ts
+export type { ValueFilters, Dim, DimRule, OverAction } from "./prefs";
+import type { Dim } from "./prefs";
 
 // ── Child Profile ──────────────────────────────────────────────
 
@@ -95,7 +83,9 @@ export interface FlaggedContent {
   reason: string;
   flags: string[];
   severity: Severity;
+  status: "hidden" | "pending_review"; // pending_review = hidden until the parent approves
   parentViewed: boolean;
+  resolution?: "approved" | "hidden"; // set by the parent app when reviewed
 }
 
 // ── AI Channel Suggestion ──────────────────────────────────────
@@ -121,19 +111,26 @@ export interface ChannelSuggestion {
 // per video by AI and shared by every family. Server-only (rules deny clients).
 // status "no_transcript" / "unavailable" are stored only when permanent.
 
+export interface DimRating {
+  level: number | null; // 0–4 ladder (prefs.ts LEVEL_LABELS); null = can't tell from the transcript
+  evidence: string;
+}
+
+export type Framing = "neutral" | "condemned" | "glorified";
+
 export interface ContentProfile {
   version: number;
   status: "ok" | "no_transcript" | "unavailable";
   title: string;
   channelName: string;
-  violence: "none" | "cartoon" | "mild" | "moderate" | "graphic";
-  language: "none" | "mild" | "strong";
-  sexual: "none" | "innuendo" | "suggestive" | "explicit";
-  political: "none" | "educational" | "opinion";
+  purpose: "entertainment" | "educational" | "news" | "devotional" | "commercial";
+  dims: Record<Dim, DimRating>;
+  violenceRealism: "none" | "cartoon_fantasy" | "realistic_fiction" | "real_footage";
+  framing: { violence: Framing; substances: Framing; selfHarm: Framing; meanness: Framing };
+  religionTraditions: string[];
   religiousThemes: string[];
   topics: string[];
   summary: string;
-  evidence: { violence: string; language: string; sexual: string; political: string };
   createdAt: Timestamp;
 }
 
@@ -147,7 +144,9 @@ export interface ContentProfile {
 export interface VideoVerdict {
   videoId: string;
   channelId: string;
-  approved: boolean;
+  approved: boolean; // what the kid feed reads: status === "approved", or the parent approved it
+  status: "approved" | "hidden" | "pending_review";
+  parentDecision?: "approved" | "hidden"; // set by the parent app; always wins
   reason: string; // empty when approved
   flags: string[];
   severity: Severity | null;
