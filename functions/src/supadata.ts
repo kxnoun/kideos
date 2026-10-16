@@ -7,6 +7,17 @@
 import { logger } from "firebase-functions/v2";
 import { APP_CONFIG } from "./config";
 
+// Supadata rate-limits bursts, so run transcript requests one at a time with a
+// short gap between them (module-level queue, shared by the whole batch).
+const SUPADATA_GAP_MS = 1100;
+let supadataQueue: Promise<unknown> = Promise.resolve();
+function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const run = supadataQueue.then(fn, fn);
+  const gap = () => new Promise((r) => setTimeout(r, SUPADATA_GAP_MS));
+  supadataQueue = run.then(gap, gap);
+  return run;
+}
+
 export interface TranscriptResult {
   available: boolean;
   transcript: string | null; // null if unavailable
@@ -37,14 +48,17 @@ export async function fetchTranscript(
     // lang=en → prefer English captions (Supadata falls back to the first available)
     const urlWithParams = `${url}?videoId=${encodeURIComponent(videoId)}&text=true&lang=en`;
 
-    // Retry on 429 (rate limit) with backoff + jitter — batches fire 5 requests at once
-    let res2 = await fetch(urlWithParams, { headers: { "x-api-key": apiKey } });
-    for (let attempt = 1; res2.status === 429 && attempt <= 4; attempt++) {
-      const waitMs = 1000 * 2 ** attempt + Math.random() * 1000;
-      logger.info(`[Supadata] 429 for ${videoId}, retry ${attempt} in ${Math.round(waitMs)}ms`);
-      await new Promise((r) => setTimeout(r, waitMs));
-      res2 = await fetch(urlWithParams, { headers: { "x-api-key": apiKey } });
-    }
+    // Queued one-at-a-time; still retry on 429 (rate limit) with backoff + jitter
+    const res2 = await queued(async () => {
+      let res = await fetch(urlWithParams, { headers: { "x-api-key": apiKey } });
+      for (let attempt = 1; res.status === 429 && attempt <= 4; attempt++) {
+        const waitMs = 1000 * 2 ** attempt + Math.random() * 1000;
+        logger.info(`[Supadata] 429 for ${videoId}, retry ${attempt} in ${Math.round(waitMs)}ms`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        res = await fetch(urlWithParams, { headers: { "x-api-key": apiKey } });
+      }
+      return res;
+    });
 
     if (res2.status === 404 || res2.status === 204) {
       // No transcript available — will fall back to metadata-only analysis

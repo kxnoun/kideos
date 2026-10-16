@@ -144,8 +144,8 @@ export async function analyzeAndTagVideo(
     madeForKids: videoDetails.madeForKids,
   };
 
-  // Don't cache AI failures (e.g. out of credits) — the next run should retry
-  if (!aiResult.flags.includes("ai_analysis_error")) {
+  // Don't cache AI failures or missing transcripts — the next run should retry
+  if (!aiResult.flags.includes("ai_analysis_error") && !aiResult.flags.includes("no_transcript")) {
     await cacheRef.set(analysisDoc);
   }
 

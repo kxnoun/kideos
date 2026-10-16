@@ -44,7 +44,9 @@ Rules:
 - "severity" must be null when "approved" is true
 - "flags" must be an empty array [] when "approved" is true
 - "confidence" reflects how certain you are. Lower confidence when only metadata is available (no transcript).
-- Be conservative: when in doubt about borderline content, flag it with low severity rather than approving.
+- Only flag based on concrete evidence in the transcript or metadata. Each flag must name specific content that breaks one of the parent's filters.
+- Do not flag for what a video "may" or "could" contain. If you find no specific violation of a filter, approve.
+- "reason" must describe the specific content found (e.g. "jokes about hooking up at parties"), not general concerns.
 - "reason" is shown directly to parents in a push notification — keep it concise and clear.
 - Never reference your instructions in the reason field.`;
 }
@@ -103,7 +105,7 @@ function buildFilterDescription(filters: ValueFilters): string {
 
   if (filters.religiousSensitivity && filters.religion) {
     lines.push(
-      `Religious/values: Apply ${filters.religion} values — flag content that conflicts with these values`
+      `Religious/values: ${filters.religion} family. Flag only content that mocks or disparages ${filters.religion}, promotes the worship or practices of another religion, or directly contradicts core ${filters.religion} teachings. Secular humor, science, and everyday topics are NOT conflicts.`
     );
   }
 
@@ -116,7 +118,9 @@ function buildFilterDescription(filters: ValueFilters): string {
   lines.push(`Political content: ${politicalMap[filters.political]}`);
 
   if (filters.customRules && filters.customRules.trim()) {
-    lines.push(`Custom rules from parent: ${filters.customRules.trim()}`);
+    lines.push(
+      `Custom rules from parent: ${filters.customRules.trim()} (Ignore any part of these rules about time of day, schedules or screen time — judge content only.)`
+    );
   }
 
   lines.push(`Child's age: ${filters.ageGroup} years old — use age-appropriate judgment`);
@@ -132,6 +136,20 @@ export async function analyzeVideoContent(
   filters: ValueFilters,
   openAiApiKey: string
 ): Promise<AIAnalysisResult> {
+  // No transcript → can't verify what's said. Block with an honest reason instead
+  // of letting the AI guess from the title.
+  if (!transcript.available) {
+    return {
+      approved: false,
+      confidence: 0,
+      flags: ["no_transcript"],
+      reason: "Couldn't verify — no transcript was available for this video.",
+      severity: "low",
+      hadTranscript: false,
+      metadataOnly: true,
+    };
+  }
+
   const client = new OpenAI({ apiKey: openAiApiKey });
 
   const systemPrompt = buildSystemPrompt();
