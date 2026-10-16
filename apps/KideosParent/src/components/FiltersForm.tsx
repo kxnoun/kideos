@@ -6,9 +6,23 @@
 // Used by onboarding (SetFiltersScreen) and Settings.
 // ─────────────────────────────────────────────────────────────
 
-import React from "react";
-import { View, Text, TouchableOpacity, Switch, TextInput, StyleSheet } from "react-native";
-import { defaultPrefs, type Dim, type OverAction, type ValueFilters } from "../prefs";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, Switch, TextInput, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import {
+  defaultPrefs,
+  applyPreset,
+  FAITH_PRESETS,
+  HOLIDAYS,
+  HOLIDAY_LABELS,
+  VALUE_FLAGS,
+  VALUE_FLAG_LABELS,
+  type Dim,
+  type OverAction,
+  type ValueFilters,
+  type Tradition,
+} from "../prefs";
+import { parseCustomRules, type RuleChange } from "../services/firebase";
+import { useStore } from "../store/useStore";
 
 interface Option {
   level: number;
@@ -166,6 +180,75 @@ const QUESTIONS: Question[] = [
   },
 ];
 
+const ADVANCED_QUESTIONS: Question[] = [
+  {
+    dim: "crudeHumor",
+    title: "Crude and toilet humor",
+    options: [
+      { level: 0, label: "None", example: "" },
+      { level: 1, label: "Silly gross-out", example: "A burp joke" },
+      { level: 2, label: "Toilet humor", example: "Fart and poop jokes" },
+      { level: 3, label: "Frequent gross-out", example: "Gross-out humor is the whole point" },
+      { level: 4, label: "Extreme", example: "Disgusting on purpose" },
+    ],
+  },
+  {
+    dim: "matureThemes",
+    title: "Mature life themes",
+    hint: "Death, divorce, illness, war, abuse, crime.",
+    options: [
+      { level: 0, label: "None", example: "" },
+      { level: 1, label: "Brief mention", example: "Someone mentions a grandparent died" },
+      { level: 2, label: "Handled gently", example: "A video about a pet dying, or parents divorcing" },
+      { level: 3, label: "Heavy themes in depth", example: "War, abuse or crime discussed in detail" },
+      { level: 4, label: "Disturbing", example: "Graphic or upsetting detail" },
+    ],
+  },
+  {
+    dim: "misinformation",
+    title: "Misinformation and conspiracies",
+    options: [
+      { level: 0, label: "None", example: "" },
+      { level: 1, label: "Unverified claims", example: "“Fun facts” that aren't quite true" },
+      { level: 2, label: "Pseudoscience as fact", example: "Flat earth, conspiracy theories presented as true" },
+      { level: 3, label: "Harmful misinformation", example: "Dangerous health or safety claims" },
+    ],
+  },
+  {
+    dim: "nudity",
+    title: "Nudity and revealing clothing",
+    hint: "Best effort — we mostly can't see the video, only read what's said.",
+    options: [
+      { level: 0, label: "None", example: "" },
+      { level: 1, label: "Swimwear, normal context", example: "A beach or swimming video" },
+      { level: 2, label: "Revealing clothing as a focus", example: "A “bikini try-on” video" },
+      { level: 3, label: "Partial nudity", example: "" },
+    ],
+  },
+];
+
+const TRADITIONS: { value: Tradition; label: string }[] = [
+  { value: "islam", label: "Muslim" },
+  { value: "judaism", label: "Jewish" },
+  { value: "christianity", label: "Christian" },
+  { value: "hinduism", label: "Hindu" },
+  { value: "sikhism", label: "Sikh" },
+];
+
+const FAITH_FLAGS = VALUE_FLAGS.filter((f) => f !== "matureGames");
+
+// Applies one change from parseCustomRules ("holidays.halloween" = "hide", etc.)
+function applyChange(p: ValueFilters, c: RuleChange): ValueFilters {
+  const next: ValueFilters = JSON.parse(JSON.stringify(p));
+  const [a, b, k] = c.key.split(".");
+  if (a === "rules") (next.rules as any)[b][k] = c.value;
+  else if (a === "holidays") (next.holidays as any)[b] = c.value;
+  else if (a === "flags") (next.flags as any)[b] = c.value;
+  else if (c.key === "music") next.music = c.value as ValueFilters["music"];
+  else if (c.key === "lgbtq") next.lgbtq = c.value as ValueFilters["lgbtq"];
+  return next;
+}
+
 function Segment<T extends string>({
   options,
   value,
@@ -190,6 +273,72 @@ function Segment<T extends string>({
   );
 }
 
+function LadderQuestion({
+  q,
+  value,
+  onChange,
+  title,
+}: {
+  q: Question;
+  value: ValueFilters;
+  onChange: (v: ValueFilters) => void;
+  title?: string;
+}) {
+  const rule = value.rules[q.dim];
+  const setRule = (patch: Partial<{ max: number; action: OverAction }>) =>
+    onChange({ ...value, rules: { ...value.rules, [q.dim]: { ...rule, ...patch } } });
+  return (
+    <View style={styles.card}>
+      <Text style={styles.title}>{title ?? q.title}</Text>
+      {q.hint ? <Text style={styles.sub}>{q.hint}</Text> : null}
+      <Text style={styles.label}>The most you're OK with:</Text>
+      {q.options.map((o) => {
+        const selected = rule.max === o.level;
+        return (
+          <TouchableOpacity
+            key={o.level}
+            style={[styles.option, selected && styles.optionSelected]}
+            onPress={() => setRule({ max: o.level })}
+          >
+            <View style={[styles.radio, selected && styles.radioSelected]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>{o.label}</Text>
+              {o.example ? <Text style={styles.optionExample}>{o.example}</Text> : null}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+      <Text style={[styles.label, { marginTop: 12 }]}>Videos that go past this:</Text>
+      <Segment
+        options={[
+          { value: "hide", label: "Hide them" },
+          { value: "review", label: "Ask me first" },
+        ]}
+        value={rule.action}
+        onChange={(action) => setRule({ action })}
+      />
+    </View>
+  );
+}
+
+function SectionHeader({ title, sub, open, onToggle }: { title: string; sub: string; open: boolean; onToggle: () => void }) {
+  return (
+    <TouchableOpacity style={styles.sectionHeader} onPress={onToggle}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Text style={styles.sectionSub}>{sub}</Text>
+      </View>
+      <Text style={styles.chevron}>{open ? "▲" : "▼"}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const FLAG_OPTIONS = [
+  { value: "ok" as const, label: "OK" },
+  { value: "review" as const, label: "Ask me" },
+  { value: "hide" as const, label: "Hide" },
+];
+
 export default function FiltersForm({
   value,
   onChange,
@@ -197,13 +346,43 @@ export default function FiltersForm({
   value: ValueFilters;
   onChange: (v: ValueFilters) => void;
 }) {
-  const setRule = (dim: Dim, patch: Partial<{ max: number; action: OverAction }>) =>
-    onChange({ ...value, rules: { ...value.rules, [dim]: { ...value.rules[dim], ...patch } } });
+  const user = useStore((s) => s.user);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showFaith, setShowFaith] = useState(Boolean(value.faith.tradition));
+  const [pickedTradition, setPickedTradition] = useState<Tradition>(value.faith.tradition);
+  const [parsing, setParsing] = useState(false);
+  const [proposal, setProposal] = useState<{ changes: RuleChange[]; remaining: string } | null>(null);
 
   const resetToAge = () => {
     const d = defaultPrefs(value.ageGroup, value.sensitivity);
     onChange({ ...d, religiousSensitivity: value.religiousSensitivity, religion: value.religion, customRules: value.customRules });
   };
+
+  const setFlag = (f: (typeof VALUE_FLAGS)[number], rule: "ok" | "review" | "hide") =>
+    onChange({ ...value, flags: { ...value.flags, [f]: rule } });
+
+  const turnIntoSettings = async () => {
+    if (!user || !value.customRules.trim()) return;
+    setParsing(true);
+    try {
+      setProposal(await parseCustomRules(user.uid, value.customRules));
+    } catch {
+      Alert.alert("Couldn't read those rules right now. Your text is saved and still checked by AI.");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const applyProposal = () => {
+    if (!proposal) return;
+    let next = value;
+    for (const c of proposal.changes) next = applyChange(next, c);
+    onChange({ ...next, customRules: proposal.remaining });
+    setProposal(null);
+  };
+
+  const presets = FAITH_PRESETS.filter((p) => p.tradition === pickedTradition);
+  const activePreset = FAITH_PRESETS.find((p) => p.id === value.faith.preset);
 
   return (
     <View>
@@ -228,41 +407,15 @@ export default function FiltersForm({
         </TouchableOpacity>
       </View>
 
-      {QUESTIONS.map((q) => {
-        const rule = value.rules[q.dim];
-        return (
-          <View key={q.dim} style={styles.card}>
-            <Text style={styles.title}>{q.title}</Text>
-            {q.hint ? <Text style={styles.sub}>{q.hint}</Text> : null}
-            <Text style={styles.label}>The most you're OK with:</Text>
-            {q.options.map((o) => {
-              const selected = rule.max === o.level;
-              return (
-                <TouchableOpacity
-                  key={o.level}
-                  style={[styles.option, selected && styles.optionSelected]}
-                  onPress={() => setRule(q.dim, { max: o.level })}
-                >
-                  <View style={[styles.radio, selected && styles.radioSelected]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>{o.label}</Text>
-                    {o.example ? <Text style={styles.optionExample}>{o.example}</Text> : null}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-            <Text style={[styles.label, { marginTop: 12 }]}>Videos that go past this:</Text>
-            <Segment
-              options={[
-                { value: "hide", label: "Hide them" },
-                { value: "review", label: "Ask me first" },
-              ]}
-              value={rule.action}
-              onChange={(action) => setRule(q.dim, { action })}
-            />
-          </View>
-        );
-      })}
+      {QUESTIONS.map((q) => (
+        <LadderQuestion
+          key={q.dim}
+          q={q}
+          value={value}
+          onChange={onChange}
+          title={q.dim === "religion" && value.faith.tradition ? "Other faiths' religious content" : undefined}
+        />
+      ))}
 
       {/* Global rules */}
       <View style={styles.card}>
@@ -299,11 +452,217 @@ export default function FiltersForm({
         />
       </View>
 
-      {/* Faith + free text (kept until faith presets ship) */}
+      {/* Faith & family values */}
+      <SectionHeader
+        title="Faith and family values"
+        sub={activePreset ? `Using: ${activePreset.label}` : "Optional — holidays, music, food, magic and more"}
+        open={showFaith}
+        onToggle={() => setShowFaith(!showFaith)}
+      />
+      {showFaith && (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.title}>Start from a preset (optional)</Text>
+            <Text style={styles.sub}>
+              A preset only fills in answers below — you can see and change every one. Videos are never filtered by
+              religion name.
+            </Text>
+            <View style={styles.chips}>
+              {TRADITIONS.map((t) => (
+                <TouchableOpacity
+                  key={t.value}
+                  style={[styles.chip, pickedTradition === t.value && styles.chipActive]}
+                  onPress={() => setPickedTradition(pickedTradition === t.value ? "" : t.value)}
+                >
+                  <Text style={[styles.chipText, pickedTradition === t.value && styles.chipTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {presets.map((p) => (
+              <TouchableOpacity
+                key={p.id}
+                style={[styles.option, value.faith.preset === p.id && styles.optionSelected]}
+                onPress={() => onChange(applyPreset(value, p.id))}
+              >
+                <View style={[styles.radio, value.faith.preset === p.id && styles.radioSelected]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.optionLabel}>{p.label}</Text>
+                  <Text style={styles.optionExample}>{p.why}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+            {value.faith.tradition ? (
+              <TouchableOpacity
+                onPress={() => onChange({ ...value, faith: { tradition: "", preset: "" } })}
+                style={styles.resetBtn}
+              >
+                <Text style={styles.resetText}>Clear faith (answers stay as they are)</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.title}>Holidays</Text>
+            <Text style={styles.sub}>“In passing” = fine if mentioned, hidden if it's what the video is about.</Text>
+            {HOLIDAYS.map((h) => (
+              <View key={h} style={styles.row}>
+                <Text style={styles.rowLabel}>{HOLIDAY_LABELS[h]}</Text>
+                <Segment
+                  options={[
+                    { value: "ok", label: "OK" },
+                    { value: "incidental", label: "In passing" },
+                    { value: "review", label: "Ask me" },
+                    { value: "hide", label: "Hide" },
+                  ]}
+                  value={value.holidays[h]}
+                  onChange={(rule) => onChange({ ...value, holidays: { ...value.holidays, [h]: rule } })}
+                />
+              </View>
+            ))}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.title}>Music</Text>
+            <Text style={styles.sub}>Best effort — captions usually only say “[Music]”.</Text>
+            {(
+              [
+                { value: "all", label: "All music OK", example: "" },
+                { value: "background", label: "Background music only", example: "No songs or music videos" },
+                { value: "vocals_only", label: "Vocals only", example: "Nasheeds, a cappella — no instruments" },
+                { value: "none", label: "No music", example: "" },
+              ] as const
+            ).map((o) => (
+              <TouchableOpacity
+                key={o.value}
+                style={[styles.option, value.music === o.value && styles.optionSelected]}
+                onPress={() => onChange({ ...value, music: o.value })}
+              >
+                <View style={[styles.radio, value.music === o.value && styles.radioSelected]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.optionLabel}>{o.label}</Text>
+                  {o.example ? <Text style={styles.optionExample}>{o.example}</Text> : null}
+                </View>
+              </TouchableOpacity>
+            ))}
+            {value.music !== "all" && (
+              <>
+                <Text style={[styles.label, { marginTop: 8 }]}>Videos with other music:</Text>
+                <Segment
+                  options={[
+                    { value: "hide", label: "Hide them" },
+                    { value: "review", label: "Ask me first" },
+                  ]}
+                  value={value.musicAction}
+                  onChange={(musicAction) => onChange({ ...value, musicAction })}
+                />
+              </>
+            )}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.title}>Specific content</Text>
+            {FAITH_FLAGS.map((f) => (
+              <View key={f} style={styles.row}>
+                <Text style={styles.rowLabel}>{VALUE_FLAG_LABELS[f]}</Text>
+                <Segment options={FLAG_OPTIONS} value={value.flags[f]} onChange={(rule) => setFlag(f, rule)} />
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
+      {/* More topics */}
+      <SectionHeader
+        title="More topics"
+        sub="Optional — crude humor, mature themes, misinformation, and more"
+        open={showAdvanced}
+        onToggle={() => setShowAdvanced(!showAdvanced)}
+      />
+      {showAdvanced && (
+        <>
+          {ADVANCED_QUESTIONS.map((q) => (
+            <LadderQuestion key={q.dim} q={q} value={value} onChange={onChange} />
+          ))}
+          <View style={styles.card}>
+            <Text style={styles.title}>LGBTQ+ people and topics</Text>
+            {(
+              [
+                { value: "allow", label: "Allow all" },
+                { value: "incidental", label: "Allow people being present; ask me about discussion" },
+                { value: "review", label: "Ask me about all of it" },
+                { value: "hide", label: "Hide discussion and advocacy" },
+              ] as const
+            ).map((o) => (
+              <TouchableOpacity
+                key={o.value}
+                style={[styles.option, value.lgbtq === o.value && styles.optionSelected]}
+                onPress={() => onChange({ ...value, lgbtq: o.value })}
+              >
+                <View style={[styles.radio, value.lgbtq === o.value && styles.radioSelected]} />
+                <Text style={[styles.optionLabel, { flex: 1 }]}>{o.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>{VALUE_FLAG_LABELS.matureGames}</Text>
+              <Segment
+                options={FLAG_OPTIONS}
+                value={value.flags.matureGames}
+                onChange={(rule) => setFlag("matureGames", rule)}
+              />
+            </View>
+          </View>
+        </>
+      )}
+
+      {/* Anything else */}
       <View style={styles.card}>
-        <Text style={styles.title}>Faith and family values</Text>
-        <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>Check videos against our faith's values</Text>
+        <Text style={styles.title}>Anything else?</Text>
+        <Text style={styles.sub}>Write it in your own words — we'll turn what we can into the settings above.</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={value.customRules}
+          onChangeText={(customRules) => onChange({ ...value, customRules })}
+          placeholder="e.g. No Halloween stuff, no fast food ads, no YouTubers yelling..."
+          placeholderTextColor="#aaa"
+          multiline
+          numberOfLines={3}
+        />
+        {value.customRules.trim() ? (
+          <TouchableOpacity style={styles.parseBtn} onPress={turnIntoSettings} disabled={parsing}>
+            {parsing ? <ActivityIndicator color="#6C63FF" /> : <Text style={styles.parseText}>Turn this into settings</Text>}
+          </TouchableOpacity>
+        ) : null}
+        {proposal && (
+          <View style={styles.proposal}>
+            {proposal.changes.length ? (
+              <>
+                <Text style={styles.label}>We'll set:</Text>
+                {proposal.changes.map((c, i) => (
+                  <Text key={i} style={styles.proposalItem}>• {c.explanation}</Text>
+                ))}
+              </>
+            ) : (
+              <Text style={styles.proposalItem}>Nothing here matches a setting.</Text>
+            )}
+            {proposal.remaining ? (
+              <Text style={styles.proposalItem}>
+                We'll keep checking this with AI: “{proposal.remaining}”
+              </Text>
+            ) : null}
+            <View style={styles.reviewRow}>
+              <TouchableOpacity style={[styles.reviewBtn, styles.reviewApprove]} onPress={applyProposal}>
+                <Text style={styles.reviewApproveText}>Apply</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.reviewBtn, styles.reviewCancel]} onPress={() => setProposal(null)}>
+                <Text style={styles.reviewCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+        <View style={[styles.switchRow, { marginTop: 14 }]}>
+          <Text style={styles.switchLabel}>Also check videos against our faith's values in general (AI)</Text>
           <Switch
             value={value.religiousSensitivity}
             onValueChange={(religiousSensitivity) => onChange({ ...value, religiousSensitivity })}
@@ -319,16 +678,6 @@ export default function FiltersForm({
             placeholderTextColor="#aaa"
           />
         )}
-        <Text style={[styles.label, { marginTop: 12 }]}>Anything else? (optional)</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={value.customRules}
-          onChangeText={(customRules) => onChange({ ...value, customRules })}
-          placeholder="e.g. No Halloween content, no fast food ads..."
-          placeholderTextColor="#aaa"
-          multiline
-          numberOfLines={3}
-        />
       </View>
     </View>
   );
@@ -364,7 +713,7 @@ const styles = StyleSheet.create({
   segment: { flexDirection: "row", backgroundColor: "#E8E8F0", borderRadius: 10, padding: 3 },
   segmentBtn: { flex: 1, paddingVertical: 9, alignItems: "center", borderRadius: 8 },
   segmentBtnActive: { backgroundColor: "#fff", shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
-  segmentText: { fontSize: 13, fontWeight: "600", color: "#888" },
+  segmentText: { fontSize: 12, fontWeight: "600", color: "#888" },
   segmentTextActive: { color: "#1A1A2E" },
   resetBtn: { marginTop: 12 },
   resetText: { fontSize: 13, color: "#6C63FF", fontWeight: "600" },
@@ -372,4 +721,32 @@ const styles = StyleSheet.create({
   switchLabel: { fontSize: 14, color: "#444", flex: 1, paddingRight: 16, lineHeight: 20 },
   input: { backgroundColor: "#F7F7FF", borderRadius: 12, padding: 14, fontSize: 15, color: "#1A1A2E" },
   textArea: { minHeight: 80, textAlignVertical: "top" },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EEEDFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  sectionTitle: { fontSize: 17, fontWeight: "800", color: "#1A1A2E" },
+  sectionSub: { fontSize: 13, color: "#666", marginTop: 2 },
+  chevron: { fontSize: 14, color: "#6C63FF", marginLeft: 12 },
+  chips: { flexDirection: "row", flexWrap: "wrap", marginBottom: 10 },
+  chip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: "#F0F0F5", marginRight: 8, marginBottom: 8 },
+  chipActive: { backgroundColor: "#6C63FF" },
+  chipText: { fontSize: 14, fontWeight: "600", color: "#555" },
+  chipTextActive: { color: "#fff" },
+  row: { marginBottom: 14 },
+  rowLabel: { fontSize: 14, fontWeight: "600", color: "#333", marginBottom: 6 },
+  parseBtn: { marginTop: 10, paddingVertical: 10, alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: "#6C63FF" },
+  parseText: { color: "#6C63FF", fontWeight: "700", fontSize: 14 },
+  proposal: { marginTop: 12, backgroundColor: "#F7F7FF", borderRadius: 12, padding: 12 },
+  proposalItem: { fontSize: 14, color: "#333", marginBottom: 6, lineHeight: 20 },
+  reviewRow: { flexDirection: "row", marginTop: 8 },
+  reviewBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
+  reviewApprove: { backgroundColor: "#6C63FF", marginRight: 8 },
+  reviewApproveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  reviewCancel: { backgroundColor: "#E8E8F0" },
+  reviewCancelText: { color: "#555", fontWeight: "700", fontSize: 14 },
 });

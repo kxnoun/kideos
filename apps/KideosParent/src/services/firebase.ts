@@ -260,6 +260,19 @@ export function subscribeToFlaggedContent(
     });
 }
 
+// Free-text "anything else?" → concrete questionnaire changes (parent confirms before applying)
+export interface RuleChange {
+  key: string;
+  value: string | number;
+  explanation: string;
+}
+export async function parseCustomRules(
+  parentId: string,
+  text: string
+): Promise<{ changes: RuleChange[]; remaining: string }> {
+  return callFunction("parseCustomRules", { parentId, text });
+}
+
 // Parent's decision on a video in the review queue. Updates the child's verdict
 // (approved = what the kid feed reads) and resolves the queue entry together.
 export async function resolveReview(
