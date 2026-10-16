@@ -144,7 +144,10 @@ export async function analyzeAndTagVideo(
     madeForKids: videoDetails.madeForKids,
   };
 
-  await cacheRef.set(analysisDoc);
+  // Don't cache AI failures (e.g. out of credits) — the next run should retry
+  if (!aiResult.flags.includes("ai_analysis_error")) {
+    await cacheRef.set(analysisDoc);
+  }
 
   // ── 5. Write approved status to video doc in channel library ─
   await tagVideoInLibrary(db, channelId, videoId, aiResult.approved);

@@ -33,26 +33,14 @@ export async function fetchTranscript(
   try {
     const url = `${APP_CONFIG.SUPADATA_BASE_URL}/youtube/transcript`;
 
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      // Supadata accepts videoId as a query param
-      // Full URL: /youtube/transcript?videoId=xxx
-    });
-
-    // Rebuild with search params (fetch doesn't support params in headers)
-    const urlWithParams = `${url}?videoId=${encodeURIComponent(videoId)}`;
+    // text=true → content is a plain string (default is an array of timed segments)
+    const urlWithParams = `${url}?videoId=${encodeURIComponent(videoId)}&text=true`;
     const res2 = await fetch(urlWithParams, {
       method: "GET",
       headers: {
         "x-api-key": apiKey,
       },
     });
-
-    void res; // discard the first request
 
     if (res2.status === 404 || res2.status === 204) {
       // No transcript available — will fall back to metadata-only analysis
