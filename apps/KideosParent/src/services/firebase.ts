@@ -38,7 +38,11 @@ export const signIn = (email: string, password: string) =>
 export const signUp = (email: string, password: string) =>
   auth().createUserWithEmailAndPassword(email, password);
 
-export const signOut = () => auth().signOut();
+export async function signOut() {
+  await auth().signOut();
+  // Also clear the cached Google account so the next sign-in shows the account picker
+  await GoogleSignin.signOut();
+}
 
 export const onAuthStateChanged = auth().onAuthStateChanged.bind(auth());
 
@@ -170,7 +174,7 @@ export async function getValueFilters(
   const snap = await firestore()
     .doc(`users/${parentId}/children/${childId}/valueFilters/current`)
     .get();
-  return snap.exists ? (snap.data() as ValueFilters) : null;
+  return snap.exists() ? (snap.data() as ValueFilters) : null;
 }
 
 // ─── Whitelisted Channels ────────────────────────────────────
@@ -220,7 +224,7 @@ export function subscribeToNowPlaying(
   return firestore()
     .doc(`users/${parentId}/children/${childId}/currentSession/nowPlaying`)
     .onSnapshot((snap) => {
-      onUpdate(snap.exists ? (snap.data() as NowPlaying) : null);
+      onUpdate(snap.exists() ? (snap.data() as NowPlaying) : null);
     });
 }
 
@@ -249,7 +253,7 @@ export function subscribeToFlaggedContent(
     .orderBy("timestamp", "desc")
     .limit(20)
     .onSnapshot((snap) => {
-      const items = snap.docs.map((doc) => doc.data() as FlaggedContent);
+      const items = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as FlaggedContent);
       onUpdate(items);
     });
 }
@@ -329,7 +333,7 @@ export async function claimPairingCode(
   const ref = firestore().doc(`pairingCodes/${code.toUpperCase()}`);
   const snap = await ref.get();
 
-  if (!snap.exists) throw new Error("Invalid code. Please try again.");
+  if (!snap.exists()) throw new Error("Invalid code. Please try again.");
 
   const data = snap.data()!;
   if (data.claimed) throw new Error("This code has already been used.");
