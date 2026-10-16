@@ -98,10 +98,9 @@ export async function analyzeAndTagVideo(
   // ── 2. Cache miss — fetch metadata + transcript in parallel ─
   logger.info(`[analyzeAndTagVideo] Cache miss: ${videoId} — running pipeline`);
 
-  const [videoDetails, transcriptResult] = await Promise.all([
-    getVideoDetails(videoId, youtubeApiKey),
-    getTranscriptCached(db, videoId, supadataApiKey),
-  ]);
+  // Video details first (YouTube API, free quota) — only fetch the transcript
+  // (Supadata, paid) once we know the video exists and isn't auto-blocked.
+  const videoDetails = await getVideoDetails(videoId, youtubeApiKey);
 
   if (!videoDetails) {
     // Video unavailable — mark as not approved, don't crash the batch
@@ -116,6 +115,8 @@ export async function analyzeAndTagVideo(
     await tagVideoInLibrary(db, channelId, videoId, false);
     return { approved: false, confidence: 100, fromCache: false };
   }
+
+  const transcriptResult = await getTranscriptCached(db, videoId, supadataApiKey);
 
   // ── 3. Run AI analysis ──────────────────────────────────────
   const aiResult = await analyzeVideoContent(
@@ -166,7 +167,8 @@ export async function analyzeAndTagVideo(
 // Transcripts don't change and don't depend on filters, so each video's
 // transcript is fetched from Supadata (paid, per request) at most once.
 // Separate from videoAnalysisCache so clearing verdicts keeps transcripts.
-// Only successful fetches are stored — failures retry on the next run.
+// Stores transcripts AND confirmed "no transcript" results (Supadata still bills
+// those). Only transient failures (rate limit, network) are left uncached.
 
 async function getTranscriptCached(
   db: FirebaseFirestore.Firestore,
@@ -178,11 +180,16 @@ async function getTranscriptCached(
   if (snap.exists) {
     logger.info(`[transcriptCache] Hit: ${videoId}`);
     const d = snap.data()!;
+    if (d.available === false) {
+      return { available: false, transcript: null, language: null, wordCount: 0, definitive: true };
+    }
     return { available: true, transcript: d.transcript, language: d.language, wordCount: d.wordCount };
   }
 
   const result = await fetchTranscript(videoId, supadataApiKey);
-  if (result.available && result.transcript) {
+  if (result.definitive) {
+    await ref.set({ available: false, fetchedAt: Timestamp.now() });
+  } else if (result.available && result.transcript) {
     await ref.set({
       // Firestore docs cap at 1 MiB; the AI only reads the first 12k chars anyway
       transcript: result.transcript.slice(0, 200000),

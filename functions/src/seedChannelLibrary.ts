@@ -338,6 +338,14 @@ export const onChannelWhitelisted = onDocumentCreated(
   },
   async (event) => {
     const { parentId, childId, channelId } = event.params;
+    // Firestore triggers are at-least-once: claim this event ID so a duplicate
+    // delivery doesn't run the whole (paid) pipeline a second time.
+    try {
+      await getFirestore().doc(`triggerEvents/${event.id}`).create({ at: Timestamp.now() });
+    } catch {
+      logger.info(`[onChannelWhitelisted] Duplicate event ${event.id} — skipping`);
+      return;
+    }
     await seedAndAnalyzeInBackground(channelId, parentId, childId);
   }
 );
