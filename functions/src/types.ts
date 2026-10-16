@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // Kideos — Shared TypeScript types
-// Mirrors the Firestore data model from product_spec_v1.md
+// Mirrors the Firestore data model — see docs/architecture.md → Firestore data model
 // ─────────────────────────────────────────────────────────────
 
 import { Timestamp } from "firebase-admin/firestore";

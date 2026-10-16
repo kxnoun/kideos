@@ -12,6 +12,10 @@ KideosParent uses three auth methods, in priority order:
 
 The kid app (Kideos) uses **anonymous Firebase Auth** only — kids never sign in.
 
+> ⚠️ **Anonymous** must be enabled in Firebase Console → Authentication → Sign-in method. If it isn't,
+> pairing still works (it needs no auth) but every Firestore read afterwards is denied, the feed stays
+> empty, and logcat shows `auth/admin-restricted-operation`.
+
 ---
 
 ## Packages
@@ -44,14 +48,18 @@ After installing, run `pod install` in `apps/KideosParent/ios/`.
 
 Google Sign-In on Android requires your app's signing certificate fingerprint to be registered in the Firebase Console.
 
-**Get your debug fingerprint (for development):**
+> **Debug builds are signed with `apps/<App>/android/app/debug.keystore`** (checked into the repo, see
+> `signingConfigs.debug` in `android/app/build.gradle`) — not your personal `~/.android/debug.keystore`.
+> Its fingerprint (SHA-1 `5E:8F:16:…:F6:25`) is already registered for `com.kideos.parent`.
+
+**Get the debug fingerprint (for development):**
 ```powershell
-# Windows
-& "$env:JAVA_HOME\bin\keytool.exe" -list -v -keystore "$env:USERPROFILE\.android\debug.keystore" -alias androiddebugkey -storepass android -keypass android
+# Windows — from apps/KideosParent/android
+& "$env:JAVA_HOME\bin\keytool.exe" -list -v -keystore "app\debug.keystore" -alias androiddebugkey -storepass android -keypass android
 ```
 ```bash
 # macOS / Linux
-keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
+keytool -list -v -keystore app/debug.keystore -alias androiddebugkey -storepass android -keypass android
 ```
 
 Copy the **SHA-1** and **SHA-256** values.
@@ -139,5 +147,7 @@ Apple Sign-In is not available on Android. The `@invertase/react-native-apple-au
 
 - Auth state is managed in `apps/KideosParent/src/hooks/useAuth.ts` and synced to Zustand via `useStore`
 - All Firebase auth calls live in `apps/KideosParent/src/services/firebase.ts`
-- The `SignInScreen` / `SignUpScreen` pattern will be replaced with a single `AuthScreen` that shows Google → Apple → email options
+- Sign-in/sign-up is one screen, `screens/auth/AuthScreen.tsx`: Google → Apple (iOS) → email/password
+- `GoogleSignin.configure()` runs once at module load in `services/firebase.ts`
+- Sign Out signs out of Firebase **and** Google (`GoogleSignin.signOut()`), so the next Google sign-in shows the account picker
 - After any successful sign-in, `onAuthStateChanged` fires and `App.tsx` routes the user to onboarding or the main tab navigator automatically — no manual navigation needed in the auth screen

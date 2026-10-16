@@ -2,7 +2,7 @@
 // Kideos Kid App — FeedScreen
 //
 // The kid's entire world. Shows pre-approved videos in a grid.
-// Every video here has already been analyzed and approved by AI.
+// Every video here passed this child's questionnaire answers (or a parent approved it).
 // No blocked screens. No error states. Just videos.
 //
 // Data flow:
