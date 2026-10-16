@@ -19,7 +19,7 @@ export function subscribeToWhitelistedChannels(
         ...doc.data(),
       })) as WhitelistedChannel[];
       onUpdate(channels);
-    });
+    }, (err) => console.warn("[whitelistedChannels] listener error:", err));
 }
 
 // ── Get approved videos for a list of channels ────────────────
@@ -72,7 +72,7 @@ export function subscribeToApprovedVideos(
           });
         videosMap.set(channelId, videos);
         emitMerged();
-      });
+      }, (err) => console.warn(`[videos ${channelId}] listener error:`, err));
     unsubscribers.push(unsub);
   }
 
@@ -89,8 +89,8 @@ export function subscribeToPlaySignal(
   return firestore()
     .doc(`users/${parentId}/children/${childId}/currentSession/playSignal`)
     .onSnapshot((snap) => {
-      onSignal(snap.exists ? (snap.data() as PlaySignal) : null);
-    });
+      onSignal(snap.exists() ? (snap.data() as PlaySignal) : null);
+    }, (err) => console.warn("[playSignal] listener error:", err));
 }
 
 // ── Write now-playing state so parent can see "Now Watching" ──
