@@ -17,8 +17,6 @@ import {
   ScrollView,
   StatusBar,
   Alert,
-  Switch,
-  TextInput,
   Modal,
   ActivityIndicator,
 } from "react-native";
@@ -30,59 +28,11 @@ import {
   deleteChildData,
 } from "../../services/firebase";
 import { useStore } from "../../store/useStore";
+import FiltersForm from "../../components/FiltersForm";
+import { defaultPrefs, normalizePrefs } from "../../prefs";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../types";
-
-function SegmentControl<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.segment}>
-        {options.map((opt) => (
-          <TouchableOpacity
-            key={opt.value}
-            style={[
-              styles.segmentBtn,
-              value === opt.value && styles.segmentBtnActive,
-            ]}
-            onPress={() => onChange(opt.value)}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                value === opt.value && styles.segmentTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-const DEFAULT_FILTERS: ValueFilters = {
-  violence: "none",
-  language: "none",
-  sexualContent: "none",
-  religiousSensitivity: false,
-  religion: "",
-  political: "block_all",
-  customRules: "",
-  ageGroup: 8,
-};
 
 export default function SettingsScreen() {
   const user = useStore((s) => s.user);
@@ -91,12 +41,9 @@ export default function SettingsScreen() {
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [filtersModalChildId, setFiltersModalChildId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<ValueFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ValueFilters>(() => defaultPrefs(8));
   const [savingFilters, setSavingFilters] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(false);
-
-  const set = <K extends keyof ValueFilters>(key: K, value: ValueFilters[K]) =>
-    setFilters((f) => ({ ...f, [key]: value }));
 
   const openFilters = useCallback(
     async (childId: string) => {
@@ -105,13 +52,9 @@ export default function SettingsScreen() {
       setFiltersModalChildId(childId);
       try {
         const loaded = await getValueFilters(user.uid, childId);
-        if (loaded) {
-          setFilters(loaded);
-        } else {
-          // First time: use child's actual age as the ageGroup default
-          const child = children.find((c) => c.id === childId);
-          setFilters({ ...DEFAULT_FILTERS, ageGroup: child?.profile.age ?? 8 });
-        }
+        const child = children.find((c) => c.id === childId);
+        // Converts the old filter format too; first time → age defaults
+        setFilters(normalizePrefs(loaded ?? undefined, child?.profile.age ?? 8));
       } finally {
         setLoadingFilters(false);
       }
@@ -125,7 +68,7 @@ export default function SettingsScreen() {
     try {
       await saveValueFilters(user.uid, filtersModalChildId, filters);
       setFiltersModalChildId(null);
-      Alert.alert("Saved", "Filters updated. New videos will be analyzed with the new settings.");
+      Alert.alert("Saved", "Filters updated. Your child's feed will update with the new settings in a moment.");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to save.";
       Alert.alert("Error", msg);
@@ -266,70 +209,7 @@ export default function SettingsScreen() {
             </View>
           ) : (
             <ScrollView contentContainerStyle={styles.modalContent}>
-              <SegmentControl
-                label="Violence"
-                options={[
-                  { value: "none", label: "None" },
-                  { value: "mild", label: "Mild" },
-                  { value: "moderate", label: "Moderate" },
-                ]}
-                value={filters.violence}
-                onChange={(v) => set("violence", v)}
-              />
-              <SegmentControl
-                label="Language"
-                options={[
-                  { value: "none", label: "Clean only" },
-                  { value: "mild", label: "Mild" },
-                  { value: "anything", label: "Anything" },
-                ]}
-                value={filters.language}
-                onChange={(v) => set("language", v)}
-              />
-              <SegmentControl
-                label="Political content"
-                options={[
-                  { value: "block_all", label: "Block all" },
-                  { value: "allow_educational", label: "Educational" },
-                  { value: "allow_all", label: "Allow all" },
-                ]}
-                value={filters.political}
-                onChange={(v) => set("political", v)}
-              />
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Religious sensitivity</Text>
-                <View style={styles.switchRow}>
-                  <Text style={styles.switchLabel}>
-                    Flag content that contradicts our faith
-                  </Text>
-                  <Switch
-                    value={filters.religiousSensitivity}
-                    onValueChange={(v) => set("religiousSensitivity", v)}
-                    trackColor={{ true: "#6C63FF" }}
-                  />
-                </View>
-                {filters.religiousSensitivity && (
-                  <TextInput
-                    style={styles.input}
-                    value={filters.religion}
-                    onChangeText={(v) => set("religion", v)}
-                    placeholder="e.g. Christian, Jewish, Muslim..."
-                    placeholderTextColor="#aaa"
-                  />
-                )}
-              </View>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Custom rules</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={filters.customRules}
-                  onChangeText={(v) => set("customRules", v)}
-                  placeholder="e.g. No gaming content, no fast food ads..."
-                  placeholderTextColor="#aaa"
-                  multiline
-                  numberOfLines={3}
-                />
-              </View>
+              <FiltersForm value={filters} onChange={setFilters} />
             </ScrollView>
           )}
         </SafeAreaView>

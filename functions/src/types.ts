@@ -24,20 +24,9 @@ export interface ParentProfile {
 
 // ── Value Filters ──────────────────────────────────────────────
 
-export type ViolenceLevel = "none" | "mild" | "moderate";
-export type LanguageLevel = "none" | "mild" | "anything";
-export type PoliticalLevel = "block_all" | "allow_educational" | "allow_all";
-
-export interface ValueFilters {
-  violence: ViolenceLevel;
-  language: LanguageLevel;
-  sexualContent: "none"; // always none — not user-configurable
-  religiousSensitivity: boolean;
-  religion: string; // e.g. "Islamic values — avoid music, mixed gender content"
-  political: PoliticalLevel;
-  customRules: string; // free text injected into AI prompt
-  ageGroup: number; // child's age in years
-}
+// Defined with the questionnaire logic in prefs.ts
+export type { ValueFilters, Dim, DimRule, OverAction } from "./prefs";
+import type { Dim, Holiday, ValueFlag } from "./prefs";
 
 // ── Child Profile ──────────────────────────────────────────────
 
@@ -94,7 +83,9 @@ export interface FlaggedContent {
   reason: string;
   flags: string[];
   severity: Severity;
+  status: "hidden" | "pending_review"; // pending_review = hidden until the parent approves
   parentViewed: boolean;
+  resolution?: "approved" | "hidden"; // set by the parent app when reviewed
 }
 
 // ── AI Channel Suggestion ──────────────────────────────────────
@@ -114,24 +105,60 @@ export interface ChannelSuggestion {
   parentResponse: SuggestionResponse;
 }
 
-// ── Video Analysis Cache ───────────────────────────────────────
-// Path: videoAnalysisCache/{videoId}/results/{filterHash}
-// Shared across all users — any parent benefits from prior analysis.
+// ── Content Profile ────────────────────────────────────────────
+// Path: videoProfiles/{videoId}
+// What a video contains, on fixed scales. Filter-independent: generated once
+// per video by AI and shared by every family. Server-only (rules deny clients).
+// status "no_transcript" / "unavailable" are stored only when permanent.
 
-export interface VideoAnalysisResult {
-  approved: boolean;
-  confidence: number; // 0–100
-  flags: string[];
-  reason: string; // plain English for parent notification / digest
-  severity: Severity | null;
-  analyzedAt: Timestamp;
-  expiresAt: Timestamp; // 30-day TTL
-  // Pipeline metadata
-  hadTranscript: boolean;
-  metadataOnly: boolean;
-  videoTitle: string;
+export interface DimRating {
+  level: number | null; // 0–4 ladder (prefs.ts LEVEL_LABELS); null = can't tell from the transcript
+  evidence: string;
+}
+
+export type Framing = "neutral" | "condemned" | "glorified";
+
+export interface ContentProfile {
+  version: number;
+  status: "ok" | "no_transcript" | "unavailable";
+  title: string;
   channelName: string;
-  madeForKids: boolean | null;
+  purpose: "entertainment" | "educational" | "news" | "devotional" | "commercial";
+  dims: Record<Dim, DimRating>;
+  violenceRealism: "none" | "cartoon_fantasy" | "realistic_fiction" | "real_footage";
+  framing: { violence: Framing; substances: Framing; selfHarm: Framing; meanness: Framing };
+  religionTraditions: string[]; // islam | judaism | christianity | hinduism | sikhism | buddhism | other
+  religiousThemes: string[];
+  holidays: { name: Holiday; prominence: "theme" | "incidental" }[];
+  music: { level: "none" | "background" | "prominent" | "music_video" }; // from captions/lyrics only — best effort
+  lgbtq: "none" | "incidental" | "discussion" | "advocacy";
+  flags: Record<ValueFlag, boolean>;
+  topics: string[];
+  summary: string;
+  createdAt: Timestamp;
+}
+
+// Path: videoProfiles/{videoId}/valuesChecks/{rulesHash}
+// Cached religion / custom-rules check (AI on the summary, not the transcript).
+
+// ── Per-child verdict ──────────────────────────────────────────
+// Path: users/{parentId}/children/{childId}/videoVerdicts/{videoId}
+// Computed from the profile + that child's filters. Kid feed reads approved == true.
+
+export interface VideoVerdict {
+  videoId: string;
+  channelId: string;
+  approved: boolean; // what the kid feed reads: status === "approved", or the parent approved it
+  status: "approved" | "hidden" | "pending_review";
+  parentDecision?: "approved" | "hidden"; // set by the parent app; always wins
+  reason: string; // empty when approved
+  flags: string[];
+  severity: Severity | null;
+  title: string;
+  thumbnail: string;
+  publishedAt: Timestamp;
+  durationSeconds: number | null;
+  evaluatedAt: Timestamp;
 }
 
 // ── Channel Library Cache ──────────────────────────────────────
@@ -149,8 +176,8 @@ export interface ChannelMetadata {
 }
 
 // Path: channelLibraryCache/{channelId}/videos/{videoId}
-// `approved` and `analyzedAt` written by batch analysis for each parent.
-// Kid's feed query: approved: true, filtered to channels in whitelist.
+// Shared metadata only. (`approved` is legacy and no longer written —
+// approvals are per child, in videoVerdicts.)
 
 export interface CachedVideo {
   videoId: string;

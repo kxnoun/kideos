@@ -6,21 +6,10 @@ type Timestamp = FirebaseFirestoreTypes.Timestamp;
 export type SubscriptionTier = "free" | "premium";
 export type SeedingStatus = "pending" | "ready" | "error";
 export type SuggestionResponse = "approved" | "denied" | "pending";
-export type ViolenceLevel = "none" | "mild" | "moderate";
-export type LanguageLevel = "none" | "mild" | "anything";
-export type PoliticalLevel = "block_all" | "allow_educational" | "allow_all";
 export type ChildMode = "young" | "older";
 
-export interface ValueFilters {
-  violence: ViolenceLevel;
-  language: LanguageLevel;
-  sexualContent: "none";
-  religiousSensitivity: boolean;
-  religion: string;
-  political: PoliticalLevel;
-  customRules: string;
-  ageGroup: number;
-}
+// Questionnaire answers — defined with their logic in ../prefs.ts
+export type { ValueFilters, Dim, DimRule, OverAction } from "../prefs";
 
 export interface ChildProfile {
   name: string;
@@ -49,7 +38,9 @@ export interface FlaggedContent {
   reason: string;
   flags: string[];
   severity: "low" | "medium" | "high";
-  parentViewed: boolean;
+  status?: "hidden" | "pending_review"; // pending_review = waiting for your OK
+  parentViewed?: boolean;
+  resolution?: "approved" | "hidden";
 }
 
 export interface ChannelSuggestion {
@@ -84,8 +75,7 @@ export interface NowPlaying {
 // Navigation
 export type RootStackParamList = {
   // Auth
-  SignIn: undefined;
-  SignUp: undefined;
+  Auth: undefined;
   // Onboarding
   CreateChild: undefined;
   SetFilters: { childId: string; childAge: number };

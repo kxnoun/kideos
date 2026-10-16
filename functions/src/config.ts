@@ -21,7 +21,6 @@ export const APP_CONFIG = {
   AI_MODEL: "gpt-4o-mini" as const,
 
   // Cache TTLs
-  VIDEO_ANALYSIS_CACHE_DAYS: 30,
   WATCH_HISTORY_RETENTION_DAYS: 90, // COPPA compliance
 
   // Pipeline targets (milliseconds)

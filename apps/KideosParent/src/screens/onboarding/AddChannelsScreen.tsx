@@ -38,6 +38,7 @@ export default function AddChannelsScreen({ navigation, route }: Props) {
   const { childId } = route.params;
   const user = useStore((s) => s.user);
   const completeOnboarding = useStore((s) => s.completeOnboarding);
+  const inOnboarding = useStore((s) => s.inOnboarding);
   const [input, setInput] = useState("");
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<AddedChannel[]>([]);
@@ -61,9 +62,14 @@ export default function AddChannelsScreen({ navigation, route }: Props) {
   }, [input, user, childId]);
 
   const handleDone = useCallback(() => {
-    // Signal App.tsx that onboarding is complete → switches to Main stack
-    completeOnboarding();
-  }, [completeOnboarding]);
+    if (inOnboarding) {
+      // Signal App.tsx that onboarding is complete → switches to Main stack
+      completeOnboarding();
+    } else {
+      // Reached via Settings → "Add Another Child": already in Main stack
+      navigation.popToTop();
+    }
+  }, [inOnboarding, completeOnboarding, navigation]);
 
   return (
     <SafeAreaView style={styles.container}>

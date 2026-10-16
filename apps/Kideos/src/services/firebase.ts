@@ -19,13 +19,17 @@ export function subscribeToWhitelistedChannels(
         ...doc.data(),
       })) as WhitelistedChannel[];
       onUpdate(channels);
-    });
+    }, (err) => console.warn("[whitelistedChannels] listener error:", err));
 }
 
-// ── Get approved videos for a list of channels ────────────────
-// Returns a combined unsubscribe function for all listeners.
+// ── Get this child's approved videos ──────────────────────────
+// Verdicts are per child (users/{p}/children/{c}/videoVerdicts), computed by the
+// backend from each video's content profile + this child's filters.
+// Only videos from currently whitelisted channels are shown.
 
 export function subscribeToApprovedVideos(
+  parentId: string,
+  childId: string,
   channelIds: string[],
   onUpdate: (videos: ApprovedVideo[]) => void
 ): () => void {
@@ -33,50 +37,28 @@ export function subscribeToApprovedVideos(
     onUpdate([]);
     return () => {};
   }
+  const allowed = new Set(channelIds);
 
-  // One listener per channel — Firestore can't query across collections
-  const videosMap = new Map<string, ApprovedVideo[]>();
-  const unsubscribers: Array<() => void> = [];
-
-  const emitMerged = () => {
-    const allVideos: ApprovedVideo[] = [];
-    for (const vids of videosMap.values()) {
-      allVideos.push(...vids);
-    }
-    // Sort newest first
-    allVideos.sort(
-      (a, b) => b.publishedAt.toMillis() - a.publishedAt.toMillis()
-    );
-    onUpdate(allVideos);
-  };
-
-  for (const channelId of channelIds) {
-    const unsub = firestore()
-      .collection(`channelLibraryCache/${channelId}/videos`)
-      .where("approved", "==", true)
-      .orderBy("publishedAt", "desc")
-      .limit(30) // 30 videos per channel max in feed
-      .onSnapshot((snap) => {
-        const videos: ApprovedVideo[] = snap.docs
-          .map((doc) => {
-            const data = doc.data();
-            return {
-              videoId: doc.id,
-              channelId,
-              channelName: "", // enriched below
-              title: data.title,
-              thumbnail: data.thumbnail,
-              publishedAt: data.publishedAt,
-              durationSeconds: data.durationSeconds ?? null,
-            } as ApprovedVideo;
-          });
-        videosMap.set(channelId, videos);
-        emitMerged();
-      });
-    unsubscribers.push(unsub);
-  }
-
-  return () => unsubscribers.forEach((fn) => fn());
+  return firestore()
+    .collection(`users/${parentId}/children/${childId}/videoVerdicts`)
+    .where("approved", "==", true)
+    .orderBy("publishedAt", "desc")
+    .limit(500)
+    .onSnapshot((snap) => {
+      const videos: ApprovedVideo[] = snap.docs
+        .map((doc) => doc.data())
+        .filter((data) => allowed.has(data.channelId))
+        .map((data) => ({
+          videoId: data.videoId,
+          channelId: data.channelId,
+          channelName: "", // filled in by FeedScreen from whitelist names
+          title: data.title,
+          thumbnail: data.thumbnail,
+          publishedAt: data.publishedAt,
+          durationSeconds: data.durationSeconds ?? null,
+        }));
+      onUpdate(videos);
+    }, (err) => console.warn("[videoVerdicts] listener error:", err));
 }
 
 // ── Subscribe to parent's play signal (pause/stop/play) ───────
@@ -89,8 +71,8 @@ export function subscribeToPlaySignal(
   return firestore()
     .doc(`users/${parentId}/children/${childId}/currentSession/playSignal`)
     .onSnapshot((snap) => {
-      onSignal(snap.exists ? (snap.data() as PlaySignal) : null);
-    });
+      onSignal(snap.exists() ? (snap.data() as PlaySignal) : null);
+    }, (err) => console.warn("[playSignal] listener error:", err));
 }
 
 // ── Write now-playing state so parent can see "Now Watching" ──

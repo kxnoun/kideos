@@ -7,6 +7,8 @@
 
 import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import appleAuth from "@invertase/react-native-apple-authentication";
 import type {
   ValueFilters,
   ChildProfile,
@@ -16,6 +18,13 @@ import type {
   WeeklyDigest,
   NowPlaying,
 } from "../types";
+
+// TODO: paste your Web Client ID from Firebase Console →
+//       Project Settings → Your apps → Web app → OAuth 2.0 client_id
+const GOOGLE_WEB_CLIENT_ID = "530175410554-ma7s33gove3f3esp8l1o2ckdtuu9snrv.apps.googleusercontent.com";
+
+// Configure once at module load — must happen before any GoogleSignin call
+GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
 
 const REGION = "us-central1";
 const PROJECT_ID = "kideos-io";
@@ -29,9 +38,55 @@ export const signIn = (email: string, password: string) =>
 export const signUp = (email: string, password: string) =>
   auth().createUserWithEmailAndPassword(email, password);
 
-export const signOut = () => auth().signOut();
+export async function signOut() {
+  await auth().signOut();
+  // Also clear the cached Google account so the next sign-in shows the account picker
+  await GoogleSignin.signOut();
+}
 
 export const onAuthStateChanged = auth().onAuthStateChanged.bind(auth());
+
+export async function createUserProfile(uid: string, email: string): Promise<void> {
+  await firestore().doc(`users/${uid}`).set(
+    { email, createdAt: firestore.FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+}
+
+export async function signInWithGoogle() {
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  const response = await GoogleSignin.signIn();
+  // v13+ returns { data: { idToken } }; v10-12 returns { idToken } directly
+  const idToken =
+    (response as { data?: { idToken?: string } }).data?.idToken ??
+    (response as { idToken?: string }).idToken;
+  if (!idToken) throw new Error("Google Sign-In failed — no ID token returned.");
+  const credential = auth.GoogleAuthProvider.credential(idToken);
+  const userCred = await auth().signInWithCredential(credential);
+  if (userCred.additionalUserInfo?.isNewUser) {
+    await createUserProfile(userCred.user.uid, userCred.user.email ?? "");
+  }
+  return userCred;
+}
+
+export async function signInWithApple() {
+  const response = await appleAuth.performRequest({
+    requestedOperation: appleAuth.Operation.LOGIN,
+    requestedScopes: [appleAuth.Scope.EMAIL, appleAuth.Scope.FULL_NAME],
+  });
+  if (!response.identityToken) {
+    throw new Error("Apple Sign-In failed — no identity token returned.");
+  }
+  const credential = auth.AppleAuthProvider.credential(
+    response.identityToken,
+    response.nonce
+  );
+  const userCred = await auth().signInWithCredential(credential);
+  if (userCred.additionalUserInfo?.isNewUser) {
+    await createUserProfile(userCred.user.uid, userCred.user.email ?? "");
+  }
+  return userCred;
+}
 
 // ─── Helper: call a Gen-2 callable Cloud Function ────────────
 
@@ -84,13 +139,20 @@ export function subscribeToChildren(
 ): () => void {
   return firestore()
     .collection(`users/${parentId}/children`)
-    .onSnapshot((snap) => {
-      const children = snap.docs.map((doc) => ({
-        id: doc.id,
-        profile: doc.data() as ChildProfile,
-      }));
-      onUpdate(children);
-    });
+    .onSnapshot(
+      (snap) => {
+        const children = snap.docs.map((doc) => ({
+          id: doc.id,
+          profile: doc.data() as ChildProfile,
+        }));
+        onUpdate(children);
+      },
+      (_err) => {
+        // Unblock the loading state so the app doesn't hang if Firestore
+        // is temporarily unavailable or rules are not yet deployed.
+        onUpdate([]);
+      }
+    );
 }
 
 // ─── Value Filters ───────────────────────────────────────────
@@ -100,19 +162,21 @@ export async function saveValueFilters(
   childId: string,
   filters: ValueFilters
 ): Promise<void> {
+  // Full overwrite: drops fields from the old (v1) filter format
   await firestore()
     .doc(`users/${parentId}/children/${childId}/valueFilters/current`)
-    .set(filters, { merge: true });
+    .set(filters);
 }
 
 export async function getValueFilters(
   parentId: string,
   childId: string
-): Promise<ValueFilters | null> {
+): Promise<Record<string, unknown> | null> {
   const snap = await firestore()
     .doc(`users/${parentId}/children/${childId}/valueFilters/current`)
     .get();
-  return snap.exists ? (snap.data() as ValueFilters) : null;
+  // Raw doc (may be the old v1 format) — callers pass it through normalizePrefs()
+  return snap.exists() ? (snap.data() ?? null) : null;
 }
 
 // ─── Whitelisted Channels ────────────────────────────────────
@@ -162,7 +226,7 @@ export function subscribeToNowPlaying(
   return firestore()
     .doc(`users/${parentId}/children/${childId}/currentSession/nowPlaying`)
     .onSnapshot((snap) => {
-      onUpdate(snap.exists ? (snap.data() as NowPlaying) : null);
+      onUpdate(snap.exists() ? (snap.data() as NowPlaying) : null);
     });
 }
 
@@ -191,9 +255,44 @@ export function subscribeToFlaggedContent(
     .orderBy("timestamp", "desc")
     .limit(20)
     .onSnapshot((snap) => {
-      const items = snap.docs.map((doc) => doc.data() as FlaggedContent);
+      const items = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as FlaggedContent);
       onUpdate(items);
     });
+}
+
+// Free-text "anything else?" → concrete questionnaire changes (parent confirms before applying)
+export interface RuleChange {
+  key: string;
+  value: string | number;
+  explanation: string;
+}
+export async function parseCustomRules(
+  parentId: string,
+  text: string
+): Promise<{ changes: RuleChange[]; remaining: string }> {
+  return callFunction("parseCustomRules", { parentId, text });
+}
+
+// Parent's decision on a video in the review queue. Updates the child's verdict
+// (approved = what the kid feed reads) and resolves the queue entry together.
+export async function resolveReview(
+  parentId: string,
+  childId: string,
+  flaggedId: string,
+  videoId: string,
+  decision: "approved" | "hidden"
+): Promise<void> {
+  const base = `users/${parentId}/children/${childId}`;
+  const batch = firestore().batch();
+  batch.update(firestore().doc(`${base}/videoVerdicts/${videoId}`), {
+    parentDecision: decision,
+    approved: decision === "approved",
+  });
+  batch.update(firestore().doc(`${base}/flaggedContent/${flaggedId}`), {
+    parentViewed: true,
+    resolution: decision,
+  });
+  await batch.commit();
 }
 
 export async function markFlaggedViewed(
@@ -271,7 +370,7 @@ export async function claimPairingCode(
   const ref = firestore().doc(`pairingCodes/${code.toUpperCase()}`);
   const snap = await ref.get();
 
-  if (!snap.exists) throw new Error("Invalid code. Please try again.");
+  if (!snap.exists()) throw new Error("Invalid code. Please try again.");
 
   const data = snap.data()!;
   if (data.claimed) throw new Error("This code has already been used.");

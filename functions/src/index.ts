@@ -13,6 +13,8 @@ initializeApp();
 // refreshChannelLibraries: nightly — detects new uploads, analyzes only new videos
 export {
   resolveAndAddChannel,
+  onChannelWhitelisted,
+  onFiltersChanged,
   seedChannelLibrary,
   refreshChannelLibraries,
 } from "./seedChannelLibrary";
@@ -22,6 +24,8 @@ export {
 //   → GPT-4o-mini handles → channels.list verify (no search.list)
 // weeklyChannelSuggestions: every Monday, generates for all Premium families
 export { suggestChannels, weeklyChannelSuggestions } from "./suggestChannels";
+
+export { parseCustomRules } from "./customRules";
 
 // ── Scheduled Jobs + Triggers ──────────────────────────────────
 // cleanupExpiredData: nightly — COPPA 90-day watch history + 30-day AI cache

@@ -7,12 +7,14 @@
 //   3. batchAnalyzeChannel (internal) — analyzes every video against parent's filters
 //      Concurrent batches of 5 — respects API rate limits
 //
-// The kid's feed query is: channelLibraryCache/{channelId}/videos where approved == true
+// Each video gets a shared content profile; each child gets their own verdict in
+// users/{p}/children/{c}/videoVerdicts (the kid feed reads approved == true there).
 // Children never trigger a YouTube API call. Everything is pre-computed.
 // ─────────────────────────────────────────────────────────────
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/v2";
 import { getFirestore, Timestamp, WriteBatch } from "firebase-admin/firestore";
 import { YOUTUBE_API_KEY, SUPADATA_API_KEY, OPENAI_API_KEY } from "./config";
@@ -21,6 +23,7 @@ import { getChannelDetails, getChannelVideos, verifyChannelHandles } from "./you
 import {
   analyzeAndTagVideo,
   loadValueFiltersForChild,
+  reapplyFiltersForChild,
   type AnalyzeAndTagParams,
 } from "./analyzeVideo";
 import type {
@@ -100,7 +103,7 @@ async function batchAnalyzeChannel({
   const db = getFirestore();
 
   // Load value filters and child info once — not per video
-  const { filters, filterHash } = await loadValueFiltersForChild(parentId, childId);
+  const filters = await loadValueFiltersForChild(parentId, childId);
 
   const childProfileSnap = await db
     .doc(`users/${parentId}/children/${childId}/profile/current`)
@@ -117,7 +120,6 @@ async function batchAnalyzeChannel({
     childName,
     parentFcmToken,
     filters,
-    filterHash,
     youtubeApiKey,
     supadataApiKey,
     openAiApiKey,
@@ -305,14 +307,8 @@ export const resolveAndAddChannel = onCall(
     };
     await whitelistRef.set(whitelistEntry);
 
-    // Kick off seeding + batch analysis in the background
-    // Don't await — return to parent app immediately, feed populates as analysis completes
-    seedAndAnalyzeInBackground(details.channelId, parentId, childId).catch((err) =>
-      logger.error(
-        `[resolveAndAddChannel] Background seed failed for ${details.channelId}:`,
-        err
-      )
-    );
+    // Seeding + analysis runs in onChannelWhitelisted (triggered by this create),
+    // not here — work left running after an onCall returns gets throttled CPU.
 
     logger.info(
       `[resolveAndAddChannel] Added "${details.name}" (${details.channelId}) for parent ${parentId}`
@@ -330,7 +326,58 @@ export const resolveAndAddChannel = onCall(
   }
 );
 
-// ── Internal: seed + analyze (used by resolveAndAddChannel) ───
+// ── Firestore trigger: seed + analyze when a channel is whitelisted ─
+// Runs as its own invocation so it gets full CPU and a 9-minute budget.
+
+export const onChannelWhitelisted = onDocumentCreated(
+  {
+    document: "users/{parentId}/children/{childId}/whitelistedChannels/{channelId}",
+    region: APP_CONFIG.FUNCTIONS_REGION,
+    secrets: [YOUTUBE_API_KEY, SUPADATA_API_KEY, OPENAI_API_KEY],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (event) => {
+    const { parentId, childId, channelId } = event.params;
+    // Firestore triggers are at-least-once: claim this event ID so a duplicate
+    // delivery doesn't run the whole (paid) pipeline a second time.
+    try {
+      await getFirestore().doc(`triggerEvents/${event.id}`).create({ at: Timestamp.now() });
+    } catch {
+      logger.info(`[onChannelWhitelisted] Duplicate event ${event.id} — skipping`);
+      return;
+    }
+    await seedAndAnalyzeInBackground(channelId, parentId, childId);
+  }
+);
+
+// ── Firestore trigger: re-apply a child's filters when they change ─
+// Profiles are reused, so this is fast and makes no Supadata / profile AI calls.
+
+export const onFiltersChanged = onDocumentWritten(
+  {
+    document: "users/{parentId}/children/{childId}/valueFilters/current",
+    region: APP_CONFIG.FUNCTIONS_REGION,
+    secrets: [OPENAI_API_KEY],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (event) => {
+    const { parentId, childId } = event.params;
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!after || JSON.stringify(before) === JSON.stringify(after)) return;
+    try {
+      await getFirestore().doc(`triggerEvents/${event.id}`).create({ at: Timestamp.now() });
+    } catch {
+      logger.info(`[onFiltersChanged] Duplicate event ${event.id} — skipping`);
+      return;
+    }
+    await reapplyFiltersForChild(parentId, childId, OPENAI_API_KEY.value());
+  }
+);
+
+// ── Internal: seed + analyze (used by onChannelWhitelisted) ───
 
 async function seedAndAnalyzeInBackground(
   channelId: string,

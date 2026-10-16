@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "videoVerdicts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "approved", "order": "ASCENDING" },
+        { "fieldPath": "publishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "watchHistory",
       "queryScope": "COLLECTION",
       "fields": [

@@ -24,12 +24,21 @@ export default function App() {
 
   // Sign in anonymously so Firestore security rules allow reads/writes.
   // The anonymous UID is stable across restarts on the same device.
+  // Wait for auth before rendering screens — their Firestore listeners
+  // are denied (and never retry) if they start before sign-in finishes.
+  const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    if (!auth().currentUser) {
-      auth().signInAnonymously().catch(() => {
-        // Silent fail — app still works without auth for public paths
+    return auth().onAuthStateChanged((user) => {
+      if (user) {
+        setAuthed(true);
+        return;
+      }
+      setAuthed(false);
+      auth().signInAnonymously().catch((err) => {
+        // Without auth, every Firestore read except pairing is denied
+        console.warn("[auth] anonymous sign-in failed:", err);
       });
-    }
+    });
   }, []);
 
   const handlePaired = useCallback(
@@ -51,7 +60,7 @@ export default function App() {
     setCurrentVideo(null);
   }, []);
 
-  if (loading) {
+  if (loading || !authed) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#6C63FF" />

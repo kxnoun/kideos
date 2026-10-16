@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 // Kideos for Parents — SetFiltersScreen
 //
-// Onboarding step 2. Configure content filters for the child.
-// These filters drive the AI video analysis.
+// Onboarding step 2. The per-child questionnaire (components/FiltersForm).
+// Answers are applied to every video's content profile.
 // ─────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback } from "react";
@@ -10,18 +10,18 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Switch,
   StyleSheet,
   SafeAreaView,
   ScrollView,
   ActivityIndicator,
   Alert,
-  TextInput,
 } from "react-native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList, ValueFilters } from "../../types";
 import { saveValueFilters } from "../../services/firebase";
+import FiltersForm from "../../components/FiltersForm";
+import { defaultPrefs } from "../../prefs";
 import { useStore } from "../../store/useStore";
 
 interface Props {
@@ -29,66 +29,11 @@ interface Props {
   route: RouteProp<RootStackParamList, "SetFilters">;
 }
 
-function defaultFilters(ageGroup: number): ValueFilters {
-  return {
-    violence: "none",
-    language: "none",
-    sexualContent: "none",
-    religiousSensitivity: false,
-    religion: "",
-    political: "block_all",
-    customRules: "",
-    ageGroup,
-  };
-}
-
-function SegmentControl<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.segment}>
-        {options.map((opt) => (
-          <TouchableOpacity
-            key={opt.value}
-            style={[
-              styles.segmentBtn,
-              value === opt.value && styles.segmentBtnActive,
-            ]}
-            onPress={() => onChange(opt.value)}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                value === opt.value && styles.segmentTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 export default function SetFiltersScreen({ navigation, route }: Props) {
   const { childId, childAge } = route.params;
   const user = useStore((s) => s.user);
-  const [filters, setFilters] = useState<ValueFilters>(() => defaultFilters(childAge));
+  const [filters, setFilters] = useState<ValueFilters>(() => defaultPrefs(childAge));
   const [loading, setLoading] = useState(false);
-
-  const set = <K extends keyof ValueFilters>(key: K, value: ValueFilters[K]) =>
-    setFilters((f) => ({ ...f, [key]: value }));
 
   const handleSave = useCallback(async () => {
     if (!user) return;
@@ -110,83 +55,10 @@ export default function SetFiltersScreen({ navigation, route }: Props) {
         <Text style={styles.step}>Step 2 of 3</Text>
         <Text style={styles.heading}>Content Filters</Text>
         <Text style={styles.sub}>
-          Tell our AI what's acceptable. These settings drive every video analysis.
+          Tell us what's OK for your child. Every video is checked against these answers, and you can change them anytime.
         </Text>
 
-        <SegmentControl
-          label="Violence"
-          options={[
-            { value: "none", label: "None" },
-            { value: "mild", label: "Mild" },
-            { value: "moderate", label: "Moderate" },
-          ]}
-          value={filters.violence}
-          onChange={(v) => set("violence", v)}
-        />
-
-        <SegmentControl
-          label="Language"
-          options={[
-            { value: "none", label: "Clean only" },
-            { value: "mild", label: "Mild" },
-            { value: "anything", label: "Anything" },
-          ]}
-          value={filters.language}
-          onChange={(v) => set("language", v)}
-        />
-
-        <SegmentControl
-          label="Political content"
-          options={[
-            { value: "block_all", label: "Block all" },
-            { value: "allow_educational", label: "Educational" },
-            { value: "allow_all", label: "Allow all" },
-          ]}
-          value={filters.political}
-          onChange={(v) => set("political", v)}
-        />
-
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Religious sensitivity</Text>
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>
-              Flag content that contradicts our faith
-            </Text>
-            <Switch
-              value={filters.religiousSensitivity}
-              onValueChange={(v) => set("religiousSensitivity", v)}
-              trackColor={{ true: "#6C63FF" }}
-            />
-          </View>
-          {filters.religiousSensitivity && (
-            <TextInput
-              style={styles.input}
-              value={filters.religion}
-              onChangeText={(v) => set("religion", v)}
-              placeholder="e.g. Christian, Jewish, Muslim..."
-              placeholderTextColor="#aaa"
-            />
-          )}
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Custom rules (optional)</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={filters.customRules}
-            onChangeText={(v) => set("customRules", v)}
-            placeholder="e.g. No gaming content, no fast food ads..."
-            placeholderTextColor="#aaa"
-            multiline
-            numberOfLines={3}
-          />
-        </View>
-
-        <View style={styles.note}>
-          <Text style={styles.noteText}>
-            Sexual content is always blocked. This cannot be changed.
-          </Text>
-        </View>
+        <FiltersForm value={filters} onChange={setFilters} />
 
         <TouchableOpacity
           style={[styles.btn, loading && styles.btnDisabled]}

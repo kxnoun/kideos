@@ -340,6 +340,7 @@ export const deleteChildData = onCall(
       "flaggedContent",
       "suggestions",
       "whitelistedChannels",
+      "videoVerdicts",
       "digests",
       "currentSession",
       "valueFilters",

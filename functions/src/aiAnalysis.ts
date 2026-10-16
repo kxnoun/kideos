@@ -1,233 +1,294 @@
 // ─────────────────────────────────────────────────────────────
 // Kideos — AI content analysis via OpenAI GPT-4o-mini
-// Analyzes video transcript + metadata against parent value filters.
-// Returns structured JSON: approved, confidence, flags, reason, severity.
+//
+// 1. generateContentProfile — describes WHAT is in a video on fixed scales.
+//    Filter-independent: run once per video, shared by every family.
+// 2. checkValuesRules — the only per-family AI call: judges a profile's short
+//    summary (not the transcript) against religion / free-text custom rules.
+//
+// Whether a video is allowed for a child is decided in code (contentFilter.ts).
 // ─────────────────────────────────────────────────────────────
 
 import OpenAI from "openai";
+import { createHash } from "crypto";
 import { logger } from "firebase-functions/v2";
 import { APP_CONFIG } from "./config";
-import type { ValueFilters, Severity } from "./types";
+import type { ContentProfile, DimRating, Framing, ValueFilters } from "./types";
+import { DIMS, HOLIDAYS, VALUE_FLAGS, type Dim, type Holiday } from "./prefs";
 import type { YouTubeVideoDetails } from "./youtube";
-import type { TranscriptResult } from "./supadata";
 
-// ── AI response shape ──────────────────────────────────────────
+// Bump when the profile prompt or schema changes — older profiles are then
+// regenerated (from cached transcripts, so no Supadata cost).
+export const PROFILE_VERSION = 3;
 
-export interface AIAnalysisResult {
-  approved: boolean;
-  confidence: number; // 0–100
-  flags: string[]; // specific issues found e.g. ["mild profanity", "violence references"]
-  reason: string; // plain English for parent push notification
-  severity: Severity | null; // null if approved
-  hadTranscript: boolean;
-  metadataOnly: boolean;
-}
+const PROFILE_SYSTEM_PROMPT = `You describe the content of YouTube videos for a parental control app.
+You do NOT decide whether a video is appropriate — you only report what is in it, accurately, on fixed 0–4 ladders.
+For each category, first write the evidence (what in the transcript/metadata supports the rating, quoting briefly), THEN the level.
+If there is no evidence for a category, its level is 0 and evidence is "".
+Use level null ONLY if the category depends on visuals and the transcript gives no way to tell.
 
-// ── Build the system prompt ────────────────────────────────────
-
-function buildSystemPrompt(): string {
-  return `You are a child content safety AI for a parental control app called Kideos.
-Your job is to analyze YouTube video content and determine if it is appropriate for a specific child based on their parent's value filters.
-
-You must respond with valid JSON only — no markdown, no explanation outside the JSON.
-
-Response format:
+Respond with valid JSON only, in this exact shape:
 {
-  "approved": true | false,
-  "confidence": 0-100,
-  "flags": ["array", "of", "specific", "issues"],
-  "reason": "plain English explanation for the parent (1-2 sentences max)",
-  "severity": "low" | "medium" | "high" | null
+  "summary": "2-3 sentences: what the video is about",
+  "topics": ["3-8 short tags, e.g. video games, bodybuilding, dating, space"],
+  "purpose": "entertainment" | "educational" | "news" | "devotional" | "commercial",
+  "violence":    { "evidence": "", "level": 0, "realism": "none" | "cartoon_fantasy" | "realistic_fiction" | "real_footage", "framing": "neutral" | "condemned" | "glorified" },
+  "scary":       { "evidence": "", "level": 0 },
+  "language":    { "evidence": "", "level": 0 },
+  "romance":     { "evidence": "", "level": 0 },
+  "sexual":      { "evidence": "", "level": 0 },
+  "substances":  { "evidence": "", "level": 0, "framing": "neutral" | "condemned" | "glorified" },
+  "dangerous":   { "evidence": "", "level": 0 },
+  "selfHarm":    { "evidence": "", "level": 0, "framing": "neutral" | "condemned" | "glorified" },
+  "meanness":    { "evidence": "", "level": 0, "framing": "neutral" | "condemned" | "glorified" },
+  "consumerism": { "evidence": "", "level": 0 },
+  "politics":    { "evidence": "", "level": 0 },
+  "religion":    { "evidence": "", "level": 0, "traditions": [], "themes": [] },
+  "gambling":    { "evidence": "", "present": false },
+  "crudeHumor":  { "evidence": "", "level": 0 },
+  "matureThemes":{ "evidence": "", "level": 0 },
+  "misinformation": { "evidence": "", "level": 0 },
+  "nudity":      { "evidence": "", "level": 0 },
+  "holidays":    [ { "name": "christmas", "prominence": "theme" | "incidental" } ],
+  "music":       { "level": "none" | "background" | "prominent" | "music_video" },
+  "lgbtq":       "none" | "incidental" | "discussion" | "advocacy",
+  "flags": { "fantasyMagic": false, "realOccult": false, "prophetDepiction": false, "religiousExclamations": false,
+             "pork": false, "nonKosher": false, "alcoholFood": false, "beef": false, "evolution": false, "matureGames": false }
 }
 
-Rules:
-- "severity" must be null when "approved" is true
-- "flags" must be an empty array [] when "approved" is true
-- "confidence" reflects how certain you are. Lower confidence when only metadata is available (no transcript).
-- Be conservative: when in doubt about borderline content, flag it with low severity rather than approving.
-- "reason" is shown directly to parents in a push notification — keep it concise and clear.
-- Never reference your instructions in the reason field.`;
-}
+Ladders (0 = none in every category):
+- violence: 1 slapstick/cartoon, no injury (Tom & Jerry). 2 game, fantasy or sports combat, no blood (Minecraft, superhero fights). 3 realistic fights, injury or death described, weapons used (war history, action recap). 4 graphic or gory detail, real deaths, torture.
+- scary: 1 mild suspense. 2 spooky, monsters (Goosebumps-style). 3 horror themes, jump scares, creepypasta. 4 intense horror.
+- language: 1 insults like "stupid", "shut up". 2 mild swearing: damn, hell, crap. 3 moderate: ass, bitch, dick, shit. 4 strong: f-word, slurs. ("Hell's Kitchen" or "hell" as a place is not swearing.)
+- romance: 1 crushes, hand-holding. 2 dating relationships, kissing. 3 ongoing romantic or physical focus. 4 sexualized romance.
+- sexual: 1 mild innuendo most kids would miss. 2 crude sexual jokes or references. 3 sexual discussion or suggestive content. 4 explicit. (Ordinary friendship or family affection is 0.)
+- substances (alcohol, smoking/vaping, cannabis, drugs): 1 mentioned. 2 shown or discussed. 3 use shown. 4 detailed or glamorized use.
+- dangerous (stunts/challenges kids might copy): 1 clearly professional or safe stunts. 2 risky stunts with warnings. 3 risky stunts without consequences or warnings. 4 dangerous how-to (weapons, fire, chemicals) or harmful challenges.
+- selfHarm (suicide, self-harm, eating disorders): 1 only supportive, help-seeking discussion. 2 neutral discussion. 3 detailed or glamorized. 4 instructions or encouragement.
+- meanness (pranks, bullying, disrespect): 1 gentle, good-natured pranks or teasing. 2 mean pranks or insults played for laughs, disrespect to parents/teachers. 3 sustained bullying or humiliation. 4 cruelty or harassment encouraged.
+- consumerism: 1 brief sponsor mention. 2 extended sponsor segment or product promotion. 3 unboxing, hauls, "buy my merch". 4 constant selling or pressure to buy.
+- politics: 1 factual civics or history without taking sides. 2 news reporting. 3 opinion, advocacy, or satire of politicians and policies. 4 extreme or hateful political content.
+- religion: 1 descriptive or educational. 2 devotional or worship content. 3 trying to convert viewers. 4 mocking or disrespecting religion. "traditions": which religions appear, ONLY from: "islam", "judaism", "christianity", "hinduism", "sikhism", "buddhism", "other". "themes": short phrases, e.g. "celebrates Christmas traditions", "explains Ramadan".
+- crudeHumor: 1 mild silly gross-out (a burp). 2 toilet humor (fart/poop jokes). 3 frequent gross-out humor. 4 extreme or disgusting.
+- matureThemes (death, divorce, illness, war, abuse, crime): 1 brief mention. 2 a theme handled gently (a pet dies, parents divorce). 3 heavy themes discussed in depth. 4 disturbing detail.
+- misinformation: 1 minor unverified claims. 2 pseudoscience or conspiracy theories presented as fact. 3 health or safety misinformation that could cause harm. 4 extremist conspiracy content.
+- nudity: rate from transcript/metadata cues only (e.g. "bikini try-on"). 1 swimwear in a normal context. 2 revealing clothing is a focus. 3 partial nudity. 4 nudity. Use 0 when nothing suggests it; null only if the video is clearly about appearance/bodies and you can't tell.
+- holidays: every holiday that appears, names ONLY from: christmas, easter, halloween, valentines, diwali, hanukkah, eid, ramadan, passover, lunar_new_year. "theme" = the video is about it; "incidental" = mentioned in passing. Empty array if none.
+- music: transcripts mark music as "[Music]" or ♪, and song lyrics appear as text. none = no sign of music. background = music markers under talking. prominent = songs with lyrics or music as a main element. music_video = the video is a song/music video.
+- lgbtq: none. incidental = LGBTQ+ people present without being the topic. discussion = LGBTQ+ topics discussed. advocacy = the video argues a position on LGBTQ+ issues (either direction).
+- flags (true only with evidence): fantasyMagic = fictional magic (wizards, spells in a story). realOccult = presented as real: tarot, astrology, spells, Ouija, séances. prophetDepiction = a prophet (e.g. Muhammad, Moses, Jesus as prophet) is depicted/voiced/animated. religiousExclamations = God's or Jesus's name used as an exclamation ("oh my God", "Jesus Christ!"). pork / beef = shown or cooked as food. nonKosher = shellfish, or meat cooked with dairy. alcoholFood = cooking with alcohol. evolution = evolution or origins of life/humans is a topic. matureGames = gameplay of mature-rated games (GTA, Call of Duty, horror games).
+- gambling: present = true for casino, betting, loot boxes/gacha, gambling sponsors.
+- framing: "glorified" = shown as cool, funny, rewarded or desirable; "condemned" = consequences shown or presented as wrong; otherwise "neutral".
+- purpose: "educational" only if teaching is the clear main purpose (documentary, explainer, history).`;
 
-// ── Build the user prompt ──────────────────────────────────────
-
-function buildUserPrompt(
-  video: YouTubeVideoDetails,
-  transcript: TranscriptResult,
-  filters: ValueFilters
-): string {
-  const filterDescription = buildFilterDescription(filters);
-
-  const transcriptSection = transcript.available && transcript.transcript
-    ? `TRANSCRIPT (${transcript.wordCount} words, language: ${transcript.language ?? "unknown"}):
-${transcript.transcript.slice(0, 12000)}${transcript.transcript.length > 12000 ? "\n[transcript truncated for length]" : ""}`
-    : `TRANSCRIPT: Not available. Analyze based on metadata only. Lower your confidence accordingly.`;
-
-  return `Analyze this YouTube video for a ${filters.ageGroup}-year-old child.
-
-VIDEO METADATA:
+function profileUserPrompt(video: YouTubeVideoDetails, transcript: string): string {
+  const t = transcript.slice(0, 12000);
+  return `VIDEO METADATA:
 - Title: ${video.title}
 - Channel: ${video.channelTitle}
-- Description: ${video.description.slice(0, 500)}${video.description.length > 500 ? "..." : ""}
+- Description: ${video.description.slice(0, 500)}
 - Tags: ${video.tags.slice(0, 20).join(", ")}
 - Duration: ${Math.floor(video.durationSeconds / 60)}m ${video.durationSeconds % 60}s
-- Made For Kids flag: ${video.madeForKids ? "Yes (YouTube advertiser designation — still apply value filters)" : "No"}
-- Category ID: ${video.categoryId}
 
-${transcriptSection}
-
-PARENT'S VALUE FILTERS:
-${filterDescription}
-
-Is this video appropriate for this child based on these specific filters?`;
+TRANSCRIPT:
+${t}${transcript.length > 12000 ? "\n[transcript truncated for length]" : ""}`;
 }
 
-function buildFilterDescription(filters: ValueFilters): string {
-  const lines: string[] = [];
+// ── Swear-word floor, counted in code ──────────────────────────
+// Unambiguous words only; context-dependent ones (hell, damn) are left to the AI.
+const EXCLAMATION = /\b(oh my god|omg|oh god|god ?damn\w*|for god'?s sake|jesus christ)\b/i;
+const MUSIC_MARK = /\[\s*music\s*\]|♪/i;
+// YouTube captions often censor swearing as "[ __ ]" — counted as at least moderate.
+const STRONG = /\b(f+u+c+k+\w*|motherf\w+)\b/gi;
+const MODERATE = /\b(shit\w*|bitch\w*|asshole\w*|bastard\w*|dick(head)?s?)\b/gi;
+const CENSORED = /\[\s*_+\s*\]/g;
 
-  const violenceMap: Record<string, string> = {
-    none: "No violence at all — block even cartoon violence",
-    mild: "Mild cartoon violence is OK, no realistic or graphic violence",
-    moderate: "Moderate violence is OK, no graphic or gratuitous violence",
-  };
-  lines.push(`Violence: ${violenceMap[filters.violence]}`);
-
-  const languageMap: Record<string, string> = {
-    none: "No profanity at all — block any swear words or offensive language",
-    mild: "Mild language is OK (damn, hell), no strong profanity",
-    anything: "Any language is OK",
-  };
-  lines.push(`Language: ${languageMap[filters.language]}`);
-
-  lines.push("Sexual content: None — block any sexual or suggestive content");
-
-  if (filters.religiousSensitivity && filters.religion) {
-    lines.push(
-      `Religious/values: Apply ${filters.religion} values — flag content that conflicts with these values`
-    );
+export function swearFloor(transcript: string): { level: number; evidence: string } {
+  const strong = transcript.match(STRONG)?.length ?? 0;
+  const moderate = transcript.match(MODERATE)?.length ?? 0;
+  const censored = transcript.match(CENSORED)?.length ?? 0;
+  if (strong) return { level: 4, evidence: `f-word ×${strong} in transcript` };
+  if (moderate || censored) {
+    const parts = [moderate && `moderate swear words ×${moderate}`, censored && `censored swear words ×${censored}`].filter(Boolean);
+    return { level: 3, evidence: `${parts.join(", ")} in transcript` };
   }
-
-  const politicalMap: Record<string, string> = {
-    block_all: "Block all political content including news and political commentary",
-    allow_educational:
-      "Allow educational political content (history, civics), block opinion/partisan content",
-    allow_all: "Allow all political content",
-  };
-  lines.push(`Political content: ${politicalMap[filters.political]}`);
-
-  if (filters.customRules && filters.customRules.trim()) {
-    lines.push(`Custom rules from parent: ${filters.customRules.trim()}`);
-  }
-
-  lines.push(`Child's age: ${filters.ageGroup} years old — use age-appropriate judgment`);
-
-  return lines.map((l) => `• ${l}`).join("\n");
+  return { level: 0, evidence: "" };
 }
 
-// ── Main analysis function ─────────────────────────────────────
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(String).filter((s) => s.trim()).slice(0, 10) : [];
+}
 
-export async function analyzeVideoContent(
+function levelOf(v: unknown): number | null {
+  if (v === null) return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 4) throw new Error(`Invalid level ${JSON.stringify(v)}`);
+  return n;
+}
+
+function framingOf(v: unknown): Framing {
+  return v === "glorified" || v === "condemned" ? v : "neutral";
+}
+
+// Returns null if the AI call fails or returns an invalid profile (nothing is cached then).
+export async function generateContentProfile(
   video: YouTubeVideoDetails,
-  transcript: TranscriptResult,
-  filters: ValueFilters,
+  transcript: string,
   openAiApiKey: string
-): Promise<AIAnalysisResult> {
+): Promise<Omit<ContentProfile, "createdAt"> | null> {
   const client = new OpenAI({ apiKey: openAiApiKey });
-
-  const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt(video, transcript, filters);
-
-  logger.info(
-    `[AI] Analyzing video "${video.title}" | transcript=${transcript.available} | model=${APP_CONFIG.AI_MODEL}`
-  );
-
-  const startMs = Date.now();
-
   try {
     const completion = await client.chat.completions.create({
       model: APP_CONFIG.AI_MODEL,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
+        { role: "system", content: PROFILE_SYSTEM_PROMPT },
+        { role: "user", content: profileUserPrompt(video, transcript) },
       ],
-      // Force JSON output
       response_format: { type: "json_object" },
-      // Conservative token budget — analysis should be concise
-      max_tokens: 512,
-      temperature: 0.1, // Low temperature for consistent, deterministic safety decisions
+      max_tokens: 1600,
+      temperature: 0,
     });
-
-    const elapsedMs = Date.now() - startMs;
-    logger.info(`[AI] Analysis complete in ${elapsedMs}ms`);
-
     const raw = completion.choices[0]?.message?.content;
     if (!raw) throw new Error("Empty response from OpenAI");
+    const p = JSON.parse(raw);
 
-    const parsed = JSON.parse(raw);
-
-    // Validate and sanitize the response
-    const result: AIAnalysisResult = {
-      approved: Boolean(parsed.approved),
-      confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 50)),
-      flags: Array.isArray(parsed.flags) ? parsed.flags.map(String) : [],
-      reason: typeof parsed.reason === "string" ? parsed.reason : "",
-      severity: validateSeverity(parsed.severity),
-      hadTranscript: transcript.available,
-      metadataOnly: !transcript.available,
-    };
-
-    // Enforce consistency: approved videos must have null severity and empty flags
-    if (result.approved) {
-      result.severity = null;
-      result.flags = [];
+    const dims = {} as Record<Dim, DimRating>;
+    for (const dim of DIMS) {
+      const d = p[dim] ?? {};
+      const evidence = String(d.evidence ?? "").slice(0, 200);
+      const level = dim === "gambling" ? (d.present ? 4 : 0) : levelOf(d.level);
+      dims[dim] = { level, evidence };
     }
+    // Code-counted swearing can only raise the AI's language level
+    const floor = swearFloor(transcript);
+    if (floor.level > (dims.language.level ?? 0)) dims.language = floor;
 
-    logger.info(
-      `[AI] Result: approved=${result.approved}, confidence=${result.confidence}, severity=${result.severity}`
-    );
+    const holidaysOut = (Array.isArray(p.holidays) ? p.holidays : [])
+      .filter((h: { name?: string }) => (HOLIDAYS as readonly string[]).includes(String(h?.name)))
+      .map((h: { name: string; prominence?: string }) => ({
+        name: h.name as Holiday,
+        prominence: h.prominence === "theme" ? ("theme" as const) : ("incidental" as const),
+      }));
+    const musicLevels = ["none", "background", "prominent", "music_video"] as const;
+    let musicLevel: ContentProfile["music"]["level"] = musicLevels.includes(p.music?.level) ? p.music.level : "none";
+    if (musicLevel === "none" && MUSIC_MARK.test(transcript)) musicLevel = "background"; // captions mark music
+    const flagsOut = {} as ContentProfile["flags"];
+    for (const f of VALUE_FLAGS) flagsOut[f] = Boolean(p.flags?.[f]);
+    if (EXCLAMATION.test(transcript)) flagsOut.religiousExclamations = true;
 
-    return result;
-  } catch (err) {
-    logger.error("[AI] Analysis failed:", err);
-
-    // Fail-safe: if AI analysis errors, flag the video with low confidence
-    // so the parent is notified rather than the video playing unchecked.
-    return {
-      approved: false,
-      confidence: 0,
-      flags: ["ai_analysis_error"],
-      reason: "Content analysis failed. Please review this video manually.",
-      severity: "low",
-      hadTranscript: transcript.available,
-      metadataOnly: !transcript.available,
+    const purposes = ["entertainment", "educational", "news", "devotional", "commercial"] as const;
+    const realisms = ["none", "cartoon_fantasy", "realistic_fiction", "real_footage"] as const;
+    const profile: Omit<ContentProfile, "createdAt"> = {
+      version: PROFILE_VERSION,
+      status: "ok",
+      title: video.title,
+      channelName: video.channelTitle,
+      purpose: purposes.includes(p.purpose) ? p.purpose : "entertainment",
+      dims,
+      violenceRealism: realisms.includes(p.violence?.realism) ? p.violence.realism : "none",
+      framing: {
+        violence: framingOf(p.violence?.framing),
+        substances: framingOf(p.substances?.framing),
+        selfHarm: framingOf(p.selfHarm?.framing),
+        meanness: framingOf(p.meanness?.framing),
+      },
+      religionTraditions: strList(p.religion?.traditions).map((t) => t.toLowerCase()),
+      holidays: holidaysOut,
+      music: { level: musicLevel },
+      lgbtq: ["incidental", "discussion", "advocacy"].includes(p.lgbtq) ? p.lgbtq : "none",
+      flags: flagsOut,
+      religiousThemes: strList(p.religion?.themes),
+      topics: strList(p.topics),
+      summary: typeof p.summary === "string" ? p.summary.slice(0, 600) : "",
     };
+    logger.info(
+      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} topics=${JSON.stringify(profile.topics)}`
+    );
+    return profile;
+  } catch (err) {
+    logger.error(`[AI] Profile generation failed for "${video.title}":`, err);
+    return null;
   }
 }
 
-function validateSeverity(value: unknown): Severity | null {
-  if (value === "low" || value === "medium" || value === "high") return value;
-  return null;
+// ── Religion / custom rules ────────────────────────────────────
+
+export function needsValuesCheck(filters: ValueFilters): boolean {
+  return Boolean(
+    (filters.religiousSensitivity && filters.religion?.trim()) || filters.customRules?.trim()
+  );
 }
 
-// ── Generate value filter hash ─────────────────────────────────
-// Used as the cache key: videoAnalysisCache/{videoId}/results/{filterHash}
-// Two parents with identical filters share the same cached result.
-// Any change to filters produces a new hash = fresh analysis.
-
-import { createHash } from "crypto";
-
-export function hashValueFilters(filters: ValueFilters): string {
-  // Serialize deterministically (sorted keys)
+// Cache key for a values check: only the inputs that affect it.
+export function hashValuesRules(filters: ValueFilters): string {
   const canonical = JSON.stringify({
-    ageGroup: filters.ageGroup,
+    religion: filters.religiousSensitivity ? (filters.religion ?? "").trim().toLowerCase() : "",
     customRules: (filters.customRules ?? "").trim().toLowerCase(),
-    language: filters.language,
-    political: filters.political,
-    religion: filters.religiousSensitivity ? (filters.religion ?? "").toLowerCase() : "",
-    religiousSensitivity: filters.religiousSensitivity,
-    sexualContent: filters.sexualContent,
-    violence: filters.violence,
   });
-  // Short 12-char hex — unique enough for Firestore doc IDs
   return createHash("sha256").update(canonical).digest("hex").slice(0, 24);
+}
+
+export interface ValuesCheckResult {
+  violates: boolean;
+  reason: string;
+}
+
+// Returns null on AI failure (caller treats as blocked, uncached).
+export async function checkValuesRules(
+  profile: ContentProfile,
+  filters: ValueFilters,
+  openAiApiKey: string
+): Promise<ValuesCheckResult | null> {
+  const rules: string[] = [];
+  const religion = filters.religion?.trim();
+  if (filters.religiousSensitivity && religion) {
+    rules.push(
+      `Religion: ${religion} family. A conflict is ONLY content that mocks or disparages ${religion}, promotes the worship or practices of another religion, or directly contradicts core ${religion} teachings. Secular humor, science, and everyday topics are NOT conflicts.`
+    );
+  }
+  if (filters.customRules?.trim()) {
+    rules.push(
+      `Parent's custom rules: ${filters.customRules.trim()} (Ignore any part about time of day, schedules or screen time — judge content only.)`
+    );
+  }
+
+  const client = new OpenAI({ apiKey: openAiApiKey });
+  try {
+    const completion = await client.chat.completions.create({
+      model: APP_CONFIG.AI_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `You check a video description against a parent's rules for a parental control app.
+Only report a violation if the description gives concrete evidence that a rule is broken. Do not speculate about what the video "may" contain.
+Respond with valid JSON only: {"violates": true | false, "reason": "if violates: which rule and the specific content, one sentence for the parent; otherwise empty"}`,
+        },
+        {
+          role: "user",
+          content: `VIDEO: ${profile.title}
+Summary: ${profile.summary}
+Topics: ${profile.topics.join(", ") || "none"}
+Religious themes: ${profile.religiousThemes.join("; ") || "none"}
+
+RULES:
+${rules.map((r) => `• ${r}`).join("\n")}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 150,
+      temperature: 0.1,
+    });
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) throw new Error("Empty response from OpenAI");
+    const p = JSON.parse(raw);
+    const result = {
+      violates: Boolean(p.violates),
+      reason: p.violates && typeof p.reason === "string" ? p.reason.slice(0, 300) : "",
+    };
+    logger.info(`[AI] Values check for "${profile.title}": violates=${result.violates} ${result.reason}`);
+    return result;
+  } catch (err) {
+    logger.error(`[AI] Values check failed for "${profile.title}":`, err);
+    return null;
+  }
 }
