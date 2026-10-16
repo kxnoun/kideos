@@ -162,19 +162,21 @@ export async function saveValueFilters(
   childId: string,
   filters: ValueFilters
 ): Promise<void> {
+  // Full overwrite: drops fields from the old (v1) filter format
   await firestore()
     .doc(`users/${parentId}/children/${childId}/valueFilters/current`)
-    .set(filters, { merge: true });
+    .set(filters);
 }
 
 export async function getValueFilters(
   parentId: string,
   childId: string
-): Promise<ValueFilters | null> {
+): Promise<Record<string, unknown> | null> {
   const snap = await firestore()
     .doc(`users/${parentId}/children/${childId}/valueFilters/current`)
     .get();
-  return snap.exists() ? (snap.data() as ValueFilters) : null;
+  // Raw doc (may be the old v1 format) — callers pass it through normalizePrefs()
+  return snap.exists() ? (snap.data() ?? null) : null;
 }
 
 // ─── Whitelisted Channels ────────────────────────────────────
@@ -256,6 +258,28 @@ export function subscribeToFlaggedContent(
       const items = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as FlaggedContent);
       onUpdate(items);
     });
+}
+
+// Parent's decision on a video in the review queue. Updates the child's verdict
+// (approved = what the kid feed reads) and resolves the queue entry together.
+export async function resolveReview(
+  parentId: string,
+  childId: string,
+  flaggedId: string,
+  videoId: string,
+  decision: "approved" | "hidden"
+): Promise<void> {
+  const base = `users/${parentId}/children/${childId}`;
+  const batch = firestore().batch();
+  batch.update(firestore().doc(`${base}/videoVerdicts/${videoId}`), {
+    parentDecision: decision,
+    approved: decision === "approved",
+  });
+  batch.update(firestore().doc(`${base}/flaggedContent/${flaggedId}`), {
+    parentViewed: true,
+    resolution: decision,
+  });
+  await batch.commit();
 }
 
 export async function markFlaggedViewed(

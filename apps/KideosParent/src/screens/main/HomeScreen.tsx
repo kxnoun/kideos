@@ -31,6 +31,7 @@ import {
   sendPlaySignal,
   claimPairingCode,
   markFlaggedViewed,
+  resolveReview,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
 
@@ -64,7 +65,10 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!parentId || !selectedChildId) return;
     const unsub = subscribeToFlaggedContent(parentId, selectedChildId, (items) => {
-      setFlagged(items.filter((i) => !i.parentViewed).slice(0, 5));
+      // Videos waiting for the parent's OK first
+      const open = items.filter((i) => !i.parentViewed);
+      const rank = (i: FlaggedContent) => (i.status === "pending_review" ? 0 : 1);
+      setFlagged(open.sort((a, b) => rank(a) - rank(b)).slice(0, 10));
     });
     return unsub;
   }, [parentId, selectedChildId]);
@@ -116,6 +120,18 @@ export default function HomeScreen() {
     async (item: FlaggedContent) => {
       if (!parentId || !selectedChildId) return;
       await markFlaggedViewed(parentId, selectedChildId, item.id);
+    },
+    [parentId, selectedChildId]
+  );
+
+  const handleReview = useCallback(
+    async (item: FlaggedContent, decision: "approved" | "hidden") => {
+      if (!parentId || !selectedChildId) return;
+      try {
+        await resolveReview(parentId, selectedChildId, item.id, item.videoId, decision);
+      } catch {
+        Alert.alert("Could not save your decision. Check your connection.");
+      }
     },
     [parentId, selectedChildId]
   );
@@ -260,7 +276,11 @@ export default function HomeScreen() {
         {/* Flagged Content Alerts */}
         {flagged.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>⚠️ Flagged Content</Text>
+            <Text style={styles.sectionTitle}>
+              {flagged.some((i) => i.status === "pending_review")
+                ? `👀 ${flagged.filter((i) => i.status === "pending_review").length} waiting for your OK`
+                : "⚠️ Flagged Content"}
+            </Text>
             {flagged.map((item) => (
               <View key={item.id} style={styles.flagCard}>
                 <View style={styles.flagHeader}>
@@ -284,12 +304,39 @@ export default function HomeScreen() {
                   {item.title}
                 </Text>
                 <Text style={styles.flagReason}>{item.reason}</Text>
-                <TouchableOpacity
-                  style={styles.markViewedBtn}
-                  onPress={() => handleMarkViewed(item)}
-                >
-                  <Text style={styles.markViewedText}>Mark as reviewed</Text>
-                </TouchableOpacity>
+                {item.status ? (
+                  <>
+                    <Text style={styles.flagStatus}>
+                      {item.status === "pending_review"
+                        ? "Waiting for your OK — hidden until you decide"
+                        : "Hidden from the feed"}
+                    </Text>
+                    <View style={styles.reviewRow}>
+                      <TouchableOpacity
+                        style={[styles.reviewBtn, styles.reviewApprove]}
+                        onPress={() => handleReview(item, "approved")}
+                      >
+                        <Text style={styles.reviewApproveText}>
+                          {item.status === "pending_review" ? "Approve" : "Allow anyway"}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.reviewBtn, styles.reviewHide]}
+                        onPress={() => handleReview(item, "hidden")}
+                      >
+                        <Text style={styles.reviewHideText}>Keep hidden</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  // Flags from before the review queue existed
+                  <TouchableOpacity
+                    style={styles.markViewedBtn}
+                    onPress={() => handleMarkViewed(item)}
+                  >
+                    <Text style={styles.markViewedText}>Mark as reviewed</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </View>
@@ -369,6 +416,13 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  flagStatus: { fontSize: 12, color: "#6C63FF", fontWeight: "600", marginTop: 8 },
+  reviewRow: { flexDirection: "row", marginTop: 10 },
+  reviewBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
+  reviewApprove: { backgroundColor: "#6C63FF", marginRight: 8 },
+  reviewApproveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  reviewHide: { backgroundColor: "#F0F0F5" },
+  reviewHideText: { color: "#555", fontWeight: "700", fontSize: 14 },
   container: { flex: 1, backgroundColor: "#F7F7FF" },
   header: {
     flexDirection: "row",
