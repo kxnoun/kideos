@@ -21,7 +21,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { APP_CONFIG } from "./config";
 import { getVideoDetails } from "./youtube";
-import { fetchTranscript } from "./supadata";
+import { fetchTranscript, type TranscriptResult } from "./supadata";
 import { analyzeVideoContent, hashValueFilters } from "./aiAnalysis";
 import type {
   ValueFilters,
@@ -100,7 +100,7 @@ export async function analyzeAndTagVideo(
 
   const [videoDetails, transcriptResult] = await Promise.all([
     getVideoDetails(videoId, youtubeApiKey),
-    fetchTranscript(videoId, supadataApiKey),
+    getTranscriptCached(db, videoId, supadataApiKey),
   ]);
 
   if (!videoDetails) {
@@ -160,6 +160,38 @@ export async function analyzeAndTagVideo(
   }
 
   return { approved: aiResult.approved, confidence: aiResult.confidence, fromCache: false };
+}
+
+// ── Transcript cache ───────────────────────────────────────────
+// Transcripts don't change and don't depend on filters, so each video's
+// transcript is fetched from Supadata (paid, per request) at most once.
+// Separate from videoAnalysisCache so clearing verdicts keeps transcripts.
+// Only successful fetches are stored — failures retry on the next run.
+
+async function getTranscriptCached(
+  db: FirebaseFirestore.Firestore,
+  videoId: string,
+  supadataApiKey: string
+): Promise<TranscriptResult> {
+  const ref = db.doc(`transcriptCache/${videoId}`);
+  const snap = await ref.get();
+  if (snap.exists) {
+    logger.info(`[transcriptCache] Hit: ${videoId}`);
+    const d = snap.data()!;
+    return { available: true, transcript: d.transcript, language: d.language, wordCount: d.wordCount };
+  }
+
+  const result = await fetchTranscript(videoId, supadataApiKey);
+  if (result.available && result.transcript) {
+    await ref.set({
+      // Firestore docs cap at 1 MiB; the AI only reads the first 12k chars anyway
+      transcript: result.transcript.slice(0, 200000),
+      language: result.language,
+      wordCount: result.wordCount,
+      fetchedAt: Timestamp.now(),
+    });
+  }
+  return result;
 }
 
 // ── Write approved status to channelLibraryCache video doc ────
