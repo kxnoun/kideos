@@ -26,7 +26,7 @@ export interface ParentProfile {
 
 // Defined with the questionnaire logic in prefs.ts
 export type { ValueFilters, Dim, DimRule, OverAction } from "./prefs";
-import type { Dim } from "./prefs";
+import type { Dim, Holiday, ValueFlag } from "./prefs";
 
 // ── Child Profile ──────────────────────────────────────────────
 
@@ -127,8 +127,12 @@ export interface ContentProfile {
   dims: Record<Dim, DimRating>;
   violenceRealism: "none" | "cartoon_fantasy" | "realistic_fiction" | "real_footage";
   framing: { violence: Framing; substances: Framing; selfHarm: Framing; meanness: Framing };
-  religionTraditions: string[];
+  religionTraditions: string[]; // islam | judaism | christianity | hinduism | sikhism | buddhism | other
   religiousThemes: string[];
+  holidays: { name: Holiday; prominence: "theme" | "incidental" }[];
+  music: { level: "none" | "background" | "prominent" | "music_video" | null; vocalsOnly: boolean };
+  lgbtq: "none" | "incidental" | "discussion" | "advocacy";
+  flags: Record<ValueFlag, boolean | null>; // null = can't tell (only femaleSinging)
   topics: string[];
   summary: string;
   createdAt: Timestamp;

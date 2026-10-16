@@ -26,6 +26,11 @@ export const DIMS = [
   "politics",
   "religion",
   "gambling",
+  // Advanced (optional section)
+  "crudeHumor",
+  "matureThemes",
+  "misinformation",
+  "nudity",
 ] as const;
 export type Dim = (typeof DIMS)[number];
 
@@ -35,6 +40,69 @@ export interface DimRule {
   action: OverAction; // what happens above it
 }
 
+// ── Faith & family values (yes/no-style checks on specific content) ──
+
+export const HOLIDAYS = [
+  "christmas",
+  "easter",
+  "halloween",
+  "valentines",
+  "diwali",
+  "hanukkah",
+  "eid",
+  "ramadan",
+  "passover",
+  "lunar_new_year",
+] as const;
+export type Holiday = (typeof HOLIDAYS)[number];
+export const HOLIDAY_LABELS: Record<Holiday, string> = {
+  christmas: "Christmas",
+  easter: "Easter",
+  halloween: "Halloween",
+  valentines: "Valentine's Day",
+  diwali: "Diwali",
+  hanukkah: "Hanukkah",
+  eid: "Eid",
+  ramadan: "Ramadan",
+  passover: "Passover",
+  lunar_new_year: "Lunar New Year",
+};
+// ok | incidental = OK in passing, hidden when it's the video's theme | review | hide
+export type HolidayRule = "ok" | "incidental" | "review" | "hide";
+
+export const VALUE_FLAGS = [
+  "fantasyMagic",
+  "realOccult",
+  "prophetDepiction",
+  "religiousExclamations",
+  "pork",
+  "nonKosher",
+  "alcoholFood",
+  "beef",
+  "evolution",
+  "femaleSinging",
+  "matureGames",
+] as const;
+export type ValueFlag = (typeof VALUE_FLAGS)[number];
+export const VALUE_FLAG_LABELS: Record<ValueFlag, string> = {
+  fantasyMagic: "Fantasy magic (Harry Potter-style)",
+  realOccult: "Real-world occult (tarot, astrology, spells, Ouija)",
+  prophetDepiction: "Depictions of prophets",
+  religiousExclamations: "God's name as an exclamation (“OMG”, “Jesus Christ!”)",
+  pork: "Pork in food content",
+  nonKosher: "Non-kosher food (shellfish, meat with dairy)",
+  alcoholFood: "Cooking with alcohol",
+  beef: "Beef in food content",
+  evolution: "Evolution and origins content",
+  femaleSinging: "Women or girls singing",
+  matureGames: "Mature-rated video games (GTA, Call of Duty, horror games)",
+};
+export type FlagRule = "ok" | "review" | "hide";
+
+export type MusicRule = "all" | "background" | "vocals_only" | "none";
+export type LgbtqRule = "allow" | "incidental" | "review" | "hide";
+export type Tradition = "" | "islam" | "judaism" | "christianity" | "hinduism" | "sikhism" | "other";
+
 export interface ValueFilters {
   version: 2;
   ageGroup: number;
@@ -43,6 +111,12 @@ export interface ValueFilters {
   educationalBoost: boolean; // clearly educational videos: violence/scary/substances/politics +1 level
   blockGlorified: boolean; // always hide glamorized violence, substances, self-harm, cruelty
   unknown: "allow" | "review" | "hide"; // when the transcript can't tell (incl. no transcript)
+  faith: { tradition: Tradition; preset: string }; // own faith's content is exempt from the religion ladder
+  holidays: Record<Holiday, HolidayRule>;
+  flags: Record<ValueFlag, FlagRule>;
+  music: MusicRule;
+  musicAction: OverAction;
+  lgbtq: LgbtqRule; // allow · incidental (allow presence, review discussion) · review all · hide discussion/advocacy
   religiousSensitivity: boolean; // + religion: free-text values check (AI on summary)
   religion: string;
   customRules: string; // free-text rules (AI on summary)
@@ -63,6 +137,10 @@ export const LEVEL_LABELS: Record<Dim, string[]> = {
   politics: ["No politics", "Educational civics/history", "News", "Political opinion", "Extreme political content"],
   religion: ["No religion", "Educational religious content", "Worship/devotional content", "Trying to convert viewers", "Mocking religion"],
   gambling: ["No gambling", "", "", "", "Gambling/loot boxes"],
+  crudeHumor: ["No crude humor", "Silly gross-out", "Toilet humor", "Frequent gross-out humor", "Extreme gross-out"],
+  matureThemes: ["No mature themes", "Brief mention of death/illness", "Gently handled mature theme", "Heavy themes in depth", "Disturbing mature themes"],
+  misinformation: ["No misinformation", "Unverified claims", "Pseudoscience/conspiracy as fact", "Harmful health/safety misinformation", "Extremist conspiracy"],
+  nudity: ["No nudity", "Swimwear in normal context", "Revealing clothing as a focus", "Partial nudity", "Nudity"],
 };
 
 // Columns: ages ≤6, 7–9, 10–12, 13–15, 16–17
@@ -80,6 +158,10 @@ const AGE_TABLE: Record<Dim, number[]> = {
   politics: [0, 0, 1, 1, 2],
   religion: [3, 3, 3, 3, 3], // all religious content except mocking
   gambling: [0, 0, 0, 0, 0],
+  crudeHumor: [1, 2, 2, 3, 3],
+  matureThemes: [1, 1, 2, 3, 3],
+  misinformation: [1, 1, 1, 1, 1],
+  nudity: [1, 1, 1, 2, 2],
 };
 
 function ageColumn(age: number): number {
@@ -96,6 +178,7 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
   for (const dim of DIMS) rules[dim] = { max: AGE_TABLE[dim][col], action: "hide" };
   const shift = sensitivity === "more" ? -1 : sensitivity === "less" ? 1 : 0;
   rules.scary.max = Math.max(0, Math.min(4, rules.scary.max + shift));
+  rules.matureThemes.max = Math.max(0, Math.min(4, rules.matureThemes.max + shift));
   if (col === 4) rules.gambling.action = "review";
   return {
     version: 2,
@@ -105,6 +188,12 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
     educationalBoost: true,
     blockGlorified: true,
     unknown: "review",
+    faith: { tradition: "", preset: "" },
+    holidays: Object.fromEntries(HOLIDAYS.map((h) => [h, "ok"])) as Record<Holiday, HolidayRule>,
+    flags: Object.fromEntries(VALUE_FLAGS.map((f) => [f, "ok"])) as Record<ValueFlag, FlagRule>,
+    music: "all",
+    musicAction: "hide",
+    lgbtq: "allow",
     religiousSensitivity: false,
     religion: "",
     customRules: "",
@@ -117,7 +206,14 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
   if (raw && raw.version === 2) {
     const d = defaultPrefs(Number(raw.ageGroup) || fallbackAge);
     const r = raw as unknown as ValueFilters;
-    return { ...d, ...r, rules: { ...d.rules, ...(r.rules ?? {}) } };
+    return {
+      ...d,
+      ...r,
+      rules: { ...d.rules, ...(r.rules ?? {}) },
+      faith: { ...d.faith, ...(r.faith ?? {}) },
+      holidays: { ...d.holidays, ...(r.holidays ?? {}) },
+      flags: { ...d.flags, ...(r.flags ?? {}) },
+    };
   }
   const age = Number(raw?.ageGroup) || fallbackAge;
   const p = defaultPrefs(age);
@@ -142,4 +238,177 @@ export function describePrefs(p: ValueFilters): string {
   if (p.religiousSensitivity && p.religion) lines.push(`- Religious values: ${p.religion}`);
   if (p.customRules) lines.push(`- Custom rules: ${p.customRules}`);
   return lines.join("\n");
+}
+
+// ── Faith presets ──────────────────────────────────────────────
+// Editable starting points that pre-fill concrete answers — nothing is ever
+// filtered on the religion label itself. Sub-presets reflect real diversity
+// within each tradition. Sources: see docs/questionnaire-research.md.
+// (No Buddhist preset: no parent media-guidance sources found — consult first.)
+
+export interface FaithPreset {
+  id: string;
+  tradition: Tradition;
+  label: string;
+  why: string;
+  apply: (p: ValueFilters) => void;
+}
+
+const holidays = (p: ValueFilters, rule: HolidayRule, hs: Holiday[]) => hs.forEach((h) => (p.holidays[h] = rule));
+const flags = (p: ValueFilters, rule: FlagRule, fs: ValueFlag[]) => fs.forEach((f) => (p.flags[f] = rule));
+const cap = (p: ValueFilters, dim: Dim, max: number, action?: OverAction) => {
+  p.rules[dim].max = Math.min(p.rules[dim].max, max);
+  if (action) p.rules[dim].action = action;
+};
+
+const islamBase = (p: ValueFilters) => {
+  cap(p, "religion", 1); // other faiths: educational only
+  flags(p, "hide", ["prophetDepiction", "pork", "alcoholFood", "realOccult"]);
+  flags(p, "review", ["religiousExclamations"]);
+  cap(p, "substances", 1);
+};
+
+export const FAITH_PRESETS: FaithPreset[] = [
+  {
+    id: "islam_background_music",
+    tradition: "islam",
+    label: "Muslim — background music OK",
+    why: "Scholars differ on music; this follows the view that permits music that isn't obscene. Also: no depictions of prophets, pork or alcohol in food content, other faiths only when educational.",
+    apply: (p) => {
+      islamBase(p);
+      p.music = "background";
+      holidays(p, "incidental", ["christmas", "easter", "halloween", "valentines"]);
+      cap(p, "nudity", 1);
+    },
+  },
+  {
+    id: "islam_vocals_only",
+    tradition: "islam",
+    label: "Muslim — vocals only (nasheeds)",
+    why: "Follows the view that avoids musical instruments but permits voice-only nasheeds. Adds modesty and romance limits common in more conservative households.",
+    apply: (p) => {
+      islamBase(p);
+      p.music = "vocals_only";
+      holidays(p, "hide", ["christmas", "easter", "halloween", "valentines"]);
+      cap(p, "romance", 1);
+      cap(p, "nudity", 0);
+      flags(p, "review", ["fantasyMagic"]);
+    },
+  },
+  {
+    id: "islam_no_music",
+    tradition: "islam",
+    label: "Muslim — no music",
+    why: "Follows the view that music and instruments are not permitted. Strictest modesty, romance and magic settings.",
+    apply: (p) => {
+      islamBase(p);
+      p.music = "none";
+      holidays(p, "hide", ["christmas", "easter", "halloween", "valentines", "diwali"]);
+      cap(p, "romance", 1);
+      cap(p, "nudity", 0);
+      flags(p, "hide", ["fantasyMagic"]);
+    },
+  },
+  {
+    id: "judaism_haredi",
+    tradition: "judaism",
+    label: "Jewish — Haredi",
+    why: "Kol isha (women's singing), gender-modest content, no other-faith holidays, kosher food. Note: many Haredi communities avoid open internet video entirely.",
+    apply: (p) => {
+      cap(p, "religion", 1);
+      cap(p, "romance", 1);
+      cap(p, "nudity", 0);
+      p.music = "background";
+      flags(p, "hide", ["femaleSinging", "nonKosher", "pork", "realOccult", "religiousExclamations"]);
+      flags(p, "review", ["fantasyMagic"]);
+      holidays(p, "hide", ["christmas", "easter", "halloween", "valentines"]);
+    },
+  },
+  {
+    id: "judaism_modern_orthodox",
+    tradition: "judaism",
+    label: "Jewish — Modern Orthodox",
+    why: "Mainstream platforms with guardrails: other faiths' worship content needs your OK, Christmas/Halloween fine in passing but not as the theme, non-kosher food flagged.",
+    apply: (p) => {
+      cap(p, "religion", 1, "review");
+      holidays(p, "incidental", ["christmas", "easter", "halloween"]);
+      flags(p, "review", ["nonKosher", "pork"]);
+    },
+  },
+  {
+    id: "judaism_traditional",
+    tradition: "judaism",
+    label: "Jewish — Traditional",
+    why: "Light-touch: Christmas fine in passing, non-kosher food flagged.",
+    apply: (p) => {
+      holidays(p, "incidental", ["christmas"]);
+      flags(p, "review", ["nonKosher"]);
+    },
+  },
+  {
+    id: "judaism_secular",
+    tradition: "judaism",
+    label: "Jewish — Secular / cultural",
+    why: "Only hides content that mocks religion (the default for everyone).",
+    apply: () => {},
+  },
+  {
+    id: "christian_evangelical",
+    tradition: "christianity",
+    label: "Christian — Evangelical",
+    why: "Based on Plugged In's categories: spiritual content, misuse of God's name, occult, other faiths' worship.",
+    apply: (p) => {
+      cap(p, "religion", 1);
+      flags(p, "hide", ["religiousExclamations", "realOccult"]);
+      flags(p, "review", ["fantasyMagic"]);
+      holidays(p, "incidental", ["halloween"]);
+    },
+  },
+  {
+    id: "christian_catholic",
+    tradition: "christianity",
+    label: "Christian — Catholic",
+    why: "The USCCB rating system treats ridicule of faith as most serious; misuse of God's name and occult flagged.",
+    apply: (p) => {
+      flags(p, "review", ["religiousExclamations", "realOccult"]);
+    },
+  },
+  {
+    id: "christian_lds",
+    tradition: "christianity",
+    label: "Latter-day Saint",
+    why: "Light-touch, per For the Strength of Youth's principle-based guidance: “media that uplifts you”, avoiding sexual content and misuse of God's name.",
+    apply: (p) => {
+      cap(p, "sexual", 0);
+      flags(p, "hide", ["religiousExclamations"]);
+    },
+  },
+  {
+    id: "hindu",
+    tradition: "hinduism",
+    label: "Hindu",
+    why: "Beef in food content and mocking or stereotyped portrayals of Hinduism.",
+    apply: (p) => {
+      flags(p, "hide", ["beef"]);
+    },
+  },
+  {
+    id: "sikh",
+    tradition: "sikhism",
+    label: "Sikh",
+    why: "Light preset: alcohol and tobacco kept low, mocking religion hidden.",
+    apply: (p) => {
+      cap(p, "substances", 1);
+    },
+  },
+];
+
+// Applies a preset on top of the current answers (age defaults stay as the base)
+export function applyPreset(p: ValueFilters, presetId: string): ValueFilters {
+  const preset = FAITH_PRESETS.find((x) => x.id === presetId);
+  const next: ValueFilters = JSON.parse(JSON.stringify(p));
+  if (!preset) return next;
+  preset.apply(next);
+  next.faith = { tradition: preset.tradition, preset: preset.id };
+  return next;
 }

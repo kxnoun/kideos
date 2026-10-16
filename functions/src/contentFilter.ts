@@ -8,7 +8,7 @@
 //   hidden          → not shown
 // ─────────────────────────────────────────────────────────────
 
-import { DIMS, LEVEL_LABELS, type Dim } from "./prefs";
+import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAGS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
 import type { ContentProfile, Severity, ValueFilters } from "./types";
 
 export type VerdictStatus = "approved" | "hidden" | "pending_review";
@@ -28,6 +28,17 @@ const GLORIFIABLE = ["violence", "substances", "selfHarm", "meanness"] as const;
 const HARD_LIMIT: Partial<Record<Dim, number>> = { selfHarm: 2, sexual: 3 };
 
 const RANK: Record<Severity, number> = { low: 1, medium: 2, high: 3 };
+
+const MUSIC_LABELS: Record<string, string> = {
+  background: "Background music",
+  prominent: "Songs or prominent music",
+  music_video: "Music video",
+};
+
+function isOwnFaithOnly(profile: ContentProfile, prefs: ValueFilters): boolean {
+  const t = prefs.faith?.tradition;
+  return Boolean(t && t !== "other" && profile.religionTraditions.length > 0 && profile.religionTraditions.every((x) => x === t));
+}
 
 function severityFor(excess: number, level: number): Severity {
   if (level === 4 || excess >= 3) return "high";
@@ -82,6 +93,9 @@ export function evaluateProfile(
       continue;
     }
 
+    // The family's own faith: its religious content is fine (mocking it still counts)
+    if (dim === "religion" && level <= 3 && isOwnFaithOnly(profile, prefs)) continue;
+
     const hardLimit = HARD_LIMIT[dim];
     if (hardLimit !== undefined && level > hardLimit) {
       note(hides, reasonText(dim, level, evidence), `${dim}:${level}`, "high");
@@ -104,6 +118,48 @@ export function evaluateProfile(
     if (excess > 0) {
       note(rule.action === "hide" ? hides : reviews, reasonText(dim, level, evidence), `${dim}:${level}`, severityFor(excess, level));
     }
+  }
+
+  // ── Faith & family values ──
+  const bucket = (rule: string) => (rule === "hide" ? hides : reviews);
+
+  for (const h of profile.holidays) {
+    const rule = prefs.holidays[h.name] ?? "ok";
+    if (rule === "ok" || (rule === "incidental" && h.prominence !== "theme")) continue;
+    const label = `${HOLIDAY_LABELS[h.name]} ${h.prominence === "theme" ? "is the video's theme" : "content"}`;
+    note(rule === "incidental" ? hides : bucket(rule), label, `holiday:${h.name}`, "low");
+  }
+
+  for (const f of VALUE_FLAGS) {
+    const rule = prefs.flags[f] ?? "ok";
+    if (rule === "ok") continue;
+    const v = profile.flags[f];
+    if (v === true) note(bucket(rule), VALUE_FLAG_LABELS[f], `flag:${f}`, "low");
+    else if (v === null && prefs.unknown !== "allow") {
+      note(prefs.unknown === "hide" ? hides : reviews, `Couldn't tell: ${VALUE_FLAG_LABELS[f]}`, `flag:${f}:unknown`, "low");
+    }
+  }
+
+  const m = profile.music.level;
+  if (prefs.music !== "all") {
+    if (m === null) {
+      if (prefs.unknown !== "allow") note(prefs.unknown === "hide" ? hides : reviews, "Couldn't tell if there's music", "music:unknown", "low");
+    } else {
+      const over =
+        prefs.music === "none"
+          ? m !== "none"
+          : prefs.music === "vocals_only"
+          ? m !== "none" && !profile.music.vocalsOnly
+          : m === "prominent" || m === "music_video"; // background
+      if (over) note(prefs.musicAction === "hide" ? hides : reviews, MUSIC_LABELS[m], `music:${m}`, "low");
+    }
+  }
+
+  const l = profile.lgbtq;
+  if (l !== "none" && prefs.lgbtq !== "allow") {
+    const label = `LGBTQ+ ${l === "incidental" ? "people present" : l === "discussion" ? "topics discussed" : "advocacy"}`;
+    if (prefs.lgbtq === "review") note(reviews, label, `lgbtq:${l}`, "low");
+    else if (l !== "incidental") note(prefs.lgbtq === "hide" ? hides : reviews, label, `lgbtq:${l}`, "low");
   }
 
   if (valuesViolation) note(hides, valuesViolation, "values", "medium");

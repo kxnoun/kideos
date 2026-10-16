@@ -30,7 +30,7 @@ import {
   checkValuesRules,
 } from "./aiAnalysis";
 import { evaluateProfile, type FilterDecision } from "./contentFilter";
-import { DIMS, normalizePrefs } from "./prefs";
+import { DIMS, VALUE_FLAGS, normalizePrefs } from "./prefs";
 import type { ValueFilters, FlaggedContent, ContentProfile, VideoVerdict } from "./types";
 
 type Db = FirebaseFirestore.Firestore;
@@ -143,6 +143,10 @@ function placeholderProfile(
     framing: { violence: "neutral", substances: "neutral", selfHarm: "neutral", meanness: "neutral" },
     religionTraditions: [],
     religiousThemes: [],
+    holidays: [],
+    music: { level: "none", vocalsOnly: false },
+    lgbtq: "none",
+    flags: Object.fromEntries(VALUE_FLAGS.map((f) => [f, false])) as ContentProfile["flags"],
     topics: [],
     summary: "",
     createdAt: Timestamp.now(),

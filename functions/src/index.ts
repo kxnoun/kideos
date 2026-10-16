@@ -25,6 +25,8 @@ export {
 // weeklyChannelSuggestions: every Monday, generates for all Premium families
 export { suggestChannels, weeklyChannelSuggestions } from "./suggestChannels";
 
+export { parseCustomRules } from "./customRules";
+
 // ── Scheduled Jobs + Triggers ──────────────────────────────────
 // cleanupExpiredData: nightly — COPPA 90-day watch history + 30-day AI cache
 // generateWeeklyDigest: Monday 8am — GPT-4o-mini weekly summary + FCM push

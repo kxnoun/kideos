@@ -14,12 +14,12 @@ import { createHash } from "crypto";
 import { logger } from "firebase-functions/v2";
 import { APP_CONFIG } from "./config";
 import type { ContentProfile, DimRating, Framing, ValueFilters } from "./types";
-import { DIMS, type Dim } from "./prefs";
+import { DIMS, HOLIDAYS, VALUE_FLAGS, type Dim, type Holiday } from "./prefs";
 import type { YouTubeVideoDetails } from "./youtube";
 
 // Bump when the profile prompt or schema changes — older profiles are then
 // regenerated (from cached transcripts, so no Supadata cost).
-export const PROFILE_VERSION = 2;
+export const PROFILE_VERSION = 3;
 
 const PROFILE_SYSTEM_PROMPT = `You describe the content of YouTube videos for a parental control app.
 You do NOT decide whether a video is appropriate — you only report what is in it, accurately, on fixed 0–4 ladders.
@@ -44,7 +44,16 @@ Respond with valid JSON only, in this exact shape:
   "consumerism": { "evidence": "", "level": 0 },
   "politics":    { "evidence": "", "level": 0 },
   "religion":    { "evidence": "", "level": 0, "traditions": [], "themes": [] },
-  "gambling":    { "evidence": "", "present": false }
+  "gambling":    { "evidence": "", "present": false },
+  "crudeHumor":  { "evidence": "", "level": 0 },
+  "matureThemes":{ "evidence": "", "level": 0 },
+  "misinformation": { "evidence": "", "level": 0 },
+  "nudity":      { "evidence": "", "level": 0 },
+  "holidays":    [ { "name": "christmas", "prominence": "theme" | "incidental" } ],
+  "music":       { "level": "none" | "background" | "prominent" | "music_video" | null, "vocalsOnly": false, "femaleVocals": false },
+  "lgbtq":       "none" | "incidental" | "discussion" | "advocacy",
+  "flags": { "fantasyMagic": false, "realOccult": false, "prophetDepiction": false, "religiousExclamations": false,
+             "pork": false, "nonKosher": false, "alcoholFood": false, "beef": false, "evolution": false, "matureGames": false }
 }
 
 Ladders (0 = none in every category):
@@ -59,7 +68,15 @@ Ladders (0 = none in every category):
 - meanness (pranks, bullying, disrespect): 1 gentle, good-natured pranks or teasing. 2 mean pranks or insults played for laughs, disrespect to parents/teachers. 3 sustained bullying or humiliation. 4 cruelty or harassment encouraged.
 - consumerism: 1 brief sponsor mention. 2 extended sponsor segment or product promotion. 3 unboxing, hauls, "buy my merch". 4 constant selling or pressure to buy.
 - politics: 1 factual civics or history without taking sides. 2 news reporting. 3 opinion, advocacy, or satire of politicians and policies. 4 extreme or hateful political content.
-- religion: 1 descriptive or educational. 2 devotional or worship content. 3 trying to convert viewers. 4 mocking or disrespecting religion. "traditions": which religions appear. "themes": short phrases, e.g. "celebrates Christmas traditions", "explains Ramadan".
+- religion: 1 descriptive or educational. 2 devotional or worship content. 3 trying to convert viewers. 4 mocking or disrespecting religion. "traditions": which religions appear, ONLY from: "islam", "judaism", "christianity", "hinduism", "sikhism", "buddhism", "other". "themes": short phrases, e.g. "celebrates Christmas traditions", "explains Ramadan".
+- crudeHumor: 1 mild silly gross-out (a burp). 2 toilet humor (fart/poop jokes). 3 frequent gross-out humor. 4 extreme or disgusting.
+- matureThemes (death, divorce, illness, war, abuse, crime): 1 brief mention. 2 a theme handled gently (a pet dies, parents divorce). 3 heavy themes discussed in depth. 4 disturbing detail.
+- misinformation: 1 minor unverified claims. 2 pseudoscience or conspiracy theories presented as fact. 3 health or safety misinformation that could cause harm. 4 extremist conspiracy content.
+- nudity: rate from transcript/metadata cues only (e.g. "bikini try-on"). 1 swimwear in a normal context. 2 revealing clothing is a focus. 3 partial nudity. 4 nudity. Use 0 when nothing suggests it; null only if the video is clearly about appearance/bodies and you can't tell.
+- holidays: every holiday that appears, names ONLY from: christmas, easter, halloween, valentines, diwali, hanukkah, eid, ramadan, passover, lunar_new_year. "theme" = the video is about it; "incidental" = mentioned in passing. Empty array if none.
+- music: transcripts mark music as "[Music]" or ♪. none = no music. background = background music under talking. prominent = songs with lyrics or music as a main element. music_video = the video is a song/music video. null only if you can't tell at all. vocalsOnly = only voices, no instruments (e.g. nasheeds, a cappella). femaleVocals = a woman or girl sings (true/false; null if there is singing but you can't tell who).
+- lgbtq: none. incidental = LGBTQ+ people present without being the topic. discussion = LGBTQ+ topics discussed. advocacy = the video argues a position on LGBTQ+ issues (either direction).
+- flags (true only with evidence): fantasyMagic = fictional magic (wizards, spells in a story). realOccult = presented as real: tarot, astrology, spells, Ouija, séances. prophetDepiction = a prophet (e.g. Muhammad, Moses, Jesus as prophet) is depicted/voiced/animated. religiousExclamations = God's or Jesus's name used as an exclamation ("oh my God", "Jesus Christ!"). pork / beef = shown or cooked as food. nonKosher = shellfish, or meat cooked with dairy. alcoholFood = cooking with alcohol. evolution = evolution or origins of life/humans is a topic. matureGames = gameplay of mature-rated games (GTA, Call of Duty, horror games).
 - gambling: present = true for casino, betting, loot boxes/gacha, gambling sponsors.
 - framing: "glorified" = shown as cool, funny, rewarded or desirable; "condemned" = consequences shown or presented as wrong; otherwise "neutral".
 - purpose: "educational" only if teaching is the clear main purpose (documentary, explainer, history).`;
@@ -79,6 +96,8 @@ ${t}${transcript.length > 12000 ? "\n[transcript truncated for length]" : ""}`;
 
 // ── Swear-word floor, counted in code ──────────────────────────
 // Unambiguous words only; context-dependent ones (hell, damn) are left to the AI.
+const EXCLAMATION = /\b(oh my god|omg|oh god|god ?damn\w*|for god'?s sake|jesus christ)\b/i;
+const MUSIC_MARK = /\[\s*music\s*\]|♪/i;
 // YouTube captions often censor swearing as "[ __ ]" — counted as at least moderate.
 const STRONG = /\b(f+u+c+k+\w*|motherf\w+)\b/gi;
 const MODERATE = /\b(shit\w*|bitch\w*|asshole\w*|bastard\w*|dick(head)?s?)\b/gi;
@@ -126,7 +145,7 @@ export async function generateContentProfile(
         { role: "user", content: profileUserPrompt(video, transcript) },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 1200,
+      max_tokens: 1600,
       temperature: 0,
     });
     const raw = completion.choices[0]?.message?.content;
@@ -144,6 +163,24 @@ export async function generateContentProfile(
     const floor = swearFloor(transcript);
     if (floor.level > (dims.language.level ?? 0)) dims.language = floor;
 
+    const holidaysOut = (Array.isArray(p.holidays) ? p.holidays : [])
+      .filter((h: { name?: string }) => (HOLIDAYS as readonly string[]).includes(String(h?.name)))
+      .map((h: { name: string; prominence?: string }) => ({
+        name: h.name as Holiday,
+        prominence: h.prominence === "theme" ? ("theme" as const) : ("incidental" as const),
+      }));
+    const musicLevels = ["none", "background", "prominent", "music_video"] as const;
+    let musicLevel: ContentProfile["music"]["level"] =
+      p.music?.level === null ? null : musicLevels.includes(p.music?.level) ? p.music.level : "none";
+    if (musicLevel === "none" && MUSIC_MARK.test(transcript)) musicLevel = "background"; // captions mark music
+    const fv = p.music?.femaleVocals;
+    const flagsOut = {} as ContentProfile["flags"];
+    for (const f of VALUE_FLAGS) {
+      if (f === "femaleSinging") flagsOut[f] = fv === true ? true : fv === null && musicLevel !== "none" ? null : false;
+      else flagsOut[f] = Boolean(p.flags?.[f]);
+    }
+    if (EXCLAMATION.test(transcript)) flagsOut.religiousExclamations = true;
+
     const purposes = ["entertainment", "educational", "news", "devotional", "commercial"] as const;
     const realisms = ["none", "cartoon_fantasy", "realistic_fiction", "real_footage"] as const;
     const profile: Omit<ContentProfile, "createdAt"> = {
@@ -160,7 +197,11 @@ export async function generateContentProfile(
         selfHarm: framingOf(p.selfHarm?.framing),
         meanness: framingOf(p.meanness?.framing),
       },
-      religionTraditions: strList(p.religion?.traditions),
+      religionTraditions: strList(p.religion?.traditions).map((t) => t.toLowerCase()),
+      holidays: holidaysOut,
+      music: { level: musicLevel, vocalsOnly: Boolean(p.music?.vocalsOnly) },
+      lgbtq: ["incidental", "discussion", "advocacy"].includes(p.lgbtq) ? p.lgbtq : "none",
+      flags: flagsOut,
       religiousThemes: strList(p.religion?.themes),
       topics: strList(p.topics),
       summary: typeof p.summary === "string" ? p.summary.slice(0, 600) : "",
