@@ -67,7 +67,7 @@ export async function fetchTranscript(
     }
 
     if (!res2.ok) {
-      logger.warn(`[Supadata] Unexpected status ${res2.status} for ${videoId}`);
+      logger.warn(`[Supadata] Unexpected status ${res2.status} for ${videoId}: ${(await res2.text()).slice(0, 200)}`);
       return { available: false, transcript: null, language: null, wordCount: 0 };
     }
 
