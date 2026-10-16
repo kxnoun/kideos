@@ -13,6 +13,7 @@ initializeApp();
 // refreshChannelLibraries: nightly — detects new uploads, analyzes only new videos
 export {
   resolveAndAddChannel,
+  onChannelWhitelisted,
   seedChannelLibrary,
   refreshChannelLibraries,
 } from "./seedChannelLibrary";

@@ -13,6 +13,7 @@
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/v2";
 import { getFirestore, Timestamp, WriteBatch } from "firebase-admin/firestore";
 import { YOUTUBE_API_KEY, SUPADATA_API_KEY, OPENAI_API_KEY } from "./config";
@@ -305,14 +306,8 @@ export const resolveAndAddChannel = onCall(
     };
     await whitelistRef.set(whitelistEntry);
 
-    // Kick off seeding + batch analysis in the background
-    // Don't await — return to parent app immediately, feed populates as analysis completes
-    seedAndAnalyzeInBackground(details.channelId, parentId, childId).catch((err) =>
-      logger.error(
-        `[resolveAndAddChannel] Background seed failed for ${details.channelId}:`,
-        err
-      )
-    );
+    // Seeding + analysis runs in onChannelWhitelisted (triggered by this create),
+    // not here — work left running after an onCall returns gets throttled CPU.
 
     logger.info(
       `[resolveAndAddChannel] Added "${details.name}" (${details.channelId}) for parent ${parentId}`
@@ -330,7 +325,24 @@ export const resolveAndAddChannel = onCall(
   }
 );
 
-// ── Internal: seed + analyze (used by resolveAndAddChannel) ───
+// ── Firestore trigger: seed + analyze when a channel is whitelisted ─
+// Runs as its own invocation so it gets full CPU and a 9-minute budget.
+
+export const onChannelWhitelisted = onDocumentCreated(
+  {
+    document: "users/{parentId}/children/{childId}/whitelistedChannels/{channelId}",
+    region: APP_CONFIG.FUNCTIONS_REGION,
+    secrets: [YOUTUBE_API_KEY, SUPADATA_API_KEY, OPENAI_API_KEY],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (event) => {
+    const { parentId, childId, channelId } = event.params;
+    await seedAndAnalyzeInBackground(channelId, parentId, childId);
+  }
+);
+
+// ── Internal: seed + analyze (used by onChannelWhitelisted) ───
 
 async function seedAndAnalyzeInBackground(
   channelId: string,

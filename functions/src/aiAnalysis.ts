@@ -183,7 +183,7 @@ export async function analyzeVideoContent(
     }
 
     logger.info(
-      `[AI] Result: approved=${result.approved}, confidence=${result.confidence}, severity=${result.severity}`
+      `[AI] Result for "${video.title}": approved=${result.approved}, confidence=${result.confidence}, severity=${result.severity}, flags=${JSON.stringify(result.flags)}, reason=${result.reason}`
     );
 
     return result;
