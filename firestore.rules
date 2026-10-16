@@ -51,10 +51,16 @@ service cloud.firestore {
         }
 
         // Per-child video verdicts — kid feed reads approved == true.
-        // Written only by Cloud Functions (analysis pipeline / filter re-apply).
+        // Written by Cloud Functions; the parent may only record a review decision,
+        // and `approved` must match it.
         match /videoVerdicts/{videoId} {
           allow read: if isParent(parentId) || isSignedIn();
-          allow write: if false;
+          allow update: if isParent(parentId)
+            && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(["parentDecision", "approved"])
+            && request.resource.data.parentDecision in ["approved", "hidden"]
+            && request.resource.data.approved == (request.resource.data.parentDecision == "approved");
+          allow create, delete: if false;
         }
 
         // Watch history — COPPA 90-day retention
@@ -74,7 +80,7 @@ service cloud.firestore {
           allow read: if isParent(parentId);
           allow update: if isParent(parentId)
             && request.resource.data.diff(resource.data)
-              .affectedKeys().hasOnly(["parentViewed"]);
+              .affectedKeys().hasOnly(["parentViewed", "resolution"]);
           allow create, delete: if false;
         }
 
