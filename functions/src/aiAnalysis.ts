@@ -50,7 +50,7 @@ Respond with valid JSON only, in this exact shape:
   "misinformation": { "evidence": "", "level": 0 },
   "nudity":      { "evidence": "", "level": 0 },
   "holidays":    [ { "name": "christmas", "prominence": "theme" | "incidental" } ],
-  "music":       { "level": "none" | "background" | "prominent" | "music_video" | null, "vocalsOnly": false, "femaleVocals": false },
+  "music":       { "level": "none" | "background" | "prominent" | "music_video" },
   "lgbtq":       "none" | "incidental" | "discussion" | "advocacy",
   "flags": { "fantasyMagic": false, "realOccult": false, "prophetDepiction": false, "religiousExclamations": false,
              "pork": false, "nonKosher": false, "alcoholFood": false, "beef": false, "evolution": false, "matureGames": false }
@@ -74,7 +74,7 @@ Ladders (0 = none in every category):
 - misinformation: 1 minor unverified claims. 2 pseudoscience or conspiracy theories presented as fact. 3 health or safety misinformation that could cause harm. 4 extremist conspiracy content.
 - nudity: rate from transcript/metadata cues only (e.g. "bikini try-on"). 1 swimwear in a normal context. 2 revealing clothing is a focus. 3 partial nudity. 4 nudity. Use 0 when nothing suggests it; null only if the video is clearly about appearance/bodies and you can't tell.
 - holidays: every holiday that appears, names ONLY from: christmas, easter, halloween, valentines, diwali, hanukkah, eid, ramadan, passover, lunar_new_year. "theme" = the video is about it; "incidental" = mentioned in passing. Empty array if none.
-- music: transcripts mark music as "[Music]" or ♪. none = no music. background = background music under talking. prominent = songs with lyrics or music as a main element. music_video = the video is a song/music video. null only if you can't tell at all. vocalsOnly = only voices, no instruments (e.g. nasheeds, a cappella). femaleVocals = a woman or girl sings (true/false; null if there is singing but you can't tell who).
+- music: transcripts mark music as "[Music]" or ♪, and song lyrics appear as text. none = no sign of music. background = music markers under talking. prominent = songs with lyrics or music as a main element. music_video = the video is a song/music video.
 - lgbtq: none. incidental = LGBTQ+ people present without being the topic. discussion = LGBTQ+ topics discussed. advocacy = the video argues a position on LGBTQ+ issues (either direction).
 - flags (true only with evidence): fantasyMagic = fictional magic (wizards, spells in a story). realOccult = presented as real: tarot, astrology, spells, Ouija, séances. prophetDepiction = a prophet (e.g. Muhammad, Moses, Jesus as prophet) is depicted/voiced/animated. religiousExclamations = God's or Jesus's name used as an exclamation ("oh my God", "Jesus Christ!"). pork / beef = shown or cooked as food. nonKosher = shellfish, or meat cooked with dairy. alcoholFood = cooking with alcohol. evolution = evolution or origins of life/humans is a topic. matureGames = gameplay of mature-rated games (GTA, Call of Duty, horror games).
 - gambling: present = true for casino, betting, loot boxes/gacha, gambling sponsors.
@@ -170,15 +170,10 @@ export async function generateContentProfile(
         prominence: h.prominence === "theme" ? ("theme" as const) : ("incidental" as const),
       }));
     const musicLevels = ["none", "background", "prominent", "music_video"] as const;
-    let musicLevel: ContentProfile["music"]["level"] =
-      p.music?.level === null ? null : musicLevels.includes(p.music?.level) ? p.music.level : "none";
+    let musicLevel: ContentProfile["music"]["level"] = musicLevels.includes(p.music?.level) ? p.music.level : "none";
     if (musicLevel === "none" && MUSIC_MARK.test(transcript)) musicLevel = "background"; // captions mark music
-    const fv = p.music?.femaleVocals;
     const flagsOut = {} as ContentProfile["flags"];
-    for (const f of VALUE_FLAGS) {
-      if (f === "femaleSinging") flagsOut[f] = fv === true ? true : fv === null && musicLevel !== "none" ? null : false;
-      else flagsOut[f] = Boolean(p.flags?.[f]);
-    }
+    for (const f of VALUE_FLAGS) flagsOut[f] = Boolean(p.flags?.[f]);
     if (EXCLAMATION.test(transcript)) flagsOut.religiousExclamations = true;
 
     const purposes = ["entertainment", "educational", "news", "devotional", "commercial"] as const;
@@ -199,7 +194,7 @@ export async function generateContentProfile(
       },
       religionTraditions: strList(p.religion?.traditions).map((t) => t.toLowerCase()),
       holidays: holidaysOut,
-      music: { level: musicLevel, vocalsOnly: Boolean(p.music?.vocalsOnly) },
+      music: { level: musicLevel },
       lgbtq: ["incidental", "discussion", "advocacy"].includes(p.lgbtq) ? p.lgbtq : "none",
       flags: flagsOut,
       religiousThemes: strList(p.religion?.themes),

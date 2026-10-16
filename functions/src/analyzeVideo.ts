@@ -144,7 +144,7 @@ function placeholderProfile(
     religionTraditions: [],
     religiousThemes: [],
     holidays: [],
-    music: { level: "none", vocalsOnly: false },
+    music: { level: "none" },
     lgbtq: "none",
     flags: Object.fromEntries(VALUE_FLAGS.map((f) => [f, false])) as ContentProfile["flags"],
     topics: [],

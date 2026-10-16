@@ -29,7 +29,7 @@ function allowedValues(key: string): Array<string | number> | null {
   }
   if (a === "holidays" && (HOLIDAYS as readonly string[]).includes(b) && !c) return ["ok", "incidental", "review", "hide"];
   if (a === "flags" && (VALUE_FLAGS as readonly string[]).includes(b) && !c) return ["ok", "review", "hide"];
-  if (key === "music") return ["all", "background", "vocals_only", "none"];
+  if (key === "music") return ["ok", "review", "hide"];
   if (key === "lgbtq") return ["allow", "incidental", "review", "hide"];
   return null;
 }
@@ -42,7 +42,7 @@ function catalog(): string {
   lines.push(`rules.<dim>.action: "hide" | "review" (review = hidden until the parent approves)`);
   for (const h of HOLIDAYS) lines.push(`holidays.${h} (${HOLIDAY_LABELS[h]}): "ok" | "incidental" (ok in passing, hidden as the theme) | "review" | "hide"`);
   for (const f of VALUE_FLAGS) lines.push(`flags.${f} (${VALUE_FLAG_LABELS[f]}): "ok" | "review" | "hide"`);
-  lines.push(`music: "all" | "background" (no songs/music videos) | "vocals_only" | "none"`);
+  lines.push(`music (videos with music, detected from captions): "ok" | "review" | "hide"`);
   lines.push(`lgbtq: "allow" | "incidental" (allow presence, review discussion) | "review" | "hide" (hide discussion/advocacy)`);
   return lines.join("\n");
 }

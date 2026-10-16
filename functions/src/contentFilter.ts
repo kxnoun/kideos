@@ -133,27 +133,12 @@ export function evaluateProfile(
   for (const f of VALUE_FLAGS) {
     const rule = prefs.flags[f] ?? "ok";
     if (rule === "ok") continue;
-    const v = profile.flags[f];
-    if (v === true) note(bucket(rule), VALUE_FLAG_LABELS[f], `flag:${f}`, "low");
-    else if (v === null && prefs.unknown !== "allow") {
-      note(prefs.unknown === "hide" ? hides : reviews, `Couldn't tell: ${VALUE_FLAG_LABELS[f]}`, `flag:${f}:unknown`, "low");
-    }
+    if (profile.flags[f]) note(bucket(rule), VALUE_FLAG_LABELS[f], `flag:${f}`, "low");
   }
 
+  // Music: best effort — only what captions ("[Music]") and lyrics reveal
   const m = profile.music.level;
-  if (prefs.music !== "all") {
-    if (m === null) {
-      if (prefs.unknown !== "allow") note(prefs.unknown === "hide" ? hides : reviews, "Couldn't tell if there's music", "music:unknown", "low");
-    } else {
-      const over =
-        prefs.music === "none"
-          ? m !== "none"
-          : prefs.music === "vocals_only"
-          ? m !== "none" && !profile.music.vocalsOnly
-          : m === "prominent" || m === "music_video"; // background
-      if (over) note(prefs.musicAction === "hide" ? hides : reviews, MUSIC_LABELS[m], `music:${m}`, "low");
-    }
-  }
+  if (prefs.music !== "ok" && m && m !== "none") note(bucket(prefs.music), MUSIC_LABELS[m], `music:${m}`, "low");
 
   const l = profile.lgbtq;
   if (l !== "none" && prefs.lgbtq !== "allow") {

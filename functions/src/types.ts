@@ -130,9 +130,9 @@ export interface ContentProfile {
   religionTraditions: string[]; // islam | judaism | christianity | hinduism | sikhism | buddhism | other
   religiousThemes: string[];
   holidays: { name: Holiday; prominence: "theme" | "incidental" }[];
-  music: { level: "none" | "background" | "prominent" | "music_video" | null; vocalsOnly: boolean };
+  music: { level: "none" | "background" | "prominent" | "music_video" }; // from captions/lyrics only — best effort
   lgbtq: "none" | "incidental" | "discussion" | "advocacy";
-  flags: Record<ValueFlag, boolean | null>; // null = can't tell (only femaleSinging)
+  flags: Record<ValueFlag, boolean>;
   topics: string[];
   summary: string;
   createdAt: Timestamp;

@@ -42,22 +42,27 @@ consumerism, politics, religion, gambling. Advanced: crude humor, mature themes,
 Synthesis of Common Sense age bands, ESRB E/E10+/T, YouTube 9+/13+, Australian G/PG/M —
 **not a validated standard**; adjust after real usage.
 
-## Faith presets
+## Faith and family values — no presets
 
-Presets only pre-fill concrete, editable answers; matching never uses the religion label.
-Sub-presets reflect internal diversity.
+We tried faith presets (e.g. "Muslim — vocals only", "Jewish — Haredi") and removed them: each bundled
+strictness under a religious label (a "no music" preset also tightened romance, modesty and magic), which
+is exactly the generalization we want to avoid — and practice varies widely within every tradition
+(research below), so wrong pre-filled answers would be trusted and left unchecked.
 
-- **Muslim** — music opinion genuinely divided (IslamQA: impermissible; al-Qaradawi / Shaltut: permitted
-  if not obscene) → three music options. Prophet depictions widely prohibited (Islamic Fiqh Council,
-  AMJA). Pork/alcohol in food. Magic views vary (IslamOnline vs IslamWeb).
-- **Jewish** — Haredi: kol isha (women's singing), modesty, no other-faith holidays (OU on Halloween;
-  "chukat goyim" on Christmas); many avoid open internet video entirely. Modern Orthodox / Traditional /
-  Secular progressively lighter (Jew in the City: wide divide on media within Orthodoxy).
-- **Christian** — Evangelical: Plugged In categories (spiritual content, misuse of God's name, occult).
-  Catholic: USCCB "O" rating for ridicule of faith. LDS: For the Strength of Youth (2022, principle-based).
-- **Hindu** — beef; stereotyped/mocking portrayals (Hindu American Foundation, Hinduism Today).
-- **Sikh** — light preset (SikhNet: general values concern, no item list).
-- **Buddhist** — no preset: no parent media-guidance sources found. Consult community members first.
+Instead, every family sees the same concrete questions, all defaulting to OK: holidays (OK / in passing /
+ask me / hide), pork, non-kosher food, cooking with alcohol, beef, prophet depictions, God's name as an
+exclamation, fantasy magic, real-world occult, evolution, videos with music. An optional "which faith is
+your family?" answer has one effect: that faith's own religious content doesn't count against the
+"other faiths" limit.
+
+**Music is best effort and deliberately simple** (OK / ask me / hide): transcripts only reveal music
+through caption markers ("[Music]", ♪) and lyrics. Background music is often unmarked, and instruments
+vs voices (nasheeds) or who is singing can't be detected at all, so those options were dropped.
+
+Research on what families in each tradition raise (kept for reference): Muslim — music opinion divided
+(IslamQA vs al-Qaradawi/Shaltut), prophet depictions widely prohibited, pork/alcohol; Jewish — kol isha,
+other-faith holidays, kashrut, wide variation within Orthodoxy; Christian — Plugged In (spiritual content,
+God's name, occult), USCCB (ridicule of faith); Hindu — beef, mocking portrayals; Sikh — general values.
 
 ## Known limits
 

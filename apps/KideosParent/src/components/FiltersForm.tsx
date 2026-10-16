@@ -10,8 +10,6 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Switch, TextInput, StyleSheet, ActivityIndicator, Alert } from "react-native";
 import {
   defaultPrefs,
-  applyPreset,
-  FAITH_PRESETS,
   HOLIDAYS,
   HOLIDAY_LABELS,
   VALUE_FLAGS,
@@ -228,11 +226,13 @@ const ADVANCED_QUESTIONS: Question[] = [
 ];
 
 const TRADITIONS: { value: Tradition; label: string }[] = [
+  { value: "", label: "None / prefer not to say" },
   { value: "islam", label: "Muslim" },
   { value: "judaism", label: "Jewish" },
   { value: "christianity", label: "Christian" },
   { value: "hinduism", label: "Hindu" },
   { value: "sikhism", label: "Sikh" },
+  { value: "other", label: "Other" },
 ];
 
 const FAITH_FLAGS = VALUE_FLAGS.filter((f) => f !== "matureGames");
@@ -349,7 +349,6 @@ export default function FiltersForm({
   const user = useStore((s) => s.user);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showFaith, setShowFaith] = useState(Boolean(value.faith.tradition));
-  const [pickedTradition, setPickedTradition] = useState<Tradition>(value.faith.tradition);
   const [parsing, setParsing] = useState(false);
   const [proposal, setProposal] = useState<{ changes: RuleChange[]; remaining: string } | null>(null);
 
@@ -381,8 +380,6 @@ export default function FiltersForm({
     setProposal(null);
   };
 
-  const presets = FAITH_PRESETS.filter((p) => p.tradition === pickedTradition);
-  const activePreset = FAITH_PRESETS.find((p) => p.id === value.faith.preset);
 
   return (
     <View>
@@ -455,50 +452,31 @@ export default function FiltersForm({
       {/* Faith & family values */}
       <SectionHeader
         title="Faith and family values"
-        sub={activePreset ? `Using: ${activePreset.label}` : "Optional — holidays, music, food, magic and more"}
+        sub="Optional — holidays, food, music, magic and more"
         open={showFaith}
         onToggle={() => setShowFaith(!showFaith)}
       />
       {showFaith && (
         <>
           <View style={styles.card}>
-            <Text style={styles.title}>Start from a preset (optional)</Text>
+            <Text style={styles.title}>Which faith is your family, if any?</Text>
             <Text style={styles.sub}>
-              A preset only fills in answers below — you can see and change every one. Videos are never filtered by
-              religion name.
+              Only used so your own faith's religious videos don't count as “other faiths” above. It doesn't change
+              any other answer.
             </Text>
             <View style={styles.chips}>
               {TRADITIONS.map((t) => (
                 <TouchableOpacity
-                  key={t.value}
-                  style={[styles.chip, pickedTradition === t.value && styles.chipActive]}
-                  onPress={() => setPickedTradition(pickedTradition === t.value ? "" : t.value)}
+                  key={t.value || "none"}
+                  style={[styles.chip, value.faith.tradition === t.value && styles.chipActive]}
+                  onPress={() => onChange({ ...value, faith: { tradition: t.value } })}
                 >
-                  <Text style={[styles.chipText, pickedTradition === t.value && styles.chipTextActive]}>{t.label}</Text>
+                  <Text style={[styles.chipText, value.faith.tradition === t.value && styles.chipTextActive]}>
+                    {t.label}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
-            {presets.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                style={[styles.option, value.faith.preset === p.id && styles.optionSelected]}
-                onPress={() => onChange(applyPreset(value, p.id))}
-              >
-                <View style={[styles.radio, value.faith.preset === p.id && styles.radioSelected]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.optionLabel}>{p.label}</Text>
-                  <Text style={styles.optionExample}>{p.why}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-            {value.faith.tradition ? (
-              <TouchableOpacity
-                onPress={() => onChange({ ...value, faith: { tradition: "", preset: "" } })}
-                style={styles.resetBtn}
-              >
-                <Text style={styles.resetText}>Clear faith (answers stay as they are)</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
 
           <View style={styles.card}>
@@ -522,45 +500,19 @@ export default function FiltersForm({
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.title}>Music</Text>
-            <Text style={styles.sub}>Best effort — captions usually only say “[Music]”.</Text>
-            {(
-              [
-                { value: "all", label: "All music OK", example: "" },
-                { value: "background", label: "Background music only", example: "No songs or music videos" },
-                { value: "vocals_only", label: "Vocals only", example: "Nasheeds, a cappella — no instruments" },
-                { value: "none", label: "No music", example: "" },
-              ] as const
-            ).map((o) => (
-              <TouchableOpacity
-                key={o.value}
-                style={[styles.option, value.music === o.value && styles.optionSelected]}
-                onPress={() => onChange({ ...value, music: o.value })}
-              >
-                <View style={[styles.radio, value.music === o.value && styles.radioSelected]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.optionLabel}>{o.label}</Text>
-                  {o.example ? <Text style={styles.optionExample}>{o.example}</Text> : null}
-                </View>
-              </TouchableOpacity>
-            ))}
-            {value.music !== "all" && (
-              <>
-                <Text style={[styles.label, { marginTop: 8 }]}>Videos with other music:</Text>
-                <Segment
-                  options={[
-                    { value: "hide", label: "Hide them" },
-                    { value: "review", label: "Ask me first" },
-                  ]}
-                  value={value.musicAction}
-                  onChange={(musicAction) => onChange({ ...value, musicAction })}
-                />
-              </>
-            )}
-          </View>
-
-          <View style={styles.card}>
             <Text style={styles.title}>Specific content</Text>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Videos with music</Text>
+              <Text style={styles.rowHint}>
+                Best effort: we can only tell from the captions (YouTube marks some music as “[Music]”) and song
+                lyrics. We can't tell instruments from voices, so nasheeds count as music too.
+              </Text>
+              <Segment
+                options={FLAG_OPTIONS}
+                value={value.music}
+                onChange={(music) => onChange({ ...value, music })}
+              />
+            </View>
             {FAITH_FLAGS.map((f) => (
               <View key={f} style={styles.row}>
                 <Text style={styles.rowLabel}>{VALUE_FLAG_LABELS[f]}</Text>
@@ -739,6 +691,7 @@ const styles = StyleSheet.create({
   chipTextActive: { color: "#fff" },
   row: { marginBottom: 14 },
   rowLabel: { fontSize: 14, fontWeight: "600", color: "#333", marginBottom: 6 },
+  rowHint: { fontSize: 12, color: "#888", marginBottom: 8, lineHeight: 17 },
   parseBtn: { marginTop: 10, paddingVertical: 10, alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: "#6C63FF" },
   parseText: { color: "#6C63FF", fontWeight: "700", fontSize: 14 },
   proposal: { marginTop: 12, backgroundColor: "#F7F7FF", borderRadius: 12, padding: 12 },
