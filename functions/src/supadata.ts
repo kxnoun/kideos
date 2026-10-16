@@ -34,13 +34,17 @@ export async function fetchTranscript(
     const url = `${APP_CONFIG.SUPADATA_BASE_URL}/youtube/transcript`;
 
     // text=true → content is a plain string (default is an array of timed segments)
-    const urlWithParams = `${url}?videoId=${encodeURIComponent(videoId)}&text=true`;
-    const res2 = await fetch(urlWithParams, {
-      method: "GET",
-      headers: {
-        "x-api-key": apiKey,
-      },
-    });
+    // lang=en → prefer English captions (Supadata falls back to the first available)
+    const urlWithParams = `${url}?videoId=${encodeURIComponent(videoId)}&text=true&lang=en`;
+
+    // Retry on 429 (rate limit) with backoff + jitter — batches fire 5 requests at once
+    let res2 = await fetch(urlWithParams, { headers: { "x-api-key": apiKey } });
+    for (let attempt = 1; res2.status === 429 && attempt <= 4; attempt++) {
+      const waitMs = 1000 * 2 ** attempt + Math.random() * 1000;
+      logger.info(`[Supadata] 429 for ${videoId}, retry ${attempt} in ${Math.round(waitMs)}ms`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      res2 = await fetch(urlWithParams, { headers: { "x-api-key": apiKey } });
+    }
 
     if (res2.status === 404 || res2.status === 204) {
       // No transcript available — will fall back to metadata-only analysis
