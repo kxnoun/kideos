@@ -18,7 +18,8 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 - JS-only changes: Metro reloads, or press `r`. Only rebuild with Gradle after native/dependency changes.
 - After an edit that adds/removes hooks or state, fully restart the app ("Should have a queue" = hot reload
   confusion, not a bug).
-- Reset the kid app's pairing: `adb shell pm clear com.kideos.app`.
+- Reset the kid app's pairing: `adb shell pm clear com.kideos.app`, then pair again from the parent app
+  (a device only gets access to a child through pairing — see `kidDeviceUids`).
 
 ## Logs
 
@@ -78,9 +79,13 @@ A new 50-video channel ≈ 50 credits + ~3¢. Re-adding channels, other families
   Known pre-existing error: `apps/Kideos/src/screens/PlayerScreen.tsx(111)` implicit `any`.
 - The backend logic was verified with throwaway mock harnesses (fake Firestore / Supadata / OpenAI
   counting every call). They aren't in the repo yet — adding a real test suite is in the backlog.
+- **Firestore rules:** `tests/rules/` — real emulator tests (paired vs unpaired devices, Show anyway,
+  pairing). Run on your machine (needs Java):
+  `cd tests\rules; npm install; cd ..\..; firebase emulators:exec --only firestore --project demo-kideos "node tests/rules/rules.test.mjs"`.
+  Run them after any change to `firestore.rules`.
 - Manual end-to-end: add a channel → watch `onChannelWhitelisted` logs → kid feed; change an answer in
-  Settings → feed updates within seconds; set a ladder to "Ask me first" → video appears in the Home
-  review queue, not in the kid feed, until approved.
+  Settings → feed updates within seconds; Home → Videos → Hidden shows each video's reason; "Show anyway…"
+  → confirm → it appears in the kid feed; Undo puts it back.
 
 ## Git
 

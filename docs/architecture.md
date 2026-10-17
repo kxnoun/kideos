@@ -33,8 +33,9 @@ questionnaire and profiles look this way see [questionnaire-research.md](questio
 2. **Questionnaire answers** (`users/{p}/children/{c}/valueFilters/current`) — per child, see
    [the questionnaire](#the-questionnaire).
 3. **Verdict** (`users/{p}/children/{c}/videoVerdicts/{videoId}`) — answers applied to the profile **in
-   plain code** (`contentFilter.ts`): `approved` | `hidden` | `pending_review`. The kid feed shows only
-   `approved == true`.
+   plain code** (`contentFilter.ts`): `approved` or `hidden`, with a plain-words reason and the video's
+   ratings. The kid feed shows only `approved == true`. There's no approval queue: parents browse
+   Shown / Hidden in the **Videos** screen and can "Show anyway" one video.
 
 Changing answers only re-runs step 3 → instant, no Supadata, no profile AI calls.
 
@@ -46,16 +47,16 @@ Defined in `functions/src/prefs.ts` (copied to `apps/KideosParent/src/prefs.ts` 
 - **About the child:** age (drives defaults), sensitivity to scary content (shifts scary/mature themes ±1).
 - **13 core ladders** (0–4, examples on every rung): violence, scary, language, romance, sexual,
   substances, dangerous stunts, self-harm, meanness/pranks, consumerism, politics, religion, gambling.
-  Each has `max` (highest allowed level) and `action` for anything above: `hide` or `review` ("Ask me first").
+  Each has `max` (highest allowed level); anything above it is hidden.
 - **Global rules:** educational videos +1 level (violence/scary/substances/politics); always hide
   glamorized violence/substances/self-harm/cruelty; what to do when a video can't be checked
-  (`unknown`: allow / review / hide — applies to "no transcript" too).
+  (`unknown`: allow / hide — applies to "no transcript" too; default hide).
 - **Faith & family values (optional):** "which faith is your family" (only effect: own faith's religious
-  content is exempt from the religion ladder), 10 holidays (ok / in passing / ask / hide), and
-  ok/ask/hide checks: pork, non-kosher, cooking with alcohol, beef, prophet depictions, God's name as an
+  content is exempt from the religion ladder), 10 holidays (ok / in passing / hide), and
+  ok/hide checks: pork, non-kosher, cooking with alcohol, beef, prophet depictions, God's name as an
   exclamation, fantasy magic, real occult, evolution, videos with music (best effort).
 - **More topics (optional):** crude humor, mature themes, misinformation, nudity (best effort) ladders;
-  LGBTQ+ (allow / allow presence & ask about discussion / ask about all / hide discussion & advocacy);
+  LGBTQ+ (allow / allow presence but hide discussion & advocacy / hide all);
   mature-rated games.
 - **Anything else (free text):** "Turn this into settings" → `parseCustomRules` maps it to the settings
   above for the parent to confirm; leftovers stay as `customRules` and are checked per video by AI.
@@ -74,10 +75,12 @@ mid-onboarding stack swaps and onboarding flashes.
 
 ### Pairing the kid's device
 Kid app signs in anonymously (it waits for auth before rendering anything — Firestore listeners started
-earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars, no auth needed)
-→ parent enters it on Home → `claimPairingCode` writes `{claimed, parentId, childId, childName}` → kid app
-sees the update and saves the session in AsyncStorage (`useSession`). To unpair: clear app data
-(`adb shell pm clear com.kideos.app`).
+earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars) including its
+own anonymous UID as `deviceUid` → parent enters the code on Home → `claimPairingCode`, in one batch, adds
+`deviceUid` to the child's **`kidDeviceUids`** and marks the code claimed → kid app sees the update and saves
+the session in AsyncStorage (`useSession`). **Security rules only let devices in `kidDeviceUids` read that
+child's whitelist, verdicts and session** (`isKid()` in `firestore.rules`). To unpair: clear app data
+(`adb shell pm clear com.kideos.app`) and pair again; removing a device from `kidDeviceUids` revokes it.
 
 ### Adding a channel → analysis
 1. Parent adds a URL/@handle → callable **`resolveAndAddChannel`**: `channels.list` (1 unit), creates
@@ -94,21 +97,24 @@ sees the update and saves the session in AsyncStorage (`useSession`). To unpair:
    - **Decision** (`decideForChild`): `evaluateProfile(profile, answers)`; if not already hidden and the
      parent set religion text / custom rules → `checkValuesRules` (AI on the short summary, cached per
      rules hash in `videoProfiles/{v}/valuesChecks/{hash}`).
-   - **Write** (one batch): verdict (`approved` honours `parentDecision`, which is never overwritten) +
-     review-queue sync (`flaggedContent/{videoId}`; removed when approved; not touched once the parent
-     decided). Push notification only for `pending_review` (see backlog: tokens not registered yet).
+   - **Write** the verdict: `status`, `reason`, `ratings` (the video's non-zero ladder levels + evidence),
+     channel name, title/thumbnail; `approved` honours `parentDecision` ("Show anyway"), which the
+     pipeline never overwrites. No notifications, no queue.
 
 ### Changing answers
 `saveValueFilters` overwrites `valueFilters/current` → **`onFiltersChanged`** (skips no-op writes, deduped)
 → `reapplyFiltersForChild`: for every `ready` channel, every video with a current-version profile →
-`decideForChild` → verdict + queue updates in batches, `videoCount` per channel. Videos without a
-current profile are left as they are (re-add the channel to re-profile). No notifications on re-apply.
+`decideForChild` → verdicts in batches, `videoCount` per channel. Videos without a current profile are
+left as they are (re-add the channel to re-profile).
 
-### Review queue ("Ask me first")
-Home shows `flaggedContent` (pending first). **Approve / Keep hidden / Allow anyway** call
-`resolveReview`: one batch sets `videoVerdicts/{v}.{parentDecision, approved}` (rules only allow those two
-fields, and `approved` must equal `parentDecision == "approved"`) and marks the queue entry
-`{parentViewed, resolution}`. Older flags (before the queue) only have "Mark as reviewed".
+### Videos screen (Shown / Hidden)
+Home → "{child}'s videos" → `VideosScreen`: all of the child's verdicts (`subscribeToVerdicts`), split into
+**Shown** and **Hidden**. Each card shows the video's ratings as chips; hidden ones show *why* in plain
+words, including the parent's limit (e.g. "Moderate swearing (sh\*t ×3) — your limit: Mild swearing").
+Nothing needs action — parents look when they want to. **"Show anyway…"** opens a confirmation screen
+(the safe button is "Keep it hidden"); confirming calls `setShowAnyway` → `parentDecision: "approved"`,
+`approved: true`. **Undo** (on Shown) deletes `parentDecision` and puts `approved` back to `status`. Rules
+only allow those two fields and require `approved` to match.
 
 ### Watching + remote control
 Kid feed: `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first, filtered to
@@ -119,7 +125,7 @@ to `currentSession/playSignal` → kid app listener.
 
 ### Nightly / weekly jobs
 - **`refreshChannelLibraries`** (03:00 UTC): new uploads per whitelisted channel → stubs → analyzed for each
-  child who has the channel (profiles shared). ⚠️ Broken pacing — see backlog.
+  child who has the channel (profiles shared). Channels run back to back (no stagger).
 - **`cleanupExpiredData`** (02:00 UTC): deletes `watchHistory` past `expiresAt` (COPPA 90 days) + legacy
   analysis-cache entries.
 - **`generateWeeklyDigest`** (Mon 08:00 UTC, Premium): GPT summary of the week. ⚠️ Path mismatch — see backlog.
@@ -135,25 +141,25 @@ child doc.
 | Path | Contents | Written by | Read by |
 |---|---|---|---|
 | `users/{p}` | parent profile (email, createdAt) | parent app | parent |
-| `users/{p}/devices/primary` | FCM token (`fcmToken`) | *nothing yet — see backlog* | functions |
-| `users/{p}/children/{c}` | child profile (name, age, avatar, mode) | parent app | parent, kid |
-| `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | functions, kid |
+| `users/{p}/children/{c}` | child profile (name, age, avatar, mode) + `kidDeviceUids` (paired kid devices) | parent app | parent, that child's paired kid devices |
+| `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | parent, functions |
 | `…/children/{c}/whitelistedChannels/{ch}` | name, thumbnail, `seedingStatus` pending/ready/error, `videoCount` | functions (create), parent (delete) | parent, kid |
-| `…/children/{c}/videoVerdicts/{v}` | `approved`, `status`, `reason`, `flags`, `severity`, title/thumbnail/publishedAt, `parentDecision?` | functions; parent may set `parentDecision`+`approved` only | kid feed, parent |
-| `…/children/{c}/flaggedContent/{v}` | review queue: title, channel, reason, flags, severity, `status`, `parentViewed?`, `resolution?` (old entries: auto IDs, no status) | functions; parent may set `parentViewed`/`resolution` | parent |
+| `…/children/{c}/videoVerdicts/{v}` | `approved`, `status` (approved/hidden), `reason`, `ratings`, `flags`, `severity`, channel/title/thumbnail/publishedAt, `parentDecision?` | functions; parent may set/clear `parentDecision`+`approved` only | kid feed, Videos screen |
+| `…/children/{c}/flaggedContent/{v}` | **legacy** review queue — no longer written or shown | — | — |
 | `…/children/{c}/watchHistory/{id}` | video, start/end, duration, `expiresAt` | kid app | parent, digest |
 | `…/children/{c}/currentSession/nowPlaying·parentCommand·playSignal` | live session + remote control | kid / parent / function | both |
 | `…/children/{c}/suggestions/{id}` | AI channel suggestions + `parentResponse` | functions | parent |
 | `…/children/{c}/digests/{week}` | weekly digest | functions | *(parent reads the wrong path — backlog)* |
-| `pairingCodes/{code}` | pairing handshake | kid (create), parent (claim) | both |
+| `pairingCodes/{code}` | pairing handshake: `deviceUid` (kid's anonymous UID), `claimed`, `parentId`, `childId` | kid (create, own UID only), parent (claim as self) | signed-in users |
 | `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata + video stubs (`approved` field is legacy) | functions | kid (metadata), functions |
 | `videoProfiles/{v}` (+ `/valuesChecks/{hash}`) | content profiles, values-check cache | functions | functions only |
 | `transcriptCache/{v}` | transcript text, or `{available: false}` when confirmed none | functions | functions only |
 | `triggerEvents/{eventId}` | dedupe markers for at-least-once triggers | functions | functions only |
 | `videoAnalysisCache/…` | **legacy** (pre-profile verdict cache), unused — safe to delete | — | — |
 
-Rules: `firestore.rules`. Kid app = any signed-in (anonymous) user may read a child's filters, whitelist,
-verdicts, session; server-only collections are default-deny. Indexes: `firestore.indexes.json` (notably
+Rules: `firestore.rules` (tested in `tests/rules/`). Kid devices can read only their own child's whitelist,
+verdicts and session (`isKid`: UID in `kidDeviceUids`), write `nowPlaying` and watch sessions; parents own
+everything under `users/{their uid}`; server-only collections are default-deny. Indexes: `firestore.indexes.json` (notably
 `videoVerdicts: approved ASC, publishedAt DESC` for the kid feed).
 
 ## Backend (`functions/src`)
@@ -163,9 +169,9 @@ verdicts, session; server-only collections are default-deny. Indexes: `firestore
 | `index.ts` | Exports every deployed function |
 | `config.ts` | Secrets (`YOUTUBE_API_KEY`, `SUPADATA_API_KEY`, `OPENAI_API_KEY`) + `APP_CONFIG` (model, region, 50 videos/channel) |
 | `seedChannelLibrary.ts` | `resolveAndAddChannel`, `onChannelWhitelisted`, `onFiltersChanged`, `refreshChannelLibraries`, `seedChannelLibrary` (legacy callable, unused by the app); internal `seedVideoMetadata`, `batchAnalyzeChannel`, `seedAndAnalyzeInBackground` |
-| `analyzeVideo.ts` | Per-video pipeline: `analyzeAndTagVideo`, `reapplyFiltersForChild`, `loadValueFiltersForChild`; internal `getOrCreateProfile`, `decideForChild`, `writeVerdict`, `syncReviewQueue`, `getTranscriptCached`, `notifyParent` |
+| `analyzeVideo.ts` | Per-video pipeline: `analyzeAndTagVideo`, `reapplyFiltersForChild`, `loadValueFiltersForChild`; internal `getOrCreateProfile`, `decideForChild`, `writeVerdict`, `summarizeRatings`, `getTranscriptCached` |
 | `aiAnalysis.ts` | `generateContentProfile` (profile prompt + validation), `swearFloor` and regexes (code-counted swearing, God's-name exclamations, `[Music]`), `checkValuesRules`, `needsValuesCheck`, `hashValuesRules`, `PROFILE_VERSION` |
-| `contentFilter.ts` | `evaluateProfile(profile, answers, valuesViolation?)` → status/reason/flags/severity — the whole matching logic, pure code |
+| `contentFilter.ts` | `evaluateProfile(profile, answers, valuesViolation?)` → approved/hidden + plain-words reason (with the parent's limit), flags, severity — the whole matching logic, pure code |
 | `prefs.ts` | Questionnaire: `DIMS`, `LEVEL_LABELS`, `HOLIDAYS`, `VALUE_FLAGS`, `AGE_TABLE`, `defaultPrefs`, `normalizePrefs`, `describePrefs` |
 | `customRules.ts` | `parseCustomRules` callable (free text → whitelisted setting changes) |
 | `supadata.ts` | `fetchTranscript` — one queued request (≈1/sec), `text=true&lang=en`, no retries; marks "no transcript" as `definitive` |
@@ -185,11 +191,12 @@ verdicts, session; server-only collections are default-deny. Indexes: `firestore
 **Parent app (`apps/KideosParent`)** — `App.tsx` (routing), `hooks/useAuth.ts`, `store/useStore.ts`
 (Zustand; `useSelectedChild()` is a hook), `components/FiltersForm.tsx` (questionnaire), `prefs.ts` (copy),
 screens: `auth/AuthScreen`, `onboarding/CreateChild · SetFilters · AddChannels`, `main/Home` (now watching,
-remote control, review queue, pairing), `main/Channels`, `main/Digest`, `main/Settings` (children,
-questionnaire, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
+remote control, link to Videos, pairing), `main/VideosScreen` (Shown / Hidden + reasons, Show anyway),
+`main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
 signs out of Google), children, `saveValueFilters` / `getValueFilters` (raw → `normalizePrefs`), channels
-(`addChannel` → `resolveAndAddChannel`, `removeChannel`), `resolveReview`, `parseCustomRules`,
-`claimPairingCode`, `sendPlaySignal`, subscriptions, `callFunction` helper for callables.
+(`addChannel` → `resolveAndAddChannel`, `removeChannel`), `subscribeToVerdicts`, `setShowAnyway`,
+`parseCustomRules`, `claimPairingCode` (also registers the kid device), `sendPlaySignal`, subscriptions,
+`callFunction` helper for callables.
 
 ## Cost controls
 

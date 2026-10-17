@@ -20,32 +20,24 @@ agreement table). See [questionnaire-research.md](questionnaire-research.md) →
 
 ## 2. Confirmed bugs
 
-- **Push notifications never arrive.** The parent app never saves its FCM token to
-  `users/{p}/devices/primary`, so `notifyParent` and the digest push have no device. Needs: request
-  notification permission, get the token (`@react-native-firebase/messaging`), save it, refresh on change.
 - **Weekly digest broken end to end.** `generateWeeklyDigest` writes `users/{p}/children/{c}/digests/{week}`,
   the parent app reads `users/{p}/digests`, and `firestore.rules` has no rule for the child-level path (so
   the parent couldn't read it anyway). Fix the path (per child), the rule, and DigestScreen's per-child view.
-- **Nightly refresh times out.** `refreshChannelLibraries` sleeps `max(2s, 18h ÷ channels)` between
-  channels inside a 9-minute function → with fewer than ~120 channels it handles one channel and dies, so
-  new uploads aren't analyzed. Replace the stagger (e.g. one task per channel, or no sleep — quota use is tiny).
-- **Notifications would say "Your child".** `batchAnalyzeChannel` reads the name from
-  `children/{c}/profile/current`, but the name is on the child doc itself.
 - **Re-apply skips videos with an old profile version** (they keep their old verdict until the channel is
   re-added). Could regenerate missing/old profiles in the background instead.
-- **Verdicts for removed channels linger.** The kid feed filters them out, but `videoVerdicts` and queue
-  entries for a removed channel stay. Clean up on whitelist delete.
+- **Verdicts for removed channels linger.** The kid feed filters them out, but `videoVerdicts` for a
+  removed channel stay (and show in the Videos screen). Clean up on whitelist delete.
+- **Weekly digest push** would need an FCM token, which the app never registers — fine for now (no
+  notifications by design), but decide when fixing the digest.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
   that part, and add a TTL/cleanup for `triggerEvents`.
 - **Kid app type error:** `PlayerScreen.tsx(111)` implicit `any` (pre-existing).
 
 ## 3. Security
 
-- **Kid-app reads are too broad.** Rules let *any* signed-in (anonymous) user read any child's filters,
-  whitelist, verdicts and session if they know the IDs. Bind kid devices to their child at pairing
-  (e.g. store the device's anonymous UID on the child and check it in rules, or custom claims).
-- `pairingCodes` allow create/read without auth (by design for pairing) — add expiry cleanup and rate
-  limiting.
+- `pairingCodes`: expired codes are never deleted, and there's no rate limiting on creating/claiming.
+- No way to see or remove paired kid devices in the parent app (`kidDeviceUids` can only be edited in the
+  console).
 
 ## 4. Missing features (from the May review, still open)
 
@@ -78,7 +70,8 @@ agreement table). See [questionnaire-research.md](questionnaire-research.md) →
   build-time copy with a check.
 - Remove the unused `seedChannelLibrary` callable and unused `APP_CONFIG` constants
   (`CACHE_HIT_TARGET_MS`, `PIPELINE_TIMEOUT_MS`, `PRE_ANALYSIS_BATCH_SIZE`).
-- Old `flaggedContent` docs (auto IDs, no `status`) only support "Mark as reviewed" — clean up or migrate.
+- Legacy `flaggedContent` docs and `@react-native-firebase/messaging` are no longer used — delete the
+  collection data and consider dropping the dependency.
 
 ## Done (Oct 2026)
 
@@ -86,4 +79,7 @@ Fixed from the May list: kid feed channel names, "Add Another Child" getting stu
 sign-in/sign-out account picker, `snap.exists()` crashes and the pairing-code check, kid-app anonymous-auth
 race, analysis running as its own function (no more stalls), transcripts actually used and cached,
 Supadata cost controls, per-child verdicts (fixed approvals being shared between families), content
-profiles + the research-based questionnaire, the review queue ("Ask me first"), free text → settings.
+profiles + the research-based questionnaire, free text → settings. Oct 17: nightly refresh fixed (no
+stagger); "Ask me first" + review queue + push notifications replaced by the Videos screen (Shown / Hidden
+with reasons, confirmed "Show anyway"); kid devices bound to their child at pairing (`kidDeviceUids`) with
+emulator-tested rules.

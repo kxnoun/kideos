@@ -17,8 +17,11 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
 - **Long work must not run after a callable returns** (Cloud Functions v2 throttles CPU) — use a
   Firestore trigger, like `onChannelWhitelisted`.
 - Firestore triggers are at-least-once: dedupe with `triggerEvents/{event.id}` `.create()`.
-- Verdicts are **per child** (`videoVerdicts`); the parent's `parentDecision` always wins and must never be
-  overwritten by the pipeline.
+- Verdicts are **per child** (`videoVerdicts`), `approved` or `hidden` — no approval queue, no push
+  notifications (product decision: less work for parents). The parent's `parentDecision` ("Show anyway")
+  always wins and must never be overwritten by the pipeline.
+- Kid devices only get access through pairing (`kidDeviceUids` on the child, `isKid()` in the rules).
+  Rule changes → run `tests/rules/` (see development.md).
 - Android on Windows: two-terminal build (Metro `--port 8082`/`8083` + `gradlew app:installDebug
   -PreactNativeDevServerPort=…`), never `react-native run-android`. Physical phone needs `adb reverse`.
 - App logs are in `adb logcat -s ReactNativeJS`, **not** the Metro terminal (RN ≥ 0.77).
