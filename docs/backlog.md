@@ -18,6 +18,12 @@ Everything depends on the AI rating videos correctly, and we haven't measured it
 Plan: build a small labeling page (one video at a time, same questions, saves answers, outputs the
 agreement table). See [questionnaire-research.md](questionnaire-research.md) → Known limits.
 
+Known from real data (Oct 17): **gambling is over-detected.** It's present/absent only, and the AI marks
+passing mentions as present — SciShow's "Power Pose" video (a study measuring risk-taking with a bet),
+Casually Explained's "Sports II" ("mention of gambling on golf"). For a child with gambling = none these
+get hidden. Fix in the prompt: only actual betting/casino/loot-box content shown or promoted, not
+mentions — check it in the labeling round.
+
 ## 1b. Before launch: fill the suggestions catalog — *after the labeling check*
 
 Analyse ~500 well-known kids' channels up front so suggestions are useful from day one (the catalog then

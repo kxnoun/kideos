@@ -271,13 +271,16 @@ export function whyNot(s: ChannelSuggestion): string {
 }
 
 // The worst of the worst, whatever the child's settings: the top of a ladder the
-// child hasn't allowed (strong swearing, graphic violence, drinking/drugs shown,
-// gambling…) or an always-hidden level (self-harm, explicit sexual content).
+// child hasn't allowed (strong swearing, graphic violence, drinking/drugs shown…)
+// or an always-hidden level (self-harm, explicit sexual content).
 function severeDims(p: CompactProfile, prefs: Parameters<typeof evaluateProfile>[1]): Dim[] {
   return DIMS.filter((dim) => {
     const lvl = p.dims[dim]?.level;
     if (lvl === null || lvl === undefined) return false;
     if (dim === "selfHarm" && lvl >= 3) return true;
+    // Gambling is only present/absent (present = 4), so a passing mention ("a gamble"
+    // in a psychology study) would count as severe — it still lowers the fit share
+    if (dim === "gambling") return false;
     return lvl === 4 && prefs.rules[dim].max < 4;
   });
 }

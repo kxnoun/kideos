@@ -145,7 +145,8 @@ Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannel
 in the child's list or dismissed. **A suggestion vouches for the channel, so the bar is higher than for
 adding one:** ≥10 checked videos (no-transcript ones are left out — unknown, not bad), ≥75% of them fit, and *no*
 severe video — severe in absolute terms, not relative to the child's strictness: the top of a ladder the
-child hasn't allowed (strong swearing, graphic violence, drinking shown…) or self-harm ≥3. So a channel
+child hasn't allowed (strong swearing, graphic violence, drinking shown…) or self-harm ≥3. Gambling doesn't
+count (it's present/absent, so a passing mention would be "severe"). So a channel
 where only the mild Shorts pass (EpicMealTime) is never suggested, but SciShow isn't sunk by one predator
 video. Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
 channel's content counts, so it mentions heavy content plainly. Then it ranks by share of fitting videos (then educational share if the parent
