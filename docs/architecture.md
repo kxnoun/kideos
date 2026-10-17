@@ -76,11 +76,11 @@ mid-onboarding stack swaps and onboarding flashes.
 ### Pairing the kid's device
 Kid app signs in anonymously (it waits for auth before rendering anything — Firestore listeners started
 earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars) including its
-own anonymous UID as `deviceUid` → parent enters the code on Home → `claimPairingCode`, in one batch, adds
-`deviceUid` to the child's **`kidDeviceUids`** and marks the code claimed → kid app sees the update and saves
-the session in AsyncStorage (`useSession`). **Security rules only let devices in `kidDeviceUids` read that
-child's whitelist, verdicts and session** (`isKid()` in `firestore.rules`). To unpair: clear app data
-(`adb shell pm clear com.kideos.app`) and pair again; removing a device from `kidDeviceUids` revokes it.
+→ parent enters the code on Home → `claimPairingCode` marks it claimed with `parentId`/`childId` → kid app
+sees the update and saves the session in AsyncStorage (`useSession`). To unpair: clear app data
+(`adb shell pm clear com.kideos.app`) and pair again.
+⚠️ Kid paths in the rules allow **any signed-in device** (`isKid()` = signed in). Device binding
+(`kidDeviceUids`) was built on Oct 17 and reverted the same day — see backlog → Security.
 
 ### Adding a channel → analysis
 1. Parent adds a URL/@handle → callable **`resolveAndAddChannel`**: `channels.list` (1 unit), creates
@@ -132,16 +132,31 @@ to `currentSession/playSignal` → kid app listener.
 - **`weeklyChannelSuggestions`** (Mon 10:00 UTC): AI channel picks per child.
 
 ### COPPA deletion
-Settings → delete child data → callable **`deleteChildData`**: hard-deletes the child's subcollections
-(watch history, flagged, suggestions, whitelist, verdicts, digests, session, filters, profile) and the
-child doc.
+Settings → delete child data → callable **`deleteChildData`**: `recursiveDelete` on the child doc — the doc
+and every subcollection under it, however large.
+
+### Suggested channels
+Every channel any family adds gets a shared **channel profile** in `channelCatalog/{channelId}`
+(`buildCatalogEntry`, run after seeding and after the nightly refresh): the channel's 50 latest analyzed
+videos as compact profiles, top topics, and a 2–3 sentence overview (the only AI call, once per channel).
+No Supadata, no per-video AI — it reuses `videoProfiles`.
+Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannelSuggestions`**: runs
+`evaluateProfile` on every catalog video against the child's answers (pure code), skips channels already
+in the child's list or dismissed, ranks by share of fitting videos (then educational share if the parent
+ticked that). Each card: overview, "X of 50 videos fit", top reasons the rest would be hidden, what's in the
+videos that would show, sample videos. Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never
+suggested again); swipe right → maybe later (skipped this time). Adding is a tap on "Add to {child}'s
+feed" (→ `resolveAndAddChannel`) — never a swipe. Custom rules / religion text aren't applied to
+suggestions; they apply once the channel is added. Channels added before this feature are backfilled
+(up to 10 per `getChannelSuggestions` call).
 
 ## Firestore data model
 
 | Path | Contents | Written by | Read by |
 |---|---|---|---|
 | `users/{p}` | parent profile (email, createdAt) | parent app | parent |
-| `users/{p}/children/{c}` | child profile (name, age, avatar, mode) + `kidDeviceUids` (paired kid devices) | parent app | parent, that child's paired kid devices |
+| `users/{p}/children/{c}` | child profile (name, age, avatar, mode) | parent app | parent, signed-in kid devices |
+| `…/children/{c}/dismissedSuggestions/{ch}` | "Not for us" on a suggested channel | parent | parent |
 | `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | parent, functions |
 | `…/children/{c}/whitelistedChannels/{ch}` | name, thumbnail, `seedingStatus` pending/ready/error, `videoCount` | functions (create), parent (delete) | parent, kid |
 | `…/children/{c}/videoVerdicts/{v}` | `approved`, `status` (approved/hidden), `reason`, `ratings`, `flags`, `severity`, channel/title/thumbnail/publishedAt, `parentDecision?` | functions; parent may set/clear `parentDecision`+`approved` only | kid feed, Videos screen |
@@ -150,15 +165,16 @@ child doc.
 | `…/children/{c}/currentSession/nowPlaying·parentCommand·playSignal` | live session + remote control | kid / parent / function | both |
 | `…/children/{c}/suggestions/{id}` | AI channel suggestions + `parentResponse` | functions | parent |
 | `…/children/{c}/digests/{week}` | weekly digest | functions | *(parent reads the wrong path — backlog)* |
-| `pairingCodes/{code}` | pairing handshake: `deviceUid` (kid's anonymous UID), `claimed`, `parentId`, `childId` | kid (create, own UID only), parent (claim as self) | signed-in users |
+| `pairingCodes/{code}` | pairing handshake: `claimed`, `parentId`, `childId` | kid (create), parent (claim) | anyone |
 | `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata + video stubs (`approved` field is legacy) | functions | kid (metadata), functions |
+| `channelCatalog/{ch}` | shared channel profile for suggestions (compact video profiles, overview, topics) | functions | functions only |
 | `videoProfiles/{v}` (+ `/valuesChecks/{hash}`) | content profiles, values-check cache | functions | functions only |
 | `transcriptCache/{v}` | transcript text, or `{available: false}` when confirmed none | functions | functions only |
 | `triggerEvents/{eventId}` | dedupe markers for at-least-once triggers | functions | functions only |
 | `videoAnalysisCache/…` | **legacy** (pre-profile verdict cache), unused — safe to delete | — | — |
 
-Rules: `firestore.rules` (tested in `tests/rules/`). Kid devices can read only their own child's whitelist,
-verdicts and session (`isKid`: UID in `kidDeviceUids`), write `nowPlaying` and watch sessions; parents own
+Rules: `firestore.rules`. Kid devices (any signed-in device — binding reverted) can read a child's whitelist,
+verdicts and session, write `nowPlaying` and watch sessions; parents own
 everything under `users/{their uid}`; server-only collections are default-deny. Indexes: `firestore.indexes.json` (notably
 `videoVerdicts: approved ASC, publishedAt DESC` for the kid feed).
 
@@ -176,7 +192,8 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `customRules.ts` | `parseCustomRules` callable (free text → whitelisted setting changes) |
 | `supadata.ts` | `fetchTranscript` — one queued request (≈1/sec), `text=true&lang=en`, no retries; marks "no transcript" as `definitive` |
 | `youtube.ts` | `parseChannelInput`, `getChannelDetails`, `getChannelVideos`, `getVideoDetails`, `verifyChannelHandles` — never `search.list` |
-| `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` |
+| `channelCatalog.ts` | Suggested channels: `buildCatalogEntry` (shared channel profile), `scoreChannel`, `getChannelSuggestions` callable |
+| `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
 | `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` |
 | `types.ts` | Firestore types (`ContentProfile`, `VideoVerdict`, `FlaggedContent`, …) |
 

@@ -19,7 +19,7 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 - After an edit that adds/removes hooks or state, fully restart the app ("Should have a queue" = hot reload
   confusion, not a bug).
 - Reset the kid app's pairing: `adb shell pm clear com.kideos.app`, then pair again from the parent app
-  (a device only gets access to a child through pairing — see `kidDeviceUids`).
+  (this also unpairs it).
 
 ## Logs
 

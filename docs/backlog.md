@@ -18,6 +18,20 @@ Everything depends on the AI rating videos correctly, and we haven't measured it
 Plan: build a small labeling page (one video at a time, same questions, saves answers, outputs the
 agreement table). See [questionnaire-research.md](questionnaire-research.md) → Known limits.
 
+## 1b. Before launch: fill the suggestions catalog — *after the labeling check*
+
+Analyse ~500 well-known kids' channels up front so suggestions are useful from day one (the catalog then
+grows by itself as families add channels). One-time cost ≈ $70–75: one month of Supadata **Mega** ($47,
+30k credits — cancel after) for ~25k transcripts + ~$25 OpenAI. Needs: a channel list sorted by age and
+topic (draft it, sister trims it), and a batch job that seeds + profiles a list of channels without a
+family attached (spread over 2–3 days for the YouTube quota). Do the labeling check first so we don't
+analyse 500 channels with a prompt we're about to change.
+
+- At ~500 channels, `getChannelSuggestions` reading the whole catalog per call gets heavy (~40 MB). Then:
+  precompute per-child scores (on answers change / catalog change), or pre-filter by age/topic.
+- Retire the older AI "suggest by description" feature (`suggestChannels`, Channels tab) once the new one
+  is proven.
+
 ## 2. Confirmed bugs
 
 - **Weekly digest broken end to end.** `generateWeeklyDigest` writes `users/{p}/children/{c}/digests/{week}`,
@@ -36,8 +50,12 @@ agreement table). See [questionnaire-research.md](questionnaire-research.md) →
 ## 3. Security
 
 - `pairingCodes`: expired codes are never deleted, and there's no rate limiting on creating/claiming.
-- No way to see or remove paired kid devices in the parent app (`kidDeviceUids` can only be edited in the
-  console).
+- **Kid devices aren't bound to their child.** Any signed-in device can read any child's whitelist,
+  verdicts and session if it knows the IDs. Binding (`kidDeviceUids` on the child, `isKid()` in the rules,
+  `deviceUid` in the pairing code) was built Oct 17 and reverted the same day: the parent app's onboarding
+  bug (below, fixed) made it look broken, and existing pairings need a re-pair when it ships. Redo it in a
+  calm moment: the rules + `tests/rules/` are in git history (commit bdf672f), plus a "paired devices" list
+  in the parent app so it can be managed without the console.
 
 ## 4. Missing features (from the May review, still open)
 
@@ -84,5 +102,5 @@ race, analysis running as its own function (no more stalls), transcripts actuall
 Supadata cost controls, per-child verdicts (fixed approvals being shared between families), content
 profiles + the research-based questionnaire, free text → settings. Oct 17: nightly refresh fixed (no
 stagger); "Ask me first" + review queue + push notifications replaced by the Videos screen (Shown / Hidden
-with reasons, confirmed "Show anyway"); kid devices bound to their child at pairing (`kidDeviceUids`) with
-emulator-tested rules.
+with reasons, confirmed "Show anyway"); suggested channels (shared channel profiles, swipe cards); deleting a child is recursive (device binding was
+reverted, see Security — so a kid device still doesn't notice its child was deleted until re-paired); fixed parent onboarding looping back to "Who is this for?" after Done.
