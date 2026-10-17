@@ -22,6 +22,7 @@ import {
   SafeAreaView,
 } from "react-native";
 import firestore from "@react-native-firebase/firestore";
+import auth from "@react-native-firebase/auth";
 import type { ChildSession } from "../types";
 
 interface Props {
@@ -51,6 +52,9 @@ export default function PairingScreen({ onPaired }: Props) {
       .doc(`pairingCodes/${newCode}`)
       .set({
         code: newCode,
+        // This device's anonymous UID — the parent's claim adds it to the child's
+        // kidDeviceUids, which the security rules check (App.tsx waits for auth first)
+        deviceUid: auth().currentUser?.uid,
         createdAt: firestore.FieldValue.serverTimestamp(),
         claimed: false,
         expiresAt: firestore.Timestamp.fromDate(
