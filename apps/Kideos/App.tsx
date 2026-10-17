@@ -13,13 +13,14 @@ import { View, ActivityIndicator, StyleSheet } from "react-native";
 import auth from "@react-native-firebase/auth";
 
 import { useSession } from "./src/hooks/useSession";
+import { watchPairing } from "./src/services/firebase";
 import PairingScreen from "./src/screens/PairingScreen";
 import FeedScreen from "./src/screens/FeedScreen";
 import PlayerScreen from "./src/screens/PlayerScreen";
 import type { ApprovedVideo, ChildSession } from "./src/types";
 
 export default function App() {
-  const { session, loading, saveSession } = useSession();
+  const { session, loading, saveSession, clearSession } = useSession();
   const [currentVideo, setCurrentVideo] = useState<ApprovedVideo | null>(null);
 
   // Sign in anonymously so Firestore security rules allow reads/writes.
@@ -40,6 +41,16 @@ export default function App() {
       });
     });
   }, []);
+
+  // If the parent deletes this child (or the device isn't bound to it),
+  // drop the saved pairing and go back to the pairing screen.
+  useEffect(() => {
+    if (!authed || !session?.paired) return;
+    return watchPairing(session.parentId, session.childId, () => {
+      setCurrentVideo(null);
+      clearSession();
+    });
+  }, [authed, session?.paired, session?.parentId, session?.childId, clearSession]);
 
   const handlePaired = useCallback(
     (newSession: ChildSession) => {
