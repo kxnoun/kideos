@@ -14,9 +14,10 @@ import type {
   ChildProfile,
   WhitelistedChannel,
   VideoVerdict,
-  ChannelSuggestion,
   WeeklyDigest,
   NowPlaying,
+  ChannelSuggestion,
+  SuggestedChannel,
 } from "../types";
 
 // TODO: paste your Web Client ID from Firebase Console →
@@ -205,6 +206,20 @@ export async function addChannel(
     "resolveAndAddChannel",
     { parentId, childId, input }
   );
+}
+
+// ─── Suggested channels ──────────────────────────────────────
+
+export async function getChannelSuggestions(parentId: string, childId: string): Promise<SuggestedChannel[]> {
+  const res = await callFunction<{ suggestions: SuggestedChannel[] }>("getChannelSuggestions", { parentId, childId });
+  return res.suggestions;
+}
+
+// "Not for us" — this channel is never suggested to this child again
+export async function dismissSuggestion(parentId: string, childId: string, channelId: string): Promise<void> {
+  await firestore()
+    .doc(`users/${parentId}/children/${childId}/dismissedSuggestions/${channelId}`)
+    .set({ dismissedAt: firestore.FieldValue.serverTimestamp() });
 }
 
 export async function removeChannel(

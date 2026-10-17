@@ -27,7 +27,7 @@ import { useStore } from "../../store/useStore";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Videos">;
 
-const DIM_TITLES: Record<Dim, string> = {
+export const DIM_TITLES: Record<Dim, string> = {
   violence: "Violence",
   scary: "Scary",
   language: "Language",

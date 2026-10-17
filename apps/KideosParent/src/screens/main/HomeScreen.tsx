@@ -257,6 +257,15 @@ export default function HomeScreen() {
               <Text style={styles.videosTitle}>📺 {selectedChild.profile.name}'s videos</Text>
               <Text style={styles.videosSub}>See what's shown and what's hidden, and why →</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.videosCard, { marginTop: 12 }]}
+              onPress={() =>
+                navigation.navigate("Suggestions", { childId: selectedChild.id, childName: selectedChild.profile.name })
+              }
+            >
+              <Text style={styles.videosTitle}>✨ Suggested channels</Text>
+              <Text style={styles.videosSub}>Channels that fit your answers for {selectedChild.profile.name} →</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>

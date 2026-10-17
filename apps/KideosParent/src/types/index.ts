@@ -88,7 +88,25 @@ export type RootStackParamList = {
   Main: undefined;
   // Pushed from Home
   Videos: { childId: string; childName: string };
+  Suggestions: { childId: string; childName: string };
 };
+
+// Suggested channel for one child (getChannelSuggestions) — scored against
+// that child's answers from the shared channel catalog
+export interface SuggestedChannel {
+  channelId: string;
+  name: string;
+  handle: string;
+  thumbnail: string;
+  overview: string;
+  topics: string[];
+  analyzed: number;
+  fitting: number;
+  educational: number;
+  hiddenReasons: { label: string; count: number }[];
+  ratings: { dim: Dim; maxLevel: number; count: number }[];
+  samples: { videoId: string; title: string; thumbnail: string }[];
+}
 
 export type MainTabParamList = {
   Home: undefined;
