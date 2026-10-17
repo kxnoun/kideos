@@ -442,7 +442,7 @@ async function seedAndAnalyzeInBackground(
 // Runs every night at 3am UTC.
 // Detects NEW videos from whitelisted channels (not yet in Firestore).
 // Analyzes only new videos — existing analyzed videos are untouched.
-// Staggered across channels to spread YouTube quota usage.
+// Channels are processed back to back (YouTube cost ~2 units per channel).
 
 export const refreshChannelLibraries = onSchedule(
   {
@@ -477,11 +477,6 @@ export const refreshChannelLibraries = onSchedule(
     }
 
     logger.info(`[refreshChannelLibraries] Refreshing ${channelParents.size} unique channels`);
-
-    const STAGGER_MS = Math.max(
-      2000,
-      Math.floor((18 * 60 * 60 * 1000) / Math.max(channelParents.size, 1))
-    );
 
     let successCount = 0;
     let failCount = 0;
@@ -561,9 +556,8 @@ export const refreshChannelLibraries = onSchedule(
         }
 
         successCount++;
-
-        // Stagger to spread quota usage across the day
-        await new Promise((r) => setTimeout(r, STAGGER_MS));
+        // (No stagger: sleeping between channels inside a 9-minute function made the
+        // job time out after the first channel. Quota use is tiny — ~2 units/channel.)
       } catch (err) {
         failCount++;
         logger.error(`[refreshChannelLibraries] Failed for channel ${channelId}:`, err);
