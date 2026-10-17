@@ -28,6 +28,7 @@ import AuthScreen from "./src/screens/auth/AuthScreen";
 import CreateChildScreen from "./src/screens/onboarding/CreateChildScreen";
 import SetFiltersScreen from "./src/screens/onboarding/SetFiltersScreen";
 import AddChannelsScreen from "./src/screens/onboarding/AddChannelsScreen";
+import VideosScreen from "./src/screens/main/VideosScreen";
 
 // Main tab screens
 import HomeScreen from "./src/screens/main/HomeScreen";
@@ -132,6 +133,7 @@ export default function App() {
             // ── Main app ────────────────────────────────────────
             <>
               <Stack.Screen name="Main" component={MainTabs} />
+              <Stack.Screen name="Videos" component={VideosScreen} />
               {/* Also available for adding new child profiles from Settings */}
               <Stack.Screen name="CreateChild" component={CreateChildScreen} />
               <Stack.Screen name="SetFilters" component={SetFiltersScreen} />

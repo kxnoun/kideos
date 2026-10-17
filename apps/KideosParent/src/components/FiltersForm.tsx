@@ -2,7 +2,7 @@
 // Kideos for Parents — FiltersForm (the per-child questionnaire)
 //
 // Each question is a ladder: the parent picks the most they're OK with, and
-// what happens to videos that go past it — hidden, or held for their review.
+// anything past it is hidden (parents can browse Shown / Hidden in the Videos screen).
 // Used by onboarding (SetFiltersScreen) and Settings.
 // ─────────────────────────────────────────────────────────────
 
@@ -15,7 +15,6 @@ import {
   VALUE_FLAGS,
   VALUE_FLAG_LABELS,
   type Dim,
-  type OverAction,
   type ValueFilters,
   type Tradition,
 } from "../prefs";
@@ -285,7 +284,7 @@ function LadderQuestion({
   title?: string;
 }) {
   const rule = value.rules[q.dim];
-  const setRule = (patch: Partial<{ max: number; action: OverAction }>) =>
+  const setRule = (patch: Partial<{ max: number }>) =>
     onChange({ ...value, rules: { ...value.rules, [q.dim]: { ...rule, ...patch } } });
   return (
     <View style={styles.card}>
@@ -308,15 +307,7 @@ function LadderQuestion({
           </TouchableOpacity>
         );
       })}
-      <Text style={[styles.label, { marginTop: 12 }]}>Videos that go past this:</Text>
-      <Segment
-        options={[
-          { value: "hide", label: "Hide them" },
-          { value: "review", label: "Ask me first" },
-        ]}
-        value={rule.action}
-        onChange={(action) => setRule({ action })}
-      />
+      <Text style={styles.optionExample}>Anything past this is hidden.</Text>
     </View>
   );
 }
@@ -335,7 +326,6 @@ function SectionHeader({ title, sub, open, onToggle }: { title: string; sub: str
 
 const FLAG_OPTIONS = [
   { value: "ok" as const, label: "OK" },
-  { value: "review" as const, label: "Ask me" },
   { value: "hide" as const, label: "Hide" },
 ];
 
@@ -357,7 +347,7 @@ export default function FiltersForm({
     onChange({ ...d, religiousSensitivity: value.religiousSensitivity, religion: value.religion, customRules: value.customRules });
   };
 
-  const setFlag = (f: (typeof VALUE_FLAGS)[number], rule: "ok" | "review" | "hide") =>
+  const setFlag = (f: (typeof VALUE_FLAGS)[number], rule: "ok" | "hide") =>
     onChange({ ...value, flags: { ...value.flags, [f]: rule } });
 
   const turnIntoSettings = async () => {
@@ -441,7 +431,6 @@ export default function FiltersForm({
         <Segment
           options={[
             { value: "allow", label: "Allow it" },
-            { value: "review", label: "Ask me" },
             { value: "hide", label: "Hide it" },
           ]}
           value={value.unknown}
@@ -489,7 +478,6 @@ export default function FiltersForm({
                   options={[
                     { value: "ok", label: "OK" },
                     { value: "incidental", label: "In passing" },
-                    { value: "review", label: "Ask me" },
                     { value: "hide", label: "Hide" },
                   ]}
                   value={value.holidays[h]}
@@ -540,9 +528,8 @@ export default function FiltersForm({
             {(
               [
                 { value: "allow", label: "Allow all" },
-                { value: "incidental", label: "Allow people being present; ask me about discussion" },
-                { value: "review", label: "Ask me about all of it" },
-                { value: "hide", label: "Hide discussion and advocacy" },
+                { value: "hide_discussion", label: "Allow people being present; hide discussion and advocacy" },
+                { value: "hide_all", label: "Hide all of it" },
               ] as const
             ).map((o) => (
               <TouchableOpacity
