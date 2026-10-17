@@ -25,12 +25,11 @@ function allowedValues(key: string): Array<string | number> | null {
   const [a, b, c] = key.split(".");
   if (a === "rules" && (DIMS as readonly string[]).includes(b)) {
     if (c === "max") return [0, 1, 2, 3, 4];
-    if (c === "action") return ["hide", "review"];
   }
-  if (a === "holidays" && (HOLIDAYS as readonly string[]).includes(b) && !c) return ["ok", "incidental", "review", "hide"];
-  if (a === "flags" && (VALUE_FLAGS as readonly string[]).includes(b) && !c) return ["ok", "review", "hide"];
-  if (key === "music") return ["ok", "review", "hide"];
-  if (key === "lgbtq") return ["allow", "incidental", "review", "hide"];
+  if (a === "holidays" && (HOLIDAYS as readonly string[]).includes(b) && !c) return ["ok", "incidental", "hide"];
+  if (a === "flags" && (VALUE_FLAGS as readonly string[]).includes(b) && !c) return ["ok", "hide"];
+  if (key === "music") return ["ok", "hide"];
+  if (key === "lgbtq") return ["allow", "hide_discussion", "hide_all"];
   return null;
 }
 
@@ -39,11 +38,11 @@ function catalog(): string {
   for (const d of DIMS) {
     lines.push(`rules.${d}.max: 0-4 — ${LEVEL_LABELS[d].map((l, i) => (l ? `${i}=${l}` : "")).filter(Boolean).join(", ")}`);
   }
-  lines.push(`rules.<dim>.action: "hide" | "review" (review = hidden until the parent approves)`);
-  for (const h of HOLIDAYS) lines.push(`holidays.${h} (${HOLIDAY_LABELS[h]}): "ok" | "incidental" (ok in passing, hidden as the theme) | "review" | "hide"`);
-  for (const f of VALUE_FLAGS) lines.push(`flags.${f} (${VALUE_FLAG_LABELS[f]}): "ok" | "review" | "hide"`);
-  lines.push(`music (videos with music, detected from captions): "ok" | "review" | "hide"`);
-  lines.push(`lgbtq: "allow" | "incidental" (allow presence, review discussion) | "review" | "hide" (hide discussion/advocacy)`);
+  lines.push(`(anything above a rules.<dim>.max level is hidden)`);
+  for (const h of HOLIDAYS) lines.push(`holidays.${h} (${HOLIDAY_LABELS[h]}): "ok" | "incidental" (ok in passing, hidden as the theme) | "hide"`);
+  for (const f of VALUE_FLAGS) lines.push(`flags.${f} (${VALUE_FLAG_LABELS[f]}): "ok" | "hide"`);
+  lines.push(`music (videos with music, detected from captions): "ok" | "hide"`);
+  lines.push(`lgbtq: "allow" | "hide_discussion" (presence OK, hide discussion/advocacy) | "hide_all"`);
   return lines.join("\n");
 }
 

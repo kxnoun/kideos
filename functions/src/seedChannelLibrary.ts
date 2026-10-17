@@ -103,25 +103,14 @@ async function batchAnalyzeChannel({
   supadataApiKey: string;
   openAiApiKey: string;
 }): Promise<{ approved: number; blocked: number }> {
-  const db = getFirestore();
 
   // Load value filters and child info once — not per video
   const filters = await loadValueFiltersForChild(parentId, childId);
-
-  const childProfileSnap = await db
-    .doc(`users/${parentId}/children/${childId}/profile/current`)
-    .get();
-  const childName: string = childProfileSnap.data()?.name ?? "Your child";
-
-  const fcmSnap = await db.doc(`users/${parentId}/devices/primary`).get();
-  const parentFcmToken: string | null = fcmSnap.data()?.fcmToken ?? null;
 
   const baseParams: Omit<AnalyzeAndTagParams, "videoId"> = {
     channelId,
     parentId,
     childId,
-    childName,
-    parentFcmToken,
     filters,
     youtubeApiKey,
     supadataApiKey,

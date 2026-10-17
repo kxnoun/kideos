@@ -8,10 +8,9 @@
 //      one AI call. Each video is profiled once, ever (per PROFILE_VERSION).
 //   2. Apply this child's filters in code (+ cached religion/custom-rules check).
 //   3. Write the child's verdict to users/{p}/children/{c}/videoVerdicts/{videoId}
-//      (approved / hidden / pending_review). The kid feed reads approved == true.
-//      A parentDecision set from the parent app always wins and is never overwritten.
-//   4. Keep flaggedContent/{videoId} in sync (the parent's review queue); push a
-//      notification only for videos waiting on the parent's review.
+//      (approved / hidden + reason + the video's ratings). The kid feed reads
+//      approved == true; the parent app's Videos screen shows Shown / Hidden.
+//      A parentDecision ("Show anyway") always wins and is never overwritten.
 //
 // reapplyFiltersForChild re-runs steps 2–3 for all of a child's videos when
 // their filters change — no transcripts, no profile AI calls.
@@ -19,7 +18,6 @@
 
 import { logger } from "firebase-functions/v2";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
-import { getMessaging } from "firebase-admin/messaging";
 import { getVideoDetails } from "./youtube";
 import { fetchTranscript, type TranscriptResult } from "./supadata";
 import {
@@ -31,7 +29,7 @@ import {
 } from "./aiAnalysis";
 import { evaluateProfile, type FilterDecision } from "./contentFilter";
 import { DIMS, VALUE_FLAGS, normalizePrefs } from "./prefs";
-import type { ValueFilters, FlaggedContent, ContentProfile, VideoVerdict } from "./types";
+import type { ValueFilters, ContentProfile, VideoVerdict } from "./types";
 
 type Db = FirebaseFirestore.Firestore;
 
@@ -40,8 +38,6 @@ export interface AnalyzeAndTagParams {
   channelId: string;
   parentId: string;
   childId: string;
-  childName: string;
-  parentFcmToken: string | null;
   filters: ValueFilters;
   youtubeApiKey: string;
   supadataApiKey: string;
@@ -52,13 +48,11 @@ export interface AnalyzeAndTagResult {
   approved: boolean;
 }
 
-// Hidden for technical reasons (retried / not reviewable) — kept out of the review queue
-const NON_CONTENT_FLAGS = new Set(["unavailable", "analysis_pending", "values_check_failed"]);
 
 // ── Core function ──────────────────────────────────────────────
 
 export async function analyzeAndTagVideo(params: AnalyzeAndTagParams): Promise<AnalyzeAndTagResult> {
-  const { videoId, channelId, parentId, childId, childName, parentFcmToken, filters } = params;
+  const { videoId, channelId, parentId, childId, filters } = params;
   const db = getFirestore();
 
   const profile = await getOrCreateProfile(db, videoId, params);
@@ -75,13 +69,8 @@ export async function analyzeAndTagVideo(params: AnalyzeAndTagParams): Promise<A
   const verdictRef = db.doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`);
   const parentDecision = (await verdictRef.get()).data()?.parentDecision;
   const batch = db.batch();
-  const approved = writeVerdict(db, parentId, childId, channelId, videoId, stub, decision, parentDecision, batch);
-  syncReviewQueue(db, parentId, childId, channelId, videoId, profile, decision, parentDecision, batch);
+  const approved = writeVerdict(db, parentId, childId, channelId, videoId, stub, profile, decision, parentDecision, batch);
   await batch.commit();
-
-  if (decision.status === "pending_review" && !parentDecision && parentFcmToken) {
-    await notifyParent(parentFcmToken, parentId, childId, childName, videoId, profile?.title ?? "", decision.reason);
-  }
   return { approved };
 }
 
@@ -192,6 +181,7 @@ function writeVerdict(
   channelId: string,
   videoId: string,
   stub: FirebaseFirestore.DocumentData,
+  profile: ContentProfile | null,
   decision: FilterDecision,
   parentDecision: "approved" | "hidden" | undefined,
   batch: FirebaseFirestore.WriteBatch
@@ -205,6 +195,10 @@ function writeVerdict(
     reason: decision.reason,
     flags: decision.flags,
     severity: decision.severity,
+    // What the video contains (non-zero ladders only), so the parent app can show
+    // why without reading server-only profiles
+    ratings: profile && profile.status === "ok" ? summarizeRatings(profile) : {},
+    channelName: profile?.channelName ?? "",
     title: stub.title ?? "",
     thumbnail: stub.thumbnail ?? "",
     publishedAt: stub.publishedAt ?? Timestamp.now(),
@@ -215,38 +209,13 @@ function writeVerdict(
   return approved;
 }
 
-// The parent's review queue: one flaggedContent doc per video (id = videoId).
-// Videos the parent already decided on are left alone.
-function syncReviewQueue(
-  db: Db,
-  parentId: string,
-  childId: string,
-  channelId: string,
-  videoId: string,
-  profile: ContentProfile | null,
-  decision: FilterDecision,
-  parentDecision: string | undefined,
-  batch: FirebaseFirestore.WriteBatch
-): void {
-  if (parentDecision) return;
-  const ref = db.doc(`users/${parentId}/children/${childId}/flaggedContent/${videoId}`);
-  if (decision.status === "approved" || !profile || decision.flags.some((f) => NON_CONTENT_FLAGS.has(f))) {
-    batch.delete(ref);
-    return;
+function summarizeRatings(profile: ContentProfile): VideoVerdict["ratings"] {
+  const out: VideoVerdict["ratings"] = {};
+  for (const dim of DIMS) {
+    const { level, evidence } = profile.dims[dim];
+    if (level === null || level > 0) out[dim] = { level, evidence };
   }
-  // parentViewed is not written here, so re-runs don't resurface items the parent dismissed
-  const entry: Omit<FlaggedContent, "parentViewed"> = {
-    videoId,
-    title: profile.title,
-    channel: profile.channelName,
-    channelId,
-    timestamp: Timestamp.now(),
-    reason: decision.reason,
-    flags: decision.flags,
-    severity: decision.severity ?? "low",
-    status: decision.status === "pending_review" ? "pending_review" : "hidden",
-  };
-  batch.set(ref, entry, { merge: true });
+  return out;
 }
 
 // ── Re-apply filters after a change ────────────────────────────
@@ -288,8 +257,7 @@ export async function reapplyFiltersForChild(
             const profile = snap.data() as ContentProfile;
             const decision = await decideForChild(db, videoDoc.id, profile, filters, openAiApiKey);
             const parentDecision = verdictSnaps[j + k].data()?.parentDecision;
-            const ok = writeVerdict(db, parentId, childId, channelId, videoDoc.id, videoDoc.data(), decision, parentDecision, batch);
-            syncReviewQueue(db, parentId, childId, channelId, videoDoc.id, profile, decision, parentDecision, batch);
+            const ok = writeVerdict(db, parentId, childId, channelId, videoDoc.id, videoDoc.data(), profile, decision, parentDecision, batch);
             if (ok) channelApproved++;
             else blocked++;
           })
@@ -335,38 +303,6 @@ async function getTranscriptCached(db: Db, videoId: string, supadataApiKey: stri
     });
   }
   return result;
-}
-
-// ── Push to parent: a video is waiting for their review ────────
-
-async function notifyParent(
-  fcmToken: string,
-  parentId: string,
-  childId: string,
-  childName: string,
-  videoId: string,
-  title: string,
-  reason: string
-): Promise<void> {
-  try {
-    await getMessaging().send({
-      token: fcmToken,
-      notification: {
-        title: "👀 Video needs your review",
-        body: `A video is waiting for your OK before it shows in ${childName}'s feed.`,
-      },
-      data: {
-        type: "video_review",
-        videoId,
-        videoTitle: title.slice(0, 100),
-        reason: reason.slice(0, 200),
-        childId,
-      },
-      apns: { payload: { aps: { sound: "default" } } },
-    });
-  } catch (err) {
-    logger.error(`[analyzeAndTagVideo] FCM notification failed for parent ${parentId}:`, err);
-  }
 }
 
 // ── Load value filters for a child ─────────────────────────────
