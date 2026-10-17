@@ -48,6 +48,9 @@ agreement table). See [questionnaire-research.md](questionnaire-research.md) →
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
 
+- **Suggested channels: re-check channels over time.** A channel's content can drift. Re-analyse catalog
+  channels every 6–12 months (channels someone follows already get new uploads analysed nightly).
+
 ## 5. Questionnaire follow-ups
 
 - **Time-of-day rules** ("no gaming after 5pm"): the AI ignores time; enforcing it needs the kid app to
