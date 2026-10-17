@@ -28,6 +28,8 @@ export {
 // weeklyChannelSuggestions: every Monday, generates for all Premium families
 export { suggestChannels, weeklyChannelSuggestions } from "./suggestChannels";
 
+export { getChannelSuggestions } from "./channelCatalog";
+
 // parseCustomRules: questionnaire free text → concrete settings (parent confirms)
 export { parseCustomRules } from "./customRules";
 

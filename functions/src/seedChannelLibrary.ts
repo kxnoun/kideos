@@ -29,6 +29,7 @@ import {
   reapplyFiltersForChild,
   type AnalyzeAndTagParams,
 } from "./analyzeVideo";
+import { buildCatalogEntrySafe } from "./channelCatalog";
 import type {
   SeedChannelRequest,
   ResolveChannelRequest,
@@ -418,6 +419,9 @@ async function seedAndAnalyzeInBackground(
       { merge: true }
     );
 
+    // Shared channel profile for suggestions (reuses the profiles just made)
+    await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
+
     logger.info(
       `[seedAndAnalyzeInBackground] Done: ${channelId} approved=${approved} blocked=${blocked}`
     );
@@ -543,6 +547,7 @@ export const refreshChannelLibraries = onSchedule(
             openAiApiKey: OPENAI_API_KEY.value(),
           });
         }
+        await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
 
         successCount++;
         // (No stagger: sleeping between channels inside a 9-minute function made the

@@ -95,6 +95,11 @@ service cloud.firestore {
         }
 
         // AI channel suggestions
+        // "Not for us" on a suggested channel — never suggested to this child again
+        match /dismissedSuggestions/{channelId} {
+          allow read, write: if isParent(parentId);
+        }
+
         match /suggestions/{suggestionId} {
           allow read: if isParent(parentId);
           allow update: if isParent(parentId)
