@@ -113,8 +113,11 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator key={inOnboarding ? 'onboarding' : 'main'} screenOptions={{ headerShown: false }}>
+      {/* Keyed so switching onboarding <-> main starts with a fresh history. Keying only
+          the navigator let the container carry the onboarding stack into main, so "Done"
+          popped back to CreateChild and every pass created another child. */}
+      <NavigationContainer key={inOnboarding ? 'onboarding' : 'main'}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
           {!isSignedIn ? (
             // ── Auth stack ──────────────────────────────────────
             <>
