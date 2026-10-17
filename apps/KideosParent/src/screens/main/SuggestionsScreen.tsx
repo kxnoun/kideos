@@ -202,12 +202,12 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
         </View>
       ) : null}
 
-      <View style={styles.fitBox}>
-        <Text style={styles.fitTitle}>
+      <View style={[styles.fitBox, pct < 0.8 && styles.fitBoxWarn]}>
+        <Text style={[styles.fitTitle, pct < 0.8 && styles.fitTitleWarn]}>
           {s.fitting} of {s.analyzed} videos fit {childName}'s settings
         </Text>
         <View style={styles.bar}>
-          <View style={[styles.barFill, { flex: pct }]} />
+          <View style={[styles.barFill, pct < 0.8 && styles.barFillWarn, { flex: pct }]} />
           <View style={{ flex: 1 - pct }} />
         </View>
         {hidden > 0 && s.hiddenReasons.length ? (
@@ -305,6 +305,10 @@ const styles = StyleSheet.create({
   fitTitle: { fontSize: 16, fontWeight: "800", color: "#1E7A44" },
   bar: { flexDirection: "row", height: 8, borderRadius: 4, backgroundColor: "#DDEFE3", overflow: "hidden", marginTop: 8 },
   barFill: { backgroundColor: "#2EAD5F" },
+  // Suggestions are ≥80% by rule; amber is a safety net so a weak channel never looks green
+  fitBoxWarn: { backgroundColor: "#FFF8EC" },
+  fitTitleWarn: { color: "#A86200" },
+  barFillWarn: { backgroundColor: "#E59A1F" },
   hiddenText: { fontSize: 13, color: "#555", marginTop: 8, lineHeight: 19 },
   sectionLabel: { fontSize: 13, fontWeight: "800", color: "#1A1A2E", marginTop: 18, textTransform: "uppercase", letterSpacing: 0.5 },
   cleanText: { fontSize: 13, color: "#888", marginTop: 6 },

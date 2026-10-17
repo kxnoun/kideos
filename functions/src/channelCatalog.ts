@@ -29,6 +29,15 @@ type Db = FirebaseFirestore.Firestore;
 const VIDEOS_PER_CHANNEL = 50;
 const MAX_SUGGESTIONS = 25;
 const BACKFILL_PER_CALL = 10;
+// Bump to rewrite every overview (e.g. when the overview prompt changes)
+const OVERVIEW_VERSION = 2;
+
+// A suggestion means "this channel suits your child", not "some of its videos do"
+// (a channel where only the mild Shorts pass is still not one to recommend):
+const MIN_ANALYZED = 10; // too few checked videos to judge a channel
+const MIN_FIT = 0.8; // at least 80% of checked videos fit the child's answers
+// …and no checked video may be far over the child's limits (severity "high": top
+// of a ladder, 3+ steps over the limit, or an always-hidden level).
 
 // Just what evaluateProfile needs, so a channel's 50 videos fit in one doc
 type CompactProfile = Pick<
@@ -51,6 +60,7 @@ export interface CatalogEntry {
   thumbnail: string;
   subscriberCount: number;
   overview: string;
+  overviewVersion: number;
   topics: string[];
   analyzedCount: number; // videos with a profile we can score
   educationalCount: number;
@@ -119,9 +129,10 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
 
   const ref = db.doc(`channelCatalog/${channelId}`);
   const existing = (await ref.get()).data() as Partial<CatalogEntry> | undefined;
+  const fresh = existing?.overview && existing.overviewVersion === OVERVIEW_VERSION;
   const overview =
-    existing?.overview ||
-    (await writeOverview(meta.name, meta.description ?? "", summaries, openAiApiKey)) ||
+    (fresh ? existing!.overview : null) ||
+    (await writeOverview(meta.name, meta.description ?? "", summaries, contentSummary(videos), openAiApiKey)) ||
     String(meta.description ?? "").slice(0, 240);
 
   const entry: CatalogEntry = {
@@ -131,6 +142,7 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
     thumbnail: meta.thumbnail ?? "",
     subscriberCount: meta.subscriberCount ?? 0,
     overview,
+    overviewVersion: OVERVIEW_VERSION,
     topics: [...topicCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t),
     analyzedCount: videos.length,
     educationalCount,
@@ -142,7 +154,27 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
   logger.info(`[channelCatalog] Built ${meta.name} (${channelId}): ${videos.length} videos`);
 }
 
-async function writeOverview(name: string, description: string, summaries: string[], apiKey: string): Promise<string | null> {
+// How much of the channel has stronger content, per category — so the overview
+// can't call a channel "light-hearted" when half of it is liquor and swearing
+function contentSummary(videos: CatalogVideo[]): string {
+  const ok = videos.filter((v) => v.p.status === "ok");
+  const lines: string[] = [];
+  for (const dim of DIMS) {
+    const strong = ok.filter((v) => (v.p.dims[dim]?.level ?? 0) >= 2).length;
+    if (!strong) continue;
+    const worst = Math.max(...ok.map((v) => v.p.dims[dim]?.level ?? 0));
+    lines.push(`• ${DIM_WORDS[dim]}: ${strong} of ${ok.length} videos at "${LEVEL_LABELS[dim][2]}" or stronger (worst: "${LEVEL_LABELS[dim][worst]}")`);
+  }
+  return lines.length ? lines.join("\n") : `None of the ${ok.length} checked videos have more than mild content.`;
+}
+
+async function writeOverview(
+  name: string,
+  description: string,
+  summaries: string[],
+  content: string,
+  apiKey: string
+): Promise<string | null> {
   try {
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({
@@ -152,12 +184,15 @@ async function writeOverview(name: string, description: string, summaries: strin
           role: "system",
           content:
             "You write a 2–3 sentence overview of a YouTube channel for parents choosing channels for their kids. " +
-            "Say what the channel's videos are about and what they're like. Plain, neutral words. No ratings, no advice, no hype. " +
-            "Only use what the description and video summaries say.",
+            "Say what the channel's videos are about and what they're like. Plain, neutral words. No advice, no hype. " +
+            "Only use what you're given. You also get a count of videos with stronger content: if a notable share of " +
+            "videos have it (roughly 1 in 5 or more), or any are at the strongest level, say so plainly in the last " +
+            "sentence (e.g. \"Many videos include heavy drinking and strong swearing.\"). Never describe a channel as " +
+            "family-friendly or light-hearted if the counts say otherwise.",
         },
         {
           role: "user",
-          content: `CHANNEL: ${name}\nDescription: ${description.slice(0, 600)}\n\nRecent videos:\n${summaries.map((s) => `• ${s}`).join("\n")}`,
+          content: `CHANNEL: ${name}\nDescription: ${description.slice(0, 600)}\n\nRecent videos:\n${summaries.map((s) => `• ${s}`).join("\n")}\n\nStronger content across the checked videos:\n${content}`,
         },
       ],
       max_tokens: 160,
@@ -190,6 +225,7 @@ export interface ChannelSuggestion {
   topics: string[];
   analyzed: number;
   fitting: number;
+  severe: number; // videos far over the child's limits — any one rules the channel out
   educational: number;
   hiddenReasons: { label: string; count: number }[]; // why the other videos wouldn't show, top 3
   ratings: { dim: Dim; maxLevel: number; count: number }[]; // what's in the videos that WOULD show
@@ -219,8 +255,13 @@ function flagLabel(flag: string): string {
   return LEVEL_LABELS[dim][Number(value)] ?? flag;
 }
 
+export function isSuggestable(s: ChannelSuggestion): boolean {
+  return s.analyzed >= MIN_ANALYZED && s.fitting / s.analyzed >= MIN_FIT && s.severe === 0;
+}
+
 export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evaluateProfile>[1]): ChannelSuggestion {
   let fitting = 0;
+  let severe = 0;
   const reasonCounts = new Map<string, number>();
   const ratings = new Map<Dim, { maxLevel: number; count: number }>();
   const samples: ChannelSuggestion["samples"] = [];
@@ -240,6 +281,7 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
         }
       }
     } else {
+      if (decision.severity === "high") severe++;
       for (const label of new Set(decision.flags.map(flagLabel))) {
         reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
       }
@@ -255,6 +297,7 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     topics: entry.topics,
     analyzed: entry.videos.length,
     fitting,
+    severe,
     educational: entry.educationalCount,
     hiddenReasons: [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([label, count]) => ({ label, count })),
     ratings: [...ratings.entries()].sort((a, b) => b[1].count - a[1].count).map(([dim, r]) => ({ dim, ...r })),
@@ -263,15 +306,16 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
 }
 
 // Build entries for channels families already added that aren't in the catalog
-// yet (channels added before this feature). Reads ids only.
+// yet (channels added before this feature), and rewrite outdated overviews.
 async function backfillCatalog(db: Db, openAiApiKey: string): Promise<void> {
   const [cache, catalog] = await Promise.all([
     db.collection("channelLibraryCache").select().get(),
-    db.collection("channelCatalog").select().get(),
+    db.collection("channelCatalog").select("overviewVersion").get(),
   ]);
   const have = new Set(catalog.docs.map((d) => d.id));
-  const missing = cache.docs.map((d) => d.id).filter((id) => !have.has(id)).slice(0, BACKFILL_PER_CALL);
-  for (const id of missing) await buildCatalogEntrySafe(id, openAiApiKey);
+  const missing = cache.docs.map((d) => d.id).filter((id) => !have.has(id));
+  const stale = catalog.docs.filter((d) => d.get("overviewVersion") !== OVERVIEW_VERSION).map((d) => d.id);
+  for (const id of [...missing, ...stale].slice(0, BACKFILL_PER_CALL)) await buildCatalogEntrySafe(id, openAiApiKey);
 }
 
 export const getChannelSuggestions = onCall(
@@ -301,7 +345,7 @@ export const getChannelSuggestions = onCall(
     const suggestions = catalog.docs
       .filter((d) => !skip.has(d.id))
       .map((d) => scoreChannel(d.data() as CatalogEntry, prefs))
-      .filter((s) => s.fitting > 0)
+      .filter(isSuggestable)
       .sort((a, b) => {
         const fit = b.fitting / b.analyzed - a.fitting / a.analyzed;
         if (Math.abs(fit) > 0.001) return fit;

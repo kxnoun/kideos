@@ -102,6 +102,7 @@ export interface SuggestedChannel {
   topics: string[];
   analyzed: number;
   fitting: number;
+  severe: number;
   educational: number;
   hiddenReasons: { label: string; count: number }[];
   ratings: { dim: Dim; maxLevel: number; count: number }[];

@@ -142,7 +142,10 @@ videos as compact profiles, top topics, and a 2–3 sentence overview (the only 
 No Supadata, no per-video AI — it reuses `videoProfiles`.
 Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannelSuggestions`**: runs
 `evaluateProfile` on every catalog video against the child's answers (pure code), skips channels already
-in the child's list or dismissed, ranks by share of fitting videos (then educational share if the parent
+in the child's list or dismissed. **A suggestion vouches for the channel, so the bar is higher than for
+adding one:** ≥10 checked videos, ≥80% of them fit, and *no* video far over the child's limits (severity
+"high") — a channel where only the mild Shorts pass is never suggested. The overview is written with the
+channel's content counts, so it mentions heavy content plainly. Then it ranks by share of fitting videos (then educational share if the parent
 ticked that). Each card: overview, "X of 50 videos fit", top reasons the rest would be hidden, what's in the
 videos that would show, sample videos. Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never
 suggested again); swipe right → maybe later (skipped this time). Adding is a tap on "Add to {child}'s
