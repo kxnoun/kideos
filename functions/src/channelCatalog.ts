@@ -35,7 +35,7 @@ const OVERVIEW_VERSION = 2;
 // A suggestion means "this channel suits your child", not "some of its videos do"
 // (a channel where only the mild Shorts pass is still not one to recommend):
 //  - judged on CHECKED videos only: no-transcript videos are unknown, not bad
-//  - no checked video may be severe in absolute terms (isSevere) — not relative to
+//  - no checked video may be severe in absolute terms (severeDims) — not relative to
 //    how strict this child is, so a science video on predators doesn't sink SciShow
 //    for a 6-year-old, but EpicMealTime's liquor and strong swearing do
 const MIN_ANALYZED = 10; // too few checked videos to judge a channel
@@ -228,7 +228,8 @@ export interface ChannelSuggestion {
   analyzed: number; // checked videos (had a transcript)
   unchecked: number; // no transcript — left out of the fit share
   fitting: number; // checked videos that fit
-  severe: number; // checked videos that are severe (isSevere) — any one rules the channel out
+  severe: number; // checked videos that are severe (severeDims) — any one rules the channel out
+  severeExamples?: string[]; // for the logs only: "title — dim N (evidence)"
   educational: number;
   hiddenReasons: { label: string; count: number }[]; // why the other videos wouldn't show, top 3
   ratings: { dim: Dim; maxLevel: number; count: number }[]; // what's in the videos that WOULD show
@@ -265,15 +266,15 @@ export function isSuggestable(s: ChannelSuggestion): boolean {
 // Why a channel wasn't suggested (for the logs)
 export function whyNot(s: ChannelSuggestion): string {
   if (s.analyzed < MIN_ANALYZED) return `only ${s.analyzed} checked videos`;
-  if (s.severe > 0) return `${s.severe} severe video(s)`;
+  if (s.severe > 0) return `${s.severe} severe video(s): ${(s.severeExamples ?? []).join(" | ")}`;
   return `fit ${s.fitting}/${s.analyzed} (${Math.round((100 * s.fitting) / s.analyzed)}%) < ${MIN_FIT * 100}%`;
 }
 
 // The worst of the worst, whatever the child's settings: the top of a ladder the
 // child hasn't allowed (strong swearing, graphic violence, drinking/drugs shown,
 // gambling…) or an always-hidden level (self-harm, explicit sexual content).
-function isSevere(p: CompactProfile, prefs: Parameters<typeof evaluateProfile>[1]): boolean {
-  return DIMS.some((dim) => {
+function severeDims(p: CompactProfile, prefs: Parameters<typeof evaluateProfile>[1]): Dim[] {
+  return DIMS.filter((dim) => {
     const lvl = p.dims[dim]?.level;
     if (lvl === null || lvl === undefined) return false;
     if (dim === "selfHarm" && lvl >= 3) return true;
@@ -285,6 +286,7 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
   let fitting = 0;
   let severe = 0;
   let checked = 0;
+  const severeExamples: string[] = [];
   const reasonCounts = new Map<string, number>();
   const ratings = new Map<Dim, { maxLevel: number; count: number }>();
   const samples: ChannelSuggestion["samples"] = [];
@@ -304,7 +306,13 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
         }
       }
     } else {
-      if (isSevere(v.p, prefs)) severe++;
+      const sd = severeDims(v.p, prefs);
+      if (sd.length) {
+        severe++;
+        if (severeExamples.length < 3) {
+          severeExamples.push(`"${v.title}" — ${sd.map((d) => `${d} ${v.p.dims[d].level} (${v.p.dims[d].evidence})`).join(", ")}`);
+        }
+      }
       for (const label of new Set(decision.flags.map(flagLabel))) {
         reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
       }
@@ -322,6 +330,7 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     unchecked: entry.videos.length - checked,
     fitting,
     severe,
+    severeExamples,
     educational: entry.educationalCount,
     hiddenReasons: [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([label, count]) => ({ label, count })),
     ratings: [...ratings.entries()].sort((a, b) => b[1].count - a[1].count).map(([dim, r]) => ({ dim, ...r })),
@@ -374,6 +383,7 @@ export const getChannelSuggestions = onCall(
     }
     const suggestions = scored
       .filter(isSuggestable)
+      .map(({ severeExamples: _drop, ...s }) => s)
       .sort((a, b) => {
         const fit = b.fitting / b.analyzed - a.fitting / a.analyzed;
         if (Math.abs(fit) > 0.001) return fit;
