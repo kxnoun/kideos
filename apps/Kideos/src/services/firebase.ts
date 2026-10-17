@@ -16,9 +16,15 @@ export function watchPairing(
   return firestore()
     .doc(`users/${parentId}/children/${childId}`)
     .onSnapshot((snap) => {
-      if (!snap.exists() && !snap.metadata.fromCache) onUnpaired();
+      if (!snap.exists() && !snap.metadata.fromCache) {
+        console.warn("[pairing] child no longer exists — unpairing");
+        onUnpaired();
+      }
     }, (err: any) => {
-      if (err?.code === "firestore/permission-denied") onUnpaired();
+      if (err?.code === "firestore/permission-denied") {
+        console.warn("[pairing] this device isn't in the child's kidDeviceUids — unpairing");
+        onUnpaired();
+      }
       else console.warn("[pairing] listener error:", err);
     });
 }
