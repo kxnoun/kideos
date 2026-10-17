@@ -100,7 +100,8 @@ export interface SuggestedChannel {
   thumbnail: string;
   overview: string;
   topics: string[];
-  analyzed: number;
+  analyzed: number; // checked videos
+  unchecked: number; // no transcript, not counted
   fitting: number;
   severe: number;
   educational: number;

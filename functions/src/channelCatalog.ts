@@ -34,10 +34,12 @@ const OVERVIEW_VERSION = 2;
 
 // A suggestion means "this channel suits your child", not "some of its videos do"
 // (a channel where only the mild Shorts pass is still not one to recommend):
+//  - judged on CHECKED videos only: no-transcript videos are unknown, not bad
+//  - no checked video may be severe in absolute terms (isSevere) — not relative to
+//    how strict this child is, so a science video on predators doesn't sink SciShow
+//    for a 6-year-old, but EpicMealTime's liquor and strong swearing do
 const MIN_ANALYZED = 10; // too few checked videos to judge a channel
-const MIN_FIT = 0.8; // at least 80% of checked videos fit the child's answers
-// …and no checked video may be far over the child's limits (severity "high": top
-// of a ladder, 3+ steps over the limit, or an always-hidden level).
+const MIN_FIT = 0.75; // share of checked videos that fit the child's answers
 
 // Just what evaluateProfile needs, so a channel's 50 videos fit in one doc
 type CompactProfile = Pick<
@@ -223,9 +225,10 @@ export interface ChannelSuggestion {
   thumbnail: string;
   overview: string;
   topics: string[];
-  analyzed: number;
-  fitting: number;
-  severe: number; // videos far over the child's limits — any one rules the channel out
+  analyzed: number; // checked videos (had a transcript)
+  unchecked: number; // no transcript — left out of the fit share
+  fitting: number; // checked videos that fit
+  severe: number; // checked videos that are severe (isSevere) — any one rules the channel out
   educational: number;
   hiddenReasons: { label: string; count: number }[]; // why the other videos wouldn't show, top 3
   ratings: { dim: Dim; maxLevel: number; count: number }[]; // what's in the videos that WOULD show
@@ -259,29 +262,49 @@ export function isSuggestable(s: ChannelSuggestion): boolean {
   return s.analyzed >= MIN_ANALYZED && s.fitting / s.analyzed >= MIN_FIT && s.severe === 0;
 }
 
+// Why a channel wasn't suggested (for the logs)
+export function whyNot(s: ChannelSuggestion): string {
+  if (s.analyzed < MIN_ANALYZED) return `only ${s.analyzed} checked videos`;
+  if (s.severe > 0) return `${s.severe} severe video(s)`;
+  return `fit ${s.fitting}/${s.analyzed} (${Math.round((100 * s.fitting) / s.analyzed)}%) < ${MIN_FIT * 100}%`;
+}
+
+// The worst of the worst, whatever the child's settings: the top of a ladder the
+// child hasn't allowed (strong swearing, graphic violence, drinking/drugs shown,
+// gambling…) or an always-hidden level (self-harm, explicit sexual content).
+function isSevere(p: CompactProfile, prefs: Parameters<typeof evaluateProfile>[1]): boolean {
+  return DIMS.some((dim) => {
+    const lvl = p.dims[dim]?.level;
+    if (lvl === null || lvl === undefined) return false;
+    if (dim === "selfHarm" && lvl >= 3) return true;
+    return lvl === 4 && prefs.rules[dim].max < 4;
+  });
+}
+
 export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evaluateProfile>[1]): ChannelSuggestion {
   let fitting = 0;
   let severe = 0;
+  let checked = 0;
   const reasonCounts = new Map<string, number>();
   const ratings = new Map<Dim, { maxLevel: number; count: number }>();
   const samples: ChannelSuggestion["samples"] = [];
 
   for (const v of entry.videos) {
+    if (v.p.status !== "ok") continue; // no transcript — unknown, not counted either way
+    checked++;
     const decision = evaluateProfile(v.p as ContentProfile, prefs);
     if (decision.status === "approved") {
       fitting++;
       if (samples.length < 6) samples.push({ videoId: v.videoId, title: v.title, thumbnail: v.thumbnail });
-      if (v.p.status === "ok") {
-        for (const dim of DIMS) {
-          const lvl = v.p.dims[dim]?.level;
-          if (lvl && lvl > 0) {
-            const r = ratings.get(dim) ?? { maxLevel: 0, count: 0 };
-            ratings.set(dim, { maxLevel: Math.max(r.maxLevel, lvl), count: r.count + 1 });
-          }
+      for (const dim of DIMS) {
+        const lvl = v.p.dims[dim]?.level;
+        if (lvl && lvl > 0) {
+          const r = ratings.get(dim) ?? { maxLevel: 0, count: 0 };
+          ratings.set(dim, { maxLevel: Math.max(r.maxLevel, lvl), count: r.count + 1 });
         }
       }
     } else {
-      if (decision.severity === "high") severe++;
+      if (isSevere(v.p, prefs)) severe++;
       for (const label of new Set(decision.flags.map(flagLabel))) {
         reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
       }
@@ -295,7 +318,8 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     thumbnail: entry.thumbnail,
     overview: entry.overview,
     topics: entry.topics,
-    analyzed: entry.videos.length,
+    analyzed: checked,
+    unchecked: entry.videos.length - checked,
     fitting,
     severe,
     educational: entry.educationalCount,
@@ -342,9 +366,13 @@ export const getChannelSuggestions = onCall(
     ]);
     const skip = new Set([...whitelisted.docs, ...dismissed.docs].map((d) => d.id));
 
-    const suggestions = catalog.docs
+    const scored = catalog.docs
       .filter((d) => !skip.has(d.id))
-      .map((d) => scoreChannel(d.data() as CatalogEntry, prefs))
+      .map((d) => scoreChannel(d.data() as CatalogEntry, prefs));
+    for (const s of scored.filter((x) => !isSuggestable(x))) {
+      logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — ${whyNot(s)}`);
+    }
+    const suggestions = scored
       .filter(isSuggestable)
       .sort((a, b) => {
         const fit = b.fitting / b.analyzed - a.fitting / a.analyzed;
