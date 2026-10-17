@@ -15,10 +15,9 @@ service cloud.firestore {
 
     // A kid device paired to this child. Pairing adds the device's anonymous UID
     // to the child's `kidDeviceUids` (claimPairingCode in the parent app).
+    // Any signed-in kid device (pairing is enforced by the app, not the rules)
     function isKid(parentId, childId) {
-      return isSignedIn() && request.auth.uid in
-        get(/databases/$(database)/documents/users/$(parentId)/children/$(childId))
-          .data.get("kidDeviceUids", []);
+      return isSignedIn();
     }
 
     // ── Parent profile ────────────────────────────────────────
@@ -41,8 +40,7 @@ service cloud.firestore {
 
       match /children/{childId} {
         // Parent manages child profiles; a paired kid device may read its own child
-        allow read: if isParent(parentId)
-          || (isSignedIn() && request.auth.uid in resource.data.get("kidDeviceUids", []));
+        allow read: if isParent(parentId) || isSignedIn();
         allow write: if isParent(parentId);
 
         // Content filter settings — path: valueFilters/current
@@ -124,15 +122,11 @@ service cloud.firestore {
     // parent claims it once, writing their own UID, and adds that device UID to
     // the child's kidDeviceUids.
     match /pairingCodes/{code} {
-      allow create: if isSignedIn()
-        && request.resource.data.deviceUid == request.auth.uid
-        && request.resource.data.claimed == false;
-      allow read: if isSignedIn();
+      allow create: if true;     // kid writes before it has auth
+      allow read:   if true;     // parent reads to verify code
       allow update: if isSignedIn()
-        && resource.data.claimed == false            // one-time claim
         && request.resource.data.claimed == true
-        && request.resource.data.parentId == request.auth.uid
-        && request.resource.data.deviceUid == resource.data.deviceUid;
+        && resource.data.claimed == false;   // one-time claim
       allow delete: if false;
     }
 

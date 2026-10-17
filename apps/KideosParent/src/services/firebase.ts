@@ -364,17 +364,8 @@ export async function claimPairingCode(
   if (expiresAt && expiresAt < new Date()) {
     throw new Error("This code has expired. Ask the child to generate a new one.");
   }
-  if (!data.deviceUid) {
-    throw new Error("Please update the Kideos app on your child's device, then try again.");
-  }
 
-  // Together: allow this kid device to read this child's data (security rules
-  // check kidDeviceUids), and tell the device it's paired.
-  const batch = firestore().batch();
-  batch.update(firestore().doc(`users/${parentId}/children/${childId}`), {
-    kidDeviceUids: firestore.FieldValue.arrayUnion(data.deviceUid),
-  });
-  batch.update(ref, {
+  await ref.update({
     claimed: true,
     parentId,
     childId,
@@ -382,7 +373,6 @@ export async function claimPairingCode(
     childAge,
     claimedAt: firestore.FieldValue.serverTimestamp(),
   });
-  await batch.commit();
 }
 
 // ─── Data deletion ───────────────────────────────────────────

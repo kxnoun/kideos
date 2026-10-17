@@ -3,32 +3,6 @@
 import firestore from "@react-native-firebase/firestore";
 import type { WhitelistedChannel, ApprovedVideo, PlaySignal } from "../types";
 
-// ── Watch whether this device is still paired ────────────────
-// Calls onUnpaired when the child is deleted or this device is no longer in
-// its kidDeviceUids (the rules then deny the read). Cached "missing" snapshots
-// are ignored so going offline doesn't unpair.
-
-export function watchPairing(
-  parentId: string,
-  childId: string,
-  onUnpaired: () => void
-): () => void {
-  return firestore()
-    .doc(`users/${parentId}/children/${childId}`)
-    .onSnapshot((snap) => {
-      if (!snap.exists() && !snap.metadata.fromCache) {
-        console.warn("[pairing] child no longer exists — unpairing");
-        onUnpaired();
-      }
-    }, (err: any) => {
-      if (err?.code === "firestore/permission-denied") {
-        console.warn("[pairing] this device isn't in the child's kidDeviceUids — unpairing");
-        onUnpaired();
-      }
-      else console.warn("[pairing] listener error:", err);
-    });
-}
-
 // ── Get whitelisted channels for a child ──────────────────────
 
 export function subscribeToWhitelistedChannels(
