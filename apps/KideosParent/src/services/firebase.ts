@@ -147,7 +147,8 @@ export function subscribeToChildren(
         }));
         onUpdate(children);
       },
-      (_err) => {
+      (err) => {
+        console.warn("[children] listener error:", err);
         // Unblock the loading state so the app doesn't hang if Firestore
         // is temporarily unavailable or rules are not yet deployed.
         onUpdate([]);

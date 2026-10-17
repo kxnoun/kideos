@@ -77,6 +77,10 @@ export default function HomeScreen() {
   );
 
   const handlePair = useCallback(async () => {
+    if (children.length === 0) {
+      Alert.alert("Add a child first", "Go to Settings → Add Another Child, then pair their device.");
+      return;
+    }
     if (!parentId || !pairCode.trim() || !pairChildId) {
       Alert.alert("Enter a code and select a child.");
       return;
