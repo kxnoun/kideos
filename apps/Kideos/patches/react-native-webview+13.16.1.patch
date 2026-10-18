@@ -29,7 +29,18 @@
      String messagingModuleName;
 --- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
 +++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
-@@ -495,6 +495,7 @@
+@@ -157,7 +157,9 @@
+                         }
+                         mVideoView = view
+                         mCustomViewCallback = callback
+-                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
++                        // Kideos patch: fullscreen rotates to landscape like the YouTube app
++                        // (either way round, following the sensor); exiting restores the old orientation
++                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                         mVideoView.systemUiVisibility = FULLSCREEN_SYSTEM_UI_VISIBILITY
+                         activity.window.setFlags(
+                             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+@@ -495,6 +497,7 @@
      fun setInjectedJavaScriptBeforeContentLoaded(viewWrapper: RNCWebViewWrapper, value: String?) {
          val view = viewWrapper.webView
          view.injectedJSBeforeContentLoaded = value
@@ -37,7 +48,7 @@
      }
  
      fun setInjectedJavaScriptForMainFrameOnly(viewWrapper: RNCWebViewWrapper, value: Boolean) {
-@@ -505,6 +506,7 @@
+@@ -505,6 +508,7 @@
      fun setInjectedJavaScriptBeforeContentLoadedForMainFrameOnly(viewWrapper: RNCWebViewWrapper, value: Boolean) {
          val view = viewWrapper.webView
          view.injectedJavaScriptBeforeContentLoadedForMainFrameOnly = value
