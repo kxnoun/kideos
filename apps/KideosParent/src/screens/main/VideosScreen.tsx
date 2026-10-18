@@ -27,6 +27,7 @@ import type { RootStackParamList, VideoVerdict, Dim } from "../../types";
 import { subscribeToVerdicts, setShowAnyway, hideVideo, hideVideos, getVideoSummary } from "../../services/firebase";
 import { LEVEL_LABELS } from "../../prefs";
 import { useStore } from "../../store/useStore";
+import VideoPreview from "../../components/VideoPreview";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Videos">;
 
@@ -276,7 +277,12 @@ export default function VideosScreen({ route, navigation }: Props) {
                 <Text style={styles.linkText}>Done</Text>
               </TouchableOpacity>
               {detailsLive.thumbnail ? (
-                <Image source={{ uri: detailsLive.thumbnail }} style={styles.detailsThumb} />
+                <VideoPreview
+                  key={detailsLive.videoId}
+                  videoId={detailsLive.videoId}
+                  thumbnail={detailsLive.thumbnail}
+                  style={styles.detailsThumb}
+                />
               ) : null}
               <Text style={styles.modalHeading}>{detailsLive.title}</Text>
               {detailsLive.channelName ? <Text style={styles.channel}>{detailsLive.channelName}</Text> : null}
@@ -418,7 +424,7 @@ const styles = StyleSheet.create({
   selectBar: { padding: 16, borderTopWidth: 1, borderTopColor: "#E8E8F0", backgroundColor: "#fff" },
   selectBarBtn: { backgroundColor: "#D9534F", borderRadius: 14, paddingVertical: 15, alignItems: "center" },
   selectBarText: { color: "#fff", fontSize: 16, fontWeight: "800" },
-  detailsThumb: { width: "100%", aspectRatio: 16 / 9, borderRadius: 12, backgroundColor: "#E8E8F0", marginTop: 12 },
+  detailsThumb: { borderRadius: 12, marginTop: 12 },
   detailsSummary: { fontSize: 15, color: "#333", lineHeight: 22, marginTop: 12 },
   detailsStatus: { fontSize: 14, fontWeight: "800", color: "#1E7A44", marginTop: 16, marginBottom: 6 },
   detailsStatusHidden: { color: "#B23B3B" },

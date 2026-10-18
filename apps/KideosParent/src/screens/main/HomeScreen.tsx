@@ -13,7 +13,6 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
@@ -38,6 +37,7 @@ import {
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
 import { DIM_TITLES } from "./VideosScreen";
+import VideoPreview from "../../components/VideoPreview";
 import { LEVEL_LABELS } from "../../prefs";
 import type { Dim } from "../../types";
 import type { VideoVerdict } from "../../types";
@@ -231,11 +231,7 @@ export default function HomeScreen() {
               </View>
             ) : nowPlaying ? (
               <View style={styles.nowPlayingCard}>
-                <Image
-                  source={{ uri: nowPlaying.thumbnail }}
-                  style={styles.nowPlayingThumb}
-                  resizeMode="cover"
-                />
+                <VideoPreview key={nowPlaying.videoId} videoId={nowPlaying.videoId} thumbnail={nowPlaying.thumbnail} />
                 <View style={styles.nowPlayingInfo}>
                   <Text style={[styles.nowPlayingLabel, nowPlaying.paused && styles.pausedLabel]}>
                     {nowPlaying.paused ? "⏸ PAUSED" : "▶ NOW WATCHING"}
@@ -517,7 +513,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 4,
   },
-  nowPlayingThumb: { width: "100%", height: 180 },
   nowPlayingInfo: { padding: 16 },
   nowPlayingLabel: {
     fontSize: 11,
