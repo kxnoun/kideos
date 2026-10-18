@@ -79,7 +79,7 @@ export default function HomeScreen() {
   // Summary + ratings of what's playing now
   const [nowSummary, setNowSummary] = useState("");
   const [summaryOpen, setSummaryOpen] = useState(false); // "more" / "less"
-  const [summaryCut, setSummaryCut] = useState(false); // longer than 3 lines?
+  const [summaryCut, setSummaryCut] = useState(false); // longer than 2 lines?
   useEffect(() => {
     setNowVerdict(null);
     setNowSummary("");
@@ -256,12 +256,12 @@ export default function HomeScreen() {
                       {!summaryCut && !summaryOpen ? (
                         <Text
                           style={[styles.nowSummary, styles.measure]}
-                          onTextLayout={(e) => setSummaryCut(e.nativeEvent.lines.length > 3)}
+                          onTextLayout={(e) => setSummaryCut(e.nativeEvent.lines.length > 2)}
                         >
                           {nowVerdict?.summary || nowSummary}
                         </Text>
                       ) : null}
-                      <Text style={styles.nowSummary} numberOfLines={summaryOpen ? undefined : 3}>
+                      <Text style={styles.nowSummary} numberOfLines={summaryOpen ? undefined : 2}>
                         {nowVerdict?.summary || nowSummary}
                       </Text>
                       {summaryCut ? (
