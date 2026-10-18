@@ -13,6 +13,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == parentId;
     }
 
+    // A kid device paired to this child. Pairing adds the device's anonymous UID
+    // to the child's `kidDeviceUids` (claimPairingCode in the parent app).
+    // Any signed-in kid device (pairing is enforced by the app, not the rules)
+    function isKid(parentId, childId) {
+      return isSignedIn();
+    }
+
     // ── Parent profile ────────────────────────────────────────
 
     match /users/{parentId} {
@@ -32,43 +39,46 @@ service cloud.firestore {
       // ── Child profiles ───────────────────────────────────────
 
       match /children/{childId} {
-        // Parent manages child profiles; kid app reads its own profile
+        // Parent manages child profiles; a paired kid device may read its own child
         allow read: if isParent(parentId) || isSignedIn();
         allow write: if isParent(parentId);
 
         // Content filter settings — path: valueFilters/current
         match /valueFilters/{doc} {
-          // Cloud Functions and parent app both read; parent app writes
-          allow read: if isParent(parentId) || isSignedIn();
-          allow write: if isParent(parentId);
+          // Parent app reads/writes; Cloud Functions use admin access
+          allow read, write: if isParent(parentId);
         }
 
         // Whitelisted channels — kid app reads for subscription list
         match /whitelistedChannels/{channelId} {
-          allow read: if isParent(parentId) || isSignedIn();
+          allow read: if isParent(parentId) || isKid(parentId, childId);
           // Only parent or Cloud Functions (resolveAndAddChannel) write
           allow write: if isParent(parentId);
         }
 
         // Per-child video verdicts — kid feed reads approved == true.
-        // Written by Cloud Functions; the parent may only record a review decision,
-        // and `approved` must match it.
+        // Written by Cloud Functions. The parent may only set or clear a
+        // "Show anyway" decision, and `approved` must match the result.
         match /videoVerdicts/{videoId} {
-          allow read: if isParent(parentId) || isSignedIn();
+          allow read: if isParent(parentId) || isKid(parentId, childId);
           allow update: if isParent(parentId)
             && request.resource.data.diff(resource.data)
               .affectedKeys().hasOnly(["parentDecision", "approved"])
-            && request.resource.data.parentDecision in ["approved", "hidden"]
-            && request.resource.data.approved == (request.resource.data.parentDecision == "approved");
+            && (
+              (request.resource.data.parentDecision in ["approved", "hidden"]
+                && request.resource.data.approved == (request.resource.data.parentDecision == "approved"))
+              || (!("parentDecision" in request.resource.data)
+                && request.resource.data.approved == (resource.data.status == "approved"))
+            );
           allow create, delete: if false;
         }
 
         // Watch history — COPPA 90-day retention
         match /watchHistory/{sessionId} {
           allow read: if isParent(parentId);
-          // Kid app writes via anonymous auth; only start/end fields allowed
-          allow create: if isSignedIn();
-          allow update: if isSignedIn()
+          // The paired kid device writes sessions; only start/end fields can change
+          allow create: if isKid(parentId, childId);
+          allow update: if isKid(parentId, childId)
             && request.resource.data.diff(resource.data)
               .affectedKeys().hasOnly(["endedAt", "durationSeconds"]);
           // Hard delete only via deleteChildData Cloud Function
@@ -85,6 +95,11 @@ service cloud.firestore {
         }
 
         // AI channel suggestions
+        // "Not for us" on a suggested channel — never suggested to this child again
+        match /dismissedSuggestions/{channelId} {
+          allow read, write: if isParent(parentId);
+        }
+
         match /suggestions/{suggestionId} {
           allow read: if isParent(parentId);
           allow update: if isParent(parentId)
@@ -95,22 +110,22 @@ service cloud.firestore {
 
         // Real-time session: nowPlaying (kid → parent) + parentCommand + playSignal
         match /currentSession/{doc} {
-          // Both parent and kid app read this (live now-watching + commands)
-          allow read: if isParent(parentId) || isSignedIn();
+          // Parent and the paired kid device read this (live now-watching + commands)
+          allow read: if isParent(parentId) || isKid(parentId, childId);
 
-          // Kid app writes nowPlaying (any authenticated user — anonymous auth)
-          // Parent app writes parentCommand
+          // Kid device writes nowPlaying, parent app writes parentCommand,
           // playSignal is written by the handleParentCommand Cloud Function only
           allow write: if
-            (doc == "nowPlaying"    && isSignedIn())   ||
+            (doc == "nowPlaying"    && isKid(parentId, childId)) ||
             (doc == "parentCommand" && isParent(parentId));
         }
       }
     }
 
     // ── Pairing codes ─────────────────────────────────────────
-    // Kid app creates the code (may be anonymous auth or unauthenticated).
-    // Parent app reads and claims it once.
+    // Kid app (signed in anonymously) creates the code with its own UID; the
+    // parent claims it once, writing their own UID, and adds that device UID to
+    // the child's kidDeviceUids.
     match /pairingCodes/{code} {
       allow create: if true;     // kid writes before it has auth
       allow read:   if true;     // parent reads to verify code

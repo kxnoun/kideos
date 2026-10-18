@@ -2,20 +2,19 @@
 // Kideos — apply a child's questionnaire answers to a content profile
 // (pure code, no AI). Changing answers only re-runs this — instant and free.
 //
-// Result status:
-//   approved        → in the kid's feed
-//   pending_review  → hidden until the parent approves it ("Ask me")
-//   hidden          → not shown
+// Result: approved (in the kid's feed) or hidden. There is no approval queue:
+// parents browse Shown / Hidden videos with these reasons and can "Show anyway"
+// one video (stored separately as parentDecision on the verdict).
 // ─────────────────────────────────────────────────────────────
 
 import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAGS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
 import type { ContentProfile, Severity, ValueFilters } from "./types";
 
-export type VerdictStatus = "approved" | "hidden" | "pending_review";
+export type VerdictStatus = "approved" | "hidden";
 
 export interface FilterDecision {
   status: VerdictStatus;
-  reason: string; // empty when approved
+  reason: string; // plain words for the parent; empty when approved
   flags: string[];
   severity: Severity | null;
 }
@@ -35,18 +34,18 @@ const MUSIC_LABELS: Record<string, string> = {
   music_video: "Music video",
 };
 
-function isOwnFaithOnly(profile: ContentProfile, prefs: ValueFilters): boolean {
-  const t = prefs.faith?.tradition;
-  return Boolean(t && t !== "other" && profile.religionTraditions.length > 0 && profile.religionTraditions.every((x) => x === t));
-}
-
 function severityFor(excess: number, level: number): Severity {
   if (level === 4 || excess >= 3) return "high";
   return excess === 2 ? "medium" : "low";
 }
 
-function reasonText(dim: Dim, level: number, evidence: string): string {
+function found(dim: Dim, level: number, evidence: string): string {
   return `${LEVEL_LABELS[dim][level]}${evidence ? ` (${evidence})` : ""}`;
+}
+
+function isOwnFaithOnly(profile: ContentProfile, prefs: ValueFilters): boolean {
+  const t = prefs.faith?.tradition;
+  return Boolean(t && t !== "other" && profile.religionTraditions.length > 0 && profile.religionTraditions.every((x) => x === t));
 }
 
 export function evaluateProfile(
@@ -65,31 +64,27 @@ export function evaluateProfile(
   if (profile.status === "no_transcript") {
     if (prefs.unknown === "allow") return { status: "approved", reason: "", flags: [], severity: null };
     return {
-      status: prefs.unknown === "hide" ? "hidden" : "pending_review",
-      reason: "Couldn't check this video — no transcript was available.",
+      status: "hidden",
+      reason: "We couldn't check this video — it has no transcript. (You chose to hide videos we can't check.)",
       flags: ["no_transcript"],
       severity: "low",
     };
   }
 
-  const hides: string[] = [];
-  const reviews: string[] = [];
+  const reasons: string[] = [];
   const flags: string[] = [];
   let worst: Severity | null = null;
-  const note = (bucket: string[], reason: string, flag: string, sev: Severity) => {
-    bucket.push(reason);
+  const note = (reason: string, flag: string, sev: Severity) => {
+    reasons.push(reason);
     flags.push(flag);
     if (!worst || RANK[sev] > RANK[worst]) worst = sev;
   };
 
   for (const dim of DIMS) {
     const { level, evidence } = profile.dims[dim];
-    const rule = prefs.rules[dim];
 
     if (level === null) {
-      if (prefs.unknown !== "allow") {
-        note(prefs.unknown === "hide" ? hides : reviews, `Couldn't tell ${dim} level from the transcript`, `${dim}:unknown`, "low");
-      }
+      if (prefs.unknown === "hide") note(`Couldn't tell the ${dim} level from the transcript`, `${dim}:unknown`, "low");
       continue;
     }
 
@@ -98,7 +93,7 @@ export function evaluateProfile(
 
     const hardLimit = HARD_LIMIT[dim];
     if (hardLimit !== undefined && level > hardLimit) {
-      note(hides, reasonText(dim, level, evidence), `${dim}:${level}`, "high");
+      note(`${found(dim, level, evidence)} — always hidden for kids`, `${dim}:${level}`, "high");
       continue;
     }
 
@@ -106,50 +101,49 @@ export function evaluateProfile(
       ? profile.framing[dim as (typeof GLORIFIABLE)[number]]
       : "neutral";
     if (prefs.blockGlorified && framing === "glorified" && level >= 1) {
-      note(hides, `Glamorized: ${reasonText(dim, level, evidence)}`, `${dim}:glorified`, "medium");
+      note(`${found(dim, level, evidence)}, made to look cool or funny — you chose to hide that`, `${dim}:glorified`, "medium");
       continue;
     }
 
-    let max = rule.max;
+    let max = prefs.rules[dim].max;
     if (prefs.educationalBoost && profile.purpose === "educational" && EDU_BOOST.includes(dim)) {
       max = Math.min(4, max + 1);
     }
     const excess = level - max;
     if (excess > 0) {
-      note(rule.action === "hide" ? hides : reviews, reasonText(dim, level, evidence), `${dim}:${level}`, severityFor(excess, level));
+      const limit = LEVEL_LABELS[dim][prefs.rules[dim].max] || "none";
+      note(`${found(dim, level, evidence)} — your limit: ${limit}`, `${dim}:${level}`, severityFor(excess, level));
     }
   }
 
   // ── Faith & family values ──
-  const bucket = (rule: string) => (rule === "hide" ? hides : reviews);
-
   for (const h of profile.holidays) {
     const rule = prefs.holidays[h.name] ?? "ok";
     if (rule === "ok" || (rule === "incidental" && h.prominence !== "theme")) continue;
-    const label = `${HOLIDAY_LABELS[h.name]} ${h.prominence === "theme" ? "is the video's theme" : "content"}`;
-    note(rule === "incidental" ? hides : bucket(rule), label, `holiday:${h.name}`, "low");
+    const what = h.prominence === "theme" ? "is what the video is about" : "comes up";
+    note(`${HOLIDAY_LABELS[h.name]} ${what} — you chose to hide ${rule === "incidental" ? "videos about it" : "it"}`, `holiday:${h.name}`, "low");
   }
 
   for (const f of VALUE_FLAGS) {
-    const rule = prefs.flags[f] ?? "ok";
-    if (rule === "ok") continue;
-    if (profile.flags[f]) note(bucket(rule), VALUE_FLAG_LABELS[f], `flag:${f}`, "low");
+    if ((prefs.flags[f] ?? "ok") === "hide" && profile.flags[f]) {
+      note(`${VALUE_FLAG_LABELS[f]} — you chose to hide this`, `flag:${f}`, "low");
+    }
   }
 
   // Music: best effort — only what captions ("[Music]") and lyrics reveal
   const m = profile.music.level;
-  if (prefs.music !== "ok" && m && m !== "none") note(bucket(prefs.music), MUSIC_LABELS[m], `music:${m}`, "low");
-
-  const l = profile.lgbtq;
-  if (l !== "none" && prefs.lgbtq !== "allow") {
-    const label = `LGBTQ+ ${l === "incidental" ? "people present" : l === "discussion" ? "topics discussed" : "advocacy"}`;
-    if (prefs.lgbtq === "review") note(reviews, label, `lgbtq:${l}`, "low");
-    else if (l !== "incidental") note(prefs.lgbtq === "hide" ? hides : reviews, label, `lgbtq:${l}`, "low");
+  if (prefs.music === "hide" && m && m !== "none") {
+    note(`${MUSIC_LABELS[m]} — you chose to hide videos with music`, `music:${m}`, "low");
   }
 
-  if (valuesViolation) note(hides, valuesViolation, "values", "medium");
+  const l = profile.lgbtq;
+  if (l !== "none" && prefs.lgbtq !== "allow" && (prefs.lgbtq === "hide_all" || l !== "incidental")) {
+    const what = l === "incidental" ? "LGBTQ+ people appear" : l === "discussion" ? "LGBTQ+ topics are discussed" : "LGBTQ+ advocacy";
+    note(`${what} — you chose to hide this`, `lgbtq:${l}`, "low");
+  }
 
-  if (hides.length) return { status: "hidden", reason: [...hides, ...reviews].join("; "), flags, severity: worst };
-  if (reviews.length) return { status: "pending_review", reason: reviews.join("; "), flags, severity: worst };
+  if (valuesViolation) note(valuesViolation, "values", "medium");
+
+  if (reasons.length) return { status: "hidden", reason: reasons.join("; "), flags, severity: worst };
   return { status: "approved", reason: "", flags: [], severity: null };
 }

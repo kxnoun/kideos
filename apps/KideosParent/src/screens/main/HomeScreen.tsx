@@ -5,7 +5,7 @@
 // - Child selector (if multiple children)
 // - Now Watching card with real-time Firestore subscription
 // - Remote pause / stop controls
-// - Recent flagged content alerts
+// - Link to the child's Videos screen (what's shown / hidden, and why)
 // - Pairing a new device button
 // ─────────────────────────────────────────────────────────────
 
@@ -24,14 +24,13 @@ import {
   Modal,
   ActivityIndicator,
 } from "react-native";
-import type { NowPlaying, FlaggedContent } from "../../types";
+import type { NowPlaying, RootStackParamList } from "../../types";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   subscribeToNowPlaying,
-  subscribeToFlaggedContent,
   sendPlaySignal,
   claimPairingCode,
-  markFlaggedViewed,
-  resolveReview,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
 
@@ -43,7 +42,6 @@ export default function HomeScreen() {
   const selectedChild = useSelectedChild();
 
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
-  const [flagged, setFlagged] = useState<FlaggedContent[]>([]);
   const [sendingSignal, setSendingSignal] = useState(false);
 
   // Pairing modal
@@ -53,6 +51,7 @@ export default function HomeScreen() {
   const [pairing, setPairing] = useState(false);
 
   const parentId = user?.uid;
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   // Subscribe to now playing
   useEffect(() => {
@@ -61,17 +60,6 @@ export default function HomeScreen() {
     return unsub;
   }, [parentId, selectedChildId]);
 
-  // Subscribe to flagged content (unviewed)
-  useEffect(() => {
-    if (!parentId || !selectedChildId) return;
-    const unsub = subscribeToFlaggedContent(parentId, selectedChildId, (items) => {
-      // Videos waiting for the parent's OK first
-      const open = items.filter((i) => !i.parentViewed);
-      const rank = (i: FlaggedContent) => (i.status === "pending_review" ? 0 : 1);
-      setFlagged(open.sort((a, b) => rank(a) - rank(b)).slice(0, 10));
-    });
-    return unsub;
-  }, [parentId, selectedChildId]);
 
   const handleSignal = useCallback(
     async (action: "play" | "pause" | "stop") => {
@@ -89,6 +77,10 @@ export default function HomeScreen() {
   );
 
   const handlePair = useCallback(async () => {
+    if (children.length === 0) {
+      Alert.alert("Add a child first", "Go to Settings → Add Another Child, then pair their device.");
+      return;
+    }
     if (!parentId || !pairCode.trim() || !pairChildId) {
       Alert.alert("Enter a code and select a child.");
       return;
@@ -115,26 +107,6 @@ export default function HomeScreen() {
       setPairing(false);
     }
   }, [parentId, pairCode, pairChildId, children]);
-
-  const handleMarkViewed = useCallback(
-    async (item: FlaggedContent) => {
-      if (!parentId || !selectedChildId) return;
-      await markFlaggedViewed(parentId, selectedChildId, item.id);
-    },
-    [parentId, selectedChildId]
-  );
-
-  const handleReview = useCallback(
-    async (item: FlaggedContent, decision: "approved" | "hidden") => {
-      if (!parentId || !selectedChildId) return;
-      try {
-        await resolveReview(parentId, selectedChildId, item.id, item.videoId, decision);
-      } catch {
-        Alert.alert("Could not save your decision. Check your connection.");
-      }
-    },
-    [parentId, selectedChildId]
-  );
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -273,72 +245,27 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Flagged Content Alerts */}
-        {flagged.length > 0 && (
+        {/* Videos: what's shown / hidden for this child, and why */}
+        {selectedChild && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {flagged.some((i) => i.status === "pending_review")
-                ? `👀 ${flagged.filter((i) => i.status === "pending_review").length} waiting for your OK`
-                : "⚠️ Flagged Content"}
-            </Text>
-            {flagged.map((item) => (
-              <View key={item.id} style={styles.flagCard}>
-                <View style={styles.flagHeader}>
-                  <View
-                    style={[
-                      styles.severityBadge,
-                      item.severity === "high"
-                        ? styles.severityHigh
-                        : item.severity === "medium"
-                        ? styles.severityMedium
-                        : styles.severityLow,
-                    ]}
-                  >
-                    <Text style={styles.severityText}>
-                      {item.severity.toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={styles.flagChannel}>{item.channel}</Text>
-                </View>
-                <Text style={styles.flagTitle} numberOfLines={2}>
-                  {item.title}
-                </Text>
-                <Text style={styles.flagReason}>{item.reason}</Text>
-                {item.status ? (
-                  <>
-                    <Text style={styles.flagStatus}>
-                      {item.status === "pending_review"
-                        ? "Waiting for your OK — hidden until you decide"
-                        : "Hidden from the feed"}
-                    </Text>
-                    <View style={styles.reviewRow}>
-                      <TouchableOpacity
-                        style={[styles.reviewBtn, styles.reviewApprove]}
-                        onPress={() => handleReview(item, "approved")}
-                      >
-                        <Text style={styles.reviewApproveText}>
-                          {item.status === "pending_review" ? "Approve" : "Allow anyway"}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.reviewBtn, styles.reviewHide]}
-                        onPress={() => handleReview(item, "hidden")}
-                      >
-                        <Text style={styles.reviewHideText}>Keep hidden</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                ) : (
-                  // Flags from before the review queue existed
-                  <TouchableOpacity
-                    style={styles.markViewedBtn}
-                    onPress={() => handleMarkViewed(item)}
-                  >
-                    <Text style={styles.markViewedText}>Mark as reviewed</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
+            <TouchableOpacity
+              style={styles.videosCard}
+              onPress={() =>
+                navigation.navigate("Videos", { childId: selectedChild.id, childName: selectedChild.profile.name })
+              }
+            >
+              <Text style={styles.videosTitle}>📺 {selectedChild.profile.name}'s videos</Text>
+              <Text style={styles.videosSub}>See what's shown and what's hidden, and why →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.videosCard, { marginTop: 12 }]}
+              onPress={() =>
+                navigation.navigate("Suggestions", { childId: selectedChild.id, childName: selectedChild.profile.name })
+              }
+            >
+              <Text style={styles.videosTitle}>✨ Suggested channels</Text>
+              <Text style={styles.videosSub}>Channels that fit your answers for {selectedChild.profile.name} →</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -416,13 +343,9 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  flagStatus: { fontSize: 12, color: "#6C63FF", fontWeight: "600", marginTop: 8 },
-  reviewRow: { flexDirection: "row", marginTop: 10 },
-  reviewBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
-  reviewApprove: { backgroundColor: "#6C63FF", marginRight: 8 },
-  reviewApproveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  reviewHide: { backgroundColor: "#F0F0F5" },
-  reviewHideText: { color: "#555", fontWeight: "700", fontSize: 14 },
+  videosCard: { backgroundColor: "#fff", borderRadius: 16, padding: 18, borderWidth: 1, borderColor: "#E8E8F0" },
+  videosTitle: { fontSize: 17, fontWeight: "800", color: "#1A1A2E" },
+  videosSub: { fontSize: 14, color: "#6C63FF", marginTop: 4, fontWeight: "600" },
   container: { flex: 1, backgroundColor: "#F7F7FF" },
   header: {
     flexDirection: "row",
@@ -520,25 +443,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  flagCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: "#FF9800",
-  },
-  flagHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
-  severityBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  severityHigh: { backgroundColor: "#FFEBEE" },
-  severityMedium: { backgroundColor: "#FFF3E0" },
-  severityLow: { backgroundColor: "#E8F5E9" },
-  severityText: { fontSize: 10, fontWeight: "800" },
-  flagChannel: { fontSize: 12, color: "#888" },
-  flagTitle: { fontSize: 14, fontWeight: "700", color: "#1A1A2E", marginBottom: 4 },
-  flagReason: { fontSize: 13, color: "#666", marginBottom: 10 },
-  markViewedBtn: { alignSelf: "flex-start" },
-  markViewedText: { fontSize: 13, color: "#6C63FF", fontWeight: "600" },
 
   emptyState: {
     alignItems: "center",

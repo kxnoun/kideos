@@ -28,6 +28,8 @@ import AuthScreen from "./src/screens/auth/AuthScreen";
 import CreateChildScreen from "./src/screens/onboarding/CreateChildScreen";
 import SetFiltersScreen from "./src/screens/onboarding/SetFiltersScreen";
 import AddChannelsScreen from "./src/screens/onboarding/AddChannelsScreen";
+import VideosScreen from "./src/screens/main/VideosScreen";
+import SuggestionsScreen from "./src/screens/main/SuggestionsScreen";
 
 // Main tab screens
 import HomeScreen from "./src/screens/main/HomeScreen";
@@ -112,8 +114,11 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator key={inOnboarding ? 'onboarding' : 'main'} screenOptions={{ headerShown: false }}>
+      {/* Keyed so switching onboarding <-> main starts with a fresh history. Keying only
+          the navigator let the container carry the onboarding stack into main, so "Done"
+          popped back to CreateChild and every pass created another child. */}
+      <NavigationContainer key={inOnboarding ? 'onboarding' : 'main'}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
           {!isSignedIn ? (
             // ── Auth stack ──────────────────────────────────────
             <>
@@ -132,6 +137,8 @@ export default function App() {
             // ── Main app ────────────────────────────────────────
             <>
               <Stack.Screen name="Main" component={MainTabs} />
+              <Stack.Screen name="Videos" component={VideosScreen} />
+              <Stack.Screen name="Suggestions" component={SuggestionsScreen} />
               {/* Also available for adding new child profiles from Settings */}
               <Stack.Screen name="CreateChild" component={CreateChildScreen} />
               <Stack.Screen name="SetFilters" component={SetFiltersScreen} />

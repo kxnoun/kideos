@@ -29,6 +29,7 @@ import {
   reapplyFiltersForChild,
   type AnalyzeAndTagParams,
 } from "./analyzeVideo";
+import { buildCatalogEntrySafe } from "./channelCatalog";
 import type {
   SeedChannelRequest,
   ResolveChannelRequest,
@@ -103,25 +104,14 @@ async function batchAnalyzeChannel({
   supadataApiKey: string;
   openAiApiKey: string;
 }): Promise<{ approved: number; blocked: number }> {
-  const db = getFirestore();
 
   // Load value filters and child info once — not per video
   const filters = await loadValueFiltersForChild(parentId, childId);
-
-  const childProfileSnap = await db
-    .doc(`users/${parentId}/children/${childId}/profile/current`)
-    .get();
-  const childName: string = childProfileSnap.data()?.name ?? "Your child";
-
-  const fcmSnap = await db.doc(`users/${parentId}/devices/primary`).get();
-  const parentFcmToken: string | null = fcmSnap.data()?.fcmToken ?? null;
 
   const baseParams: Omit<AnalyzeAndTagParams, "videoId"> = {
     channelId,
     parentId,
     childId,
-    childName,
-    parentFcmToken,
     filters,
     youtubeApiKey,
     supadataApiKey,
@@ -429,6 +419,9 @@ async function seedAndAnalyzeInBackground(
       { merge: true }
     );
 
+    // Shared channel profile for suggestions (reuses the profiles just made)
+    await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
+
     logger.info(
       `[seedAndAnalyzeInBackground] Done: ${channelId} approved=${approved} blocked=${blocked}`
     );
@@ -442,7 +435,7 @@ async function seedAndAnalyzeInBackground(
 // Runs every night at 3am UTC.
 // Detects NEW videos from whitelisted channels (not yet in Firestore).
 // Analyzes only new videos — existing analyzed videos are untouched.
-// Staggered across channels to spread YouTube quota usage.
+// Channels are processed back to back (YouTube cost ~2 units per channel).
 
 export const refreshChannelLibraries = onSchedule(
   {
@@ -477,11 +470,6 @@ export const refreshChannelLibraries = onSchedule(
     }
 
     logger.info(`[refreshChannelLibraries] Refreshing ${channelParents.size} unique channels`);
-
-    const STAGGER_MS = Math.max(
-      2000,
-      Math.floor((18 * 60 * 60 * 1000) / Math.max(channelParents.size, 1))
-    );
 
     let successCount = 0;
     let failCount = 0;
@@ -559,11 +547,11 @@ export const refreshChannelLibraries = onSchedule(
             openAiApiKey: OPENAI_API_KEY.value(),
           });
         }
+        await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
 
         successCount++;
-
-        // Stagger to spread quota usage across the day
-        await new Promise((r) => setTimeout(r, STAGGER_MS));
+        // (No stagger: sleeping between channels inside a 9-minute function made the
+        // job time out after the first channel. Quota use is tiny — ~2 units/channel.)
       } catch (err) {
         failCount++;
         logger.error(`[refreshChannelLibraries] Failed for channel ${channelId}:`, err);

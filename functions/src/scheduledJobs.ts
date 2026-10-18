@@ -316,7 +316,7 @@ export const handleParentCommand = onDocumentWritten(
 export const deleteChildData = onCall(
   {
     region: APP_CONFIG.FUNCTIONS_REGION,
-    timeoutSeconds: 60,
+    timeoutSeconds: 300,
     memory: "256MiB",
   },
   async (request): Promise<{ success: boolean }> => {
@@ -335,35 +335,9 @@ export const deleteChildData = onCall(
       `[deleteChildData] Hard deleting all data for child ${childId} under parent ${parentId}`
     );
 
-    const subcollections = [
-      "watchHistory",
-      "flaggedContent",
-      "suggestions",
-      "whitelistedChannels",
-      "videoVerdicts",
-      "digests",
-      "currentSession",
-      "valueFilters",
-      "profile",
-    ];
-
-    for (const subcollection of subcollections) {
-      const snap = await db
-        .collection(`users/${parentId}/children/${childId}/${subcollection}`)
-        .get();
-
-      if (!snap.empty) {
-        const batch: WriteBatch = db.batch();
-        snap.docs.forEach((doc) => batch.delete(doc.ref));
-        await batch.commit();
-        logger.info(
-          `[deleteChildData] Deleted ${snap.docs.length} docs from ${subcollection}`
-        );
-      }
-    }
-
-    // Delete the child document itself
-    await db.doc(`users/${parentId}/children/${childId}`).delete();
+    // recursiveDelete removes the child doc and every subcollection under it,
+    // however large (a plain batch caps at 500 writes and would fail midway).
+    await db.recursiveDelete(db.doc(`users/${parentId}/children/${childId}`));
 
     logger.info(`[deleteChildData] Complete for child ${childId}`);
     return { success: true };

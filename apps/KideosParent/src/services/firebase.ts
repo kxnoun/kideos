@@ -13,10 +13,11 @@ import type {
   ValueFilters,
   ChildProfile,
   WhitelistedChannel,
-  FlaggedContent,
-  ChannelSuggestion,
+  VideoVerdict,
   WeeklyDigest,
   NowPlaying,
+  ChannelSuggestion,
+  SuggestedChannel,
 } from "../types";
 
 // TODO: paste your Web Client ID from Firebase Console →
@@ -147,7 +148,8 @@ export function subscribeToChildren(
         }));
         onUpdate(children);
       },
-      (_err) => {
+      (err) => {
+        console.warn("[children] listener error:", err);
         // Unblock the loading state so the app doesn't hang if Firestore
         // is temporarily unavailable or rules are not yet deployed.
         onUpdate([]);
@@ -206,6 +208,20 @@ export async function addChannel(
   );
 }
 
+// ─── Suggested channels ──────────────────────────────────────
+
+export async function getChannelSuggestions(parentId: string, childId: string): Promise<SuggestedChannel[]> {
+  const res = await callFunction<{ suggestions: SuggestedChannel[] }>("getChannelSuggestions", { parentId, childId });
+  return res.suggestions;
+}
+
+// "Not for us" — this channel is never suggested to this child again
+export async function dismissSuggestion(parentId: string, childId: string, channelId: string): Promise<void> {
+  await firestore()
+    .doc(`users/${parentId}/children/${childId}/dismissedSuggestions/${channelId}`)
+    .set({ dismissedAt: firestore.FieldValue.serverTimestamp() });
+}
+
 export async function removeChannel(
   parentId: string,
   childId: string,
@@ -243,21 +259,39 @@ export async function sendPlaySignal(
     });
 }
 
-// ─── Flagged Content ─────────────────────────────────────────
+// ─── Videos (per-child verdicts) ─────────────────────────────
 
-export function subscribeToFlaggedContent(
+// Everything analyzed for this child, newest first — the Videos screen splits it
+// into Shown (approved) and Hidden.
+export function subscribeToVerdicts(
   parentId: string,
   childId: string,
-  onUpdate: (items: FlaggedContent[]) => void
+  onUpdate: (verdicts: VideoVerdict[]) => void
 ): () => void {
   return firestore()
-    .collection(`users/${parentId}/children/${childId}/flaggedContent`)
-    .orderBy("timestamp", "desc")
-    .limit(20)
-    .onSnapshot((snap) => {
-      const items = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as FlaggedContent);
-      onUpdate(items);
-    });
+    .collection(`users/${parentId}/children/${childId}/videoVerdicts`)
+    .orderBy("publishedAt", "desc")
+    .limit(500)
+    .onSnapshot(
+      (snap) => onUpdate(snap.docs.map((doc) => doc.data() as VideoVerdict)),
+      (err) => console.warn("[videoVerdicts] listener error:", err)
+    );
+}
+
+// "Show anyway" (decision = "approved") or undo it (decision = null → back to
+// what the child's answers decided). Security rules only allow these two fields.
+export async function setShowAnyway(
+  parentId: string,
+  childId: string,
+  verdict: VideoVerdict,
+  show: boolean
+): Promise<void> {
+  const ref = firestore().doc(`users/${parentId}/children/${childId}/videoVerdicts/${verdict.videoId}`);
+  if (show) {
+    await ref.update({ parentDecision: "approved", approved: true });
+  } else {
+    await ref.update({ parentDecision: firestore.FieldValue.delete(), approved: verdict.status === "approved" });
+  }
 }
 
 // Free-text "anything else?" → concrete questionnaire changes (parent confirms before applying)
@@ -271,40 +305,6 @@ export async function parseCustomRules(
   text: string
 ): Promise<{ changes: RuleChange[]; remaining: string }> {
   return callFunction("parseCustomRules", { parentId, text });
-}
-
-// Parent's decision on a video in the review queue. Updates the child's verdict
-// (approved = what the kid feed reads) and resolves the queue entry together.
-export async function resolveReview(
-  parentId: string,
-  childId: string,
-  flaggedId: string,
-  videoId: string,
-  decision: "approved" | "hidden"
-): Promise<void> {
-  const base = `users/${parentId}/children/${childId}`;
-  const batch = firestore().batch();
-  batch.update(firestore().doc(`${base}/videoVerdicts/${videoId}`), {
-    parentDecision: decision,
-    approved: decision === "approved",
-  });
-  batch.update(firestore().doc(`${base}/flaggedContent/${flaggedId}`), {
-    parentViewed: true,
-    resolution: decision,
-  });
-  await batch.commit();
-}
-
-export async function markFlaggedViewed(
-  parentId: string,
-  childId: string,
-  contentId: string
-): Promise<void> {
-  await firestore()
-    .doc(
-      `users/${parentId}/children/${childId}/flaggedContent/${contentId}`
-    )
-    .update({ parentViewed: true });
 }
 
 // ─── Channel Suggestions ─────────────────────────────────────

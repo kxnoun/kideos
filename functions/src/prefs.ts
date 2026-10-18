@@ -2,8 +2,9 @@
 // Kideos — parent content preferences (the per-child questionnaire)
 //
 // Every dimension uses the same 0–4 ladder. The AI's content profile rates each
-// video on these ladders; the parent picks the highest level they allow and what
-// happens above it ("hide" or "review" = hidden until the parent approves).
+// video on these ladders; the parent picks the highest level they allow. Anything
+// above it is hidden — no approval queue. Parents can browse Shown / Hidden videos
+// (with reasons) and "Show anyway" a single video.
 //
 // Age defaults are a synthesis of Common Sense Media age bands, ESRB E/E10+/T,
 // YouTube 9+/13+ tiers and Australian G/PG/M impact levels — a starting point
@@ -34,10 +35,8 @@ export const DIMS = [
 ] as const;
 export type Dim = (typeof DIMS)[number];
 
-export type OverAction = "hide" | "review";
 export interface DimRule {
-  max: number; // highest level allowed (0–4)
-  action: OverAction; // what happens above it
+  max: number; // highest level allowed (0–4); anything above is hidden
 }
 
 // ── Faith & family values (yes/no-style checks on specific content) ──
@@ -67,8 +66,8 @@ export const HOLIDAY_LABELS: Record<Holiday, string> = {
   passover: "Passover",
   lunar_new_year: "Lunar New Year",
 };
-// ok | incidental = OK in passing, hidden when it's the video's theme | review | hide
-export type HolidayRule = "ok" | "incidental" | "review" | "hide";
+// ok | incidental = OK in passing, hidden when it's the video's theme | hide
+export type HolidayRule = "ok" | "incidental" | "hide";
 
 export const VALUE_FLAGS = [
   "fantasyMagic",
@@ -95,9 +94,9 @@ export const VALUE_FLAG_LABELS: Record<ValueFlag, string> = {
   evolution: "Evolution and origins content",
   matureGames: "Mature-rated video games (GTA, Call of Duty, horror games)",
 };
-export type FlagRule = "ok" | "review" | "hide";
+export type FlagRule = "ok" | "hide";
 
-export type LgbtqRule = "allow" | "incidental" | "review" | "hide";
+export type LgbtqRule = "allow" | "hide_discussion" | "hide_all";
 export type Tradition = "" | "islam" | "judaism" | "christianity" | "hinduism" | "sikhism" | "other";
 
 export interface ValueFilters {
@@ -107,15 +106,16 @@ export interface ValueFilters {
   rules: Record<Dim, DimRule>;
   educationalBoost: boolean; // clearly educational videos: violence/scary/substances/politics +1 level
   blockGlorified: boolean; // always hide glamorized violence, substances, self-harm, cruelty
-  unknown: "allow" | "review" | "hide"; // when the transcript can't tell (incl. no transcript)
+  unknown: "allow" | "hide"; // when the transcript can't tell (incl. no transcript)
   faith: { tradition: Tradition }; // only effect: own faith's religious content is exempt from the religion ladder
   holidays: Record<Holiday, HolidayRule>;
   flags: Record<ValueFlag, FlagRule>;
   music: FlagRule; // best effort: detected from captions ("[Music]") and lyrics only
-  lgbtq: LgbtqRule; // allow · incidental (allow presence, review discussion) · review all · hide discussion/advocacy
+  lgbtq: LgbtqRule; // allow · hide discussion/advocacy (presence OK) · hide all
   religiousSensitivity: boolean; // + religion: free-text values check (AI on summary)
   religion: string;
   customRules: string; // free-text rules (AI on summary)
+  gamblingLadder?: boolean; // true once gambling uses the 0–4 ladder (older answers were 0 / 4 only)
 }
 
 // Level labels — used in block reasons (and mirrored in the parent app's questionnaire)
@@ -132,7 +132,7 @@ export const LEVEL_LABELS: Record<Dim, string[]> = {
   consumerism: ["No selling", "Brief sponsor mention", "Product promotion", "Unboxing/merch selling", "Constant selling"],
   politics: ["No politics", "Educational civics/history", "News", "Political opinion", "Extreme political content"],
   religion: ["No religion", "Educational religious content", "Worship/devotional content", "Trying to convert viewers", "Mocking religion"],
-  gambling: ["No gambling", "", "", "", "Gambling/loot boxes"],
+  gambling: ["No gambling", "Gambling mentioned", "Gambling discussed", "Gambling shown", "Gambling promoted"],
   crudeHumor: ["No crude humor", "Silly gross-out", "Toilet humor", "Frequent gross-out humor", "Extreme gross-out"],
   matureThemes: ["No mature themes", "Brief mention of death/illness", "Gently handled mature theme", "Heavy themes in depth", "Disturbing mature themes"],
   misinformation: ["No misinformation", "Unverified claims", "Pseudoscience/conspiracy as fact", "Harmful health/safety misinformation", "Extremist conspiracy"],
@@ -153,7 +153,7 @@ const AGE_TABLE: Record<Dim, number[]> = {
   consumerism: [1, 1, 2, 2, 3],
   politics: [0, 0, 1, 1, 2],
   religion: [3, 3, 3, 3, 3], // all religious content except mocking
-  gambling: [0, 0, 0, 0, 0],
+  gambling: [1, 1, 2, 2, 2], // passing mentions OK; shown/promoted never by default
   crudeHumor: [1, 2, 2, 3, 3],
   matureThemes: [1, 1, 2, 3, 3],
   misinformation: [1, 1, 1, 1, 1],
@@ -171,11 +171,10 @@ function ageColumn(age: number): number {
 export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensitivity"] = "average"): ValueFilters {
   const col = ageColumn(ageGroup);
   const rules = {} as Record<Dim, DimRule>;
-  for (const dim of DIMS) rules[dim] = { max: AGE_TABLE[dim][col], action: "hide" };
+  for (const dim of DIMS) rules[dim] = { max: AGE_TABLE[dim][col] };
   const shift = sensitivity === "more" ? -1 : sensitivity === "less" ? 1 : 0;
   rules.scary.max = Math.max(0, Math.min(4, rules.scary.max + shift));
   rules.matureThemes.max = Math.max(0, Math.min(4, rules.matureThemes.max + shift));
-  if (col === 4) rules.gambling.action = "review";
   return {
     version: 2,
     ageGroup,
@@ -183,7 +182,7 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
     rules,
     educationalBoost: true,
     blockGlorified: true,
-    unknown: "review",
+    unknown: "hide",
     faith: { tradition: "" },
     holidays: Object.fromEntries(HOLIDAYS.map((h) => [h, "ok"])) as Record<Holiday, HolidayRule>,
     flags: Object.fromEntries(VALUE_FLAGS.map((f) => [f, "ok"])) as Record<ValueFlag, FlagRule>,
@@ -192,6 +191,7 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
     religiousSensitivity: false,
     religion: "",
     customRules: "",
+    gamblingLadder: true,
   };
 }
 
@@ -201,18 +201,37 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
   if (raw && raw.version === 2) {
     const d = defaultPrefs(Number(raw.ageGroup) || fallbackAge);
     const r = raw as unknown as ValueFilters;
+    // Older answers had "review" ("Ask me first") options — those now mean hide.
+    const okOrHide = (v: unknown): FlagRule => (v === "ok" || v === "all" ? "ok" : "hide");
+    const raw2 = raw as Record<string, any>;
+    const rules = { ...d.rules };
+    for (const dim of DIMS) {
+      const m = raw2.rules?.[dim]?.max;
+      if (typeof m === "number") rules[dim] = { max: m };
+    }
+    // Gambling used to be present/absent: "Not allowed" (0) meant no real gambling,
+    // which is "passing mentions OK" (1) on the ladder
+    if (!raw2.gamblingLadder && rules.gambling.max === 0) rules.gambling = { max: 1 };
     const flags = { ...d.flags };
-    for (const f of VALUE_FLAGS) if (r.flags?.[f]) flags[f] = r.flags[f];
-    const music = (r.music as string) ?? "ok";
+    for (const f of VALUE_FLAGS) if (raw2.flags?.[f]) flags[f] = okOrHide(raw2.flags[f]);
+    const holidays = { ...d.holidays };
+    for (const h of HOLIDAYS) {
+      const v = raw2.holidays?.[h];
+      if (v) holidays[h] = v === "ok" || v === "incidental" ? v : "hide";
+    }
+    const lg = raw2.lgbtq;
     return {
       ...d,
       ...r,
-      rules: { ...d.rules, ...(r.rules ?? {}) },
+      rules,
       faith: { tradition: r.faith?.tradition ?? "" },
-      holidays: { ...d.holidays, ...(r.holidays ?? {}) },
+      holidays,
       flags,
-      // earlier music options (all / background / vocals_only / none) → ok / hide
-      music: ["ok", "review", "hide"].includes(music) ? (music as FlagRule) : music === "all" ? "ok" : "hide",
+      unknown: raw2.unknown === "allow" ? "allow" : "hide",
+      // earlier music options (all / background / vocals_only / none / review) → ok / hide
+      music: raw2.music === undefined ? "ok" : okOrHide(raw2.music),
+      lgbtq: lg === "allow" || lg === undefined ? "allow" : lg === "review" || lg === "hide_all" ? "hide_all" : "hide_discussion",
+      gamblingLadder: true,
     };
   }
   const age = Number(raw?.ageGroup) || fallbackAge;

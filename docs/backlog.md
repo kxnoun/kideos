@@ -18,34 +18,49 @@ Everything depends on the AI rating videos correctly, and we haven't measured it
 Plan: build a small labeling page (one video at a time, same questions, saves answers, outputs the
 agreement table). See [questionnaire-research.md](questionnaire-research.md) → Known limits.
 
+Found in real data (Oct 17): gambling was present/absent only, so passing mentions counted as the worst
+level — SciShow's "Power Pose" video (a study using a bet), Casually Explained's "Sports II" ("mention of
+gambling on golf"). Fixed in profile v4 with a 0–4 gambling ladder (mentioned → discussed → shown →
+promoted). Include a few gambling-mention videos in the labeling round to confirm.
+
+## 1b. Before launch: fill the suggestions catalog — *after the labeling check*
+
+Analyse ~500 well-known kids' channels up front so suggestions are useful from day one (the catalog then
+grows by itself as families add channels). One-time cost ≈ $70–75: one month of Supadata **Mega** ($47,
+30k credits — cancel after) for ~25k transcripts + ~$25 OpenAI. Needs: a channel list sorted by age and
+topic (draft it, sister trims it), and a batch job that seeds + profiles a list of channels without a
+family attached (spread over 2–3 days for the YouTube quota). Do the labeling check first so we don't
+analyse 500 channels with a prompt we're about to change.
+
+- At ~500 channels, `getChannelSuggestions` reading the whole catalog per call gets heavy (~40 MB). Then:
+  precompute per-child scores (on answers change / catalog change), or pre-filter by age/topic.
+- Retire the older AI "suggest by description" feature (`suggestChannels`, Channels tab) once the new one
+  is proven.
+
 ## 2. Confirmed bugs
 
-- **Push notifications never arrive.** The parent app never saves its FCM token to
-  `users/{p}/devices/primary`, so `notifyParent` and the digest push have no device. Needs: request
-  notification permission, get the token (`@react-native-firebase/messaging`), save it, refresh on change.
 - **Weekly digest broken end to end.** `generateWeeklyDigest` writes `users/{p}/children/{c}/digests/{week}`,
   the parent app reads `users/{p}/digests`, and `firestore.rules` has no rule for the child-level path (so
   the parent couldn't read it anyway). Fix the path (per child), the rule, and DigestScreen's per-child view.
-- **Nightly refresh times out.** `refreshChannelLibraries` sleeps `max(2s, 18h ÷ channels)` between
-  channels inside a 9-minute function → with fewer than ~120 channels it handles one channel and dies, so
-  new uploads aren't analyzed. Replace the stagger (e.g. one task per channel, or no sleep — quota use is tiny).
-- **Notifications would say "Your child".** `batchAnalyzeChannel` reads the name from
-  `children/{c}/profile/current`, but the name is on the child doc itself.
-- **Re-apply skips videos with an old profile version** (they keep their old verdict until the channel is
-  re-added). Could regenerate missing/old profiles in the background instead.
-- **Verdicts for removed channels linger.** The kid feed filters them out, but `videoVerdicts` and queue
-  entries for a removed channel stay. Clean up on whitelist delete.
+- Re-apply skips videos with *no* usable profile (older than v3). Older-version profiles are now upgraded
+  nightly by `reprofileOutdated` (cached transcripts only).
+- **Verdicts for removed channels linger.** The kid feed filters them out, but `videoVerdicts` for a
+  removed channel stay (and show in the Videos screen). Clean up on whitelist delete.
+- **Weekly digest push** would need an FCM token, which the app never registers — fine for now (no
+  notifications by design), but decide when fixing the digest.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
   that part, and add a TTL/cleanup for `triggerEvents`.
 - **Kid app type error:** `PlayerScreen.tsx(111)` implicit `any` (pre-existing).
 
 ## 3. Security
 
-- **Kid-app reads are too broad.** Rules let *any* signed-in (anonymous) user read any child's filters,
-  whitelist, verdicts and session if they know the IDs. Bind kid devices to their child at pairing
-  (e.g. store the device's anonymous UID on the child and check it in rules, or custom claims).
-- `pairingCodes` allow create/read without auth (by design for pairing) — add expiry cleanup and rate
-  limiting.
+- `pairingCodes`: expired codes are never deleted, and there's no rate limiting on creating/claiming.
+- **Kid devices aren't bound to their child.** Any signed-in device can read any child's whitelist,
+  verdicts and session if it knows the IDs. Binding (`kidDeviceUids` on the child, `isKid()` in the rules,
+  `deviceUid` in the pairing code) was built Oct 17 and reverted the same day: the parent app's onboarding
+  bug (below, fixed) made it look broken, and existing pairings need a re-pair when it ships. Redo it in a
+  calm moment: the rules + `tests/rules/` are in git history (commit bdf672f), plus a "paired devices" list
+  in the parent app so it can be managed without the console.
 
 ## 4. Missing features (from the May review, still open)
 
@@ -55,6 +70,9 @@ agreement table). See [questionnaire-research.md](questionnaire-research.md) →
 - Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
+
+- **Suggested channels: re-check channels over time.** A channel's content can drift. Re-analyse catalog
+  channels every 6–12 months (channels someone follows already get new uploads analysed nightly).
 
 ## 5. Questionnaire follow-ups
 
@@ -78,7 +96,8 @@ agreement table). See [questionnaire-research.md](questionnaire-research.md) →
   build-time copy with a check.
 - Remove the unused `seedChannelLibrary` callable and unused `APP_CONFIG` constants
   (`CACHE_HIT_TARGET_MS`, `PIPELINE_TIMEOUT_MS`, `PRE_ANALYSIS_BATCH_SIZE`).
-- Old `flaggedContent` docs (auto IDs, no `status`) only support "Mark as reviewed" — clean up or migrate.
+- Legacy `flaggedContent` docs and `@react-native-firebase/messaging` are no longer used — delete the
+  collection data and consider dropping the dependency.
 
 ## Done (Oct 2026)
 
@@ -86,4 +105,7 @@ Fixed from the May list: kid feed channel names, "Add Another Child" getting stu
 sign-in/sign-out account picker, `snap.exists()` crashes and the pairing-code check, kid-app anonymous-auth
 race, analysis running as its own function (no more stalls), transcripts actually used and cached,
 Supadata cost controls, per-child verdicts (fixed approvals being shared between families), content
-profiles + the research-based questionnaire, the review queue ("Ask me first"), free text → settings.
+profiles + the research-based questionnaire, free text → settings. Oct 17: nightly refresh fixed (no
+stagger); "Ask me first" + review queue + push notifications replaced by the Videos screen (Shown / Hidden
+with reasons, confirmed "Show anyway"); suggested channels (shared channel profiles, swipe cards); deleting a child is recursive (device binding was
+reverted, see Security — so a kid device still doesn't notice its child was deleted until re-paired); fixed parent onboarding looping back to "Who is this for?" after Done.

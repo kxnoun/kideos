@@ -25,7 +25,7 @@ export interface ParentProfile {
 // ── Value Filters ──────────────────────────────────────────────
 
 // Defined with the questionnaire logic in prefs.ts
-export type { ValueFilters, Dim, DimRule, OverAction } from "./prefs";
+export type { ValueFilters, Dim, DimRule } from "./prefs";
 import type { Dim, Holiday, ValueFlag } from "./prefs";
 
 // ── Child Profile ──────────────────────────────────────────────
@@ -68,25 +68,8 @@ export interface WatchSession {
   expiresAt: Timestamp;
 }
 
-// ── Flagged Content ────────────────────────────────────────────
-// Written during background batch analysis when a video is blocked.
-// These videos never appear in the kid's feed.
 
 export type Severity = "low" | "medium" | "high";
-
-export interface FlaggedContent {
-  videoId: string;
-  title: string;
-  channel: string;
-  channelId: string;
-  timestamp: Timestamp;
-  reason: string;
-  flags: string[];
-  severity: Severity;
-  status: "hidden" | "pending_review"; // pending_review = hidden until the parent approves
-  parentViewed: boolean;
-  resolution?: "approved" | "hidden"; // set by the parent app when reviewed
-}
 
 // ── AI Channel Suggestion ──────────────────────────────────────
 
@@ -148,9 +131,11 @@ export interface ContentProfile {
 export interface VideoVerdict {
   videoId: string;
   channelId: string;
-  approved: boolean; // what the kid feed reads: status === "approved", or the parent approved it
-  status: "approved" | "hidden" | "pending_review";
-  parentDecision?: "approved" | "hidden"; // set by the parent app; always wins
+  approved: boolean; // what the kid feed reads: status === "approved", unless the parent overrode it
+  status: "approved" | "hidden"; // result of the parent's answers
+  parentDecision?: "approved" | "hidden"; // "Show anyway" from the parent app; always wins
+  ratings: Partial<Record<Dim, DimRating>>; // the video's non-zero ladder ratings, for the parent app
+  channelName: string;
   reason: string; // empty when approved
   flags: string[];
   severity: Severity | null;
