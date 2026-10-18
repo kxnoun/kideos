@@ -19,6 +19,26 @@ What's next, in rough priority order. Update this file as things land.
    - **"Made for Kids" videos must have tracking off** in the embed (YouTube Developer Policies III.E.4.j);
    - the **kid player decision** (hiding YouTube's buttons is against their terms — see kid player below).
 
+### Also agreed Oct 18 (top priority from the sister)
+
+- **YouTube Premium → "Premium mode" (opt-in per child).** Our player can't see a Google login (in-app web
+  views have their own cookie jar, and Google blocks signing in there; there's no API to pass Premium in,
+  and copying cookies would hand over the parent's whole Google account — never). Premium mode plays the
+  video as YouTube's **embed page in the system browser** (Chrome Custom Tab on Android, Safari View
+  Controller on iPhone — Google allows sign-in there), signed in once, ideally with the kid's
+  **supervised account under Premium Family** (Google: supervised kids get ad-free; if they tap out,
+  YouTube's own supervised settings apply). Trade-off: no hiding YouTube's buttons, no remote pause (End
+  Session / Hide still close it). **First: 2-minute test** — youtube.com/embed/<id> in Chrome signed in vs
+  Incognito; ads gone signed in → build it.
+- **"Pace & stimulation" ladder** (CoComelon-style / brainrot): 0 calm → 4 noise & shock, from music/
+  song share, repetition, shouting, title style, and the channel's known reputation; a parent "allow up to"
+  setting. Research: Lillard & Peterson 2011 (fast-paced cartoons → worse executive function in
+  4-year-olds). Needs a profile version bump (re-analysis from cached transcripts).
+- **Visual check from 4 stills** (thumbnail + YouTube's 3 auto frames at 25/50/75%) with a vision model for
+  nudity / gore / scary imagery (~$0.001/video). Do it in the same version bump as Pace & stimulation.
+- Embedding-blocked videos (common for record-label music) are now hidden automatically; already-analyzed
+  ones get caught on the next re-analysis (and the kid player closes them gracefully meanwhile).
+
 ## 1. Check the AI against people (labeling) — *on the backburner, do before real families use it*
 
 Everything depends on the AI rating videos correctly, and we haven't measured it yet.
