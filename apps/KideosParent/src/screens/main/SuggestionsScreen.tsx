@@ -178,6 +178,12 @@ export default function SuggestionsScreen({ route, navigation }: Props) {
   );
 }
 
+function audienceLabel(min: number | null, max: number | null): string | null {
+  if (min === null && max === null) return "All ages";
+  if (max === null) return `Made for ages ${min}+`;
+  return `Made for ages ${min ?? 0}–${max}`;
+}
+
 function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: string }) {
   const pct = s.analyzed ? s.fitting / s.analyzed : 0;
   const hidden = s.analyzed - s.fitting;
@@ -191,6 +197,11 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
         </View>
       </View>
 
+      {audienceLabel(s.audienceMinAge, s.audienceMaxAge) ? (
+        <View style={styles.ageChip}>
+          <Text style={styles.ageText}>{audienceLabel(s.audienceMinAge, s.audienceMaxAge)}</Text>
+        </View>
+      ) : null}
       <Text style={styles.overview}>{s.overview}</Text>
       {s.topics.length ? (
         <View style={styles.chips}>
@@ -308,6 +319,8 @@ const styles = StyleSheet.create({
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#E8E8F0", marginRight: 12 },
   name: { fontSize: 20, fontWeight: "800", color: "#1A1A2E" },
   handle: { fontSize: 13, color: "#888", marginTop: 2 },
+  ageChip: { alignSelf: "flex-start", backgroundColor: "#1A1A2E", borderRadius: 10, paddingVertical: 3, paddingHorizontal: 9, marginBottom: 10 },
+  ageText: { fontSize: 12, color: "#fff", fontWeight: "700" },
   overview: { fontSize: 15, color: "#333", lineHeight: 22 },
   chips: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
   topicChip: { backgroundColor: "#EEEDFF", borderRadius: 12, paddingVertical: 4, paddingHorizontal: 10, marginRight: 6, marginBottom: 6 },

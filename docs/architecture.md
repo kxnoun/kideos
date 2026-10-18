@@ -148,7 +148,10 @@ adding one:** ≥10 checked videos (no-transcript ones are left out — unknown,
 at most 2 severe videos (3+ rule it out; 1–2 show as a ⚠ warning on the card). Severe is absolute, not
 relative to the child's strictness: the top of a ladder the child hasn't allowed (strong swearing, graphic
 violence, gambling promoted…) or self-harm ≥3. So a channel where only the mild Shorts pass (EpicMealTime)
-is never suggested, but SciShow isn't sunk by one predator video. Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
+is never suggested, but SciShow isn't sunk by one predator video. Suggestions are also **for the child's age**: the overview call
+estimates who the channel is made for (`audienceMinAge`/`audienceMaxAge`, e.g. Ms Rachel 1–4, SciShow 12+);
+a channel is suggested only within ±1 year of that (all-ages channels to everyone), and the card shows
+"Made for ages …". Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
 channel's content counts, so it mentions heavy content plainly. Then it ranks by share of fitting videos (then educational share if the parent
 ticked that). Each card: overview, "X of 50 videos fit", top reasons the rest would be hidden, what's in the
 videos that would show, sample videos. Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never

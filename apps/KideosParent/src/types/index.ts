@@ -99,6 +99,8 @@ export interface SuggestedChannel {
   handle: string;
   thumbnail: string;
   overview: string;
+  audienceMinAge: number | null; // who the channel is made for (null max = and up)
+  audienceMaxAge: number | null;
   topics: string[];
   analyzed: number; // checked videos
   unchecked: number; // no transcript, not counted

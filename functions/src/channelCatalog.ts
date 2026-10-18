@@ -30,7 +30,9 @@ const VIDEOS_PER_CHANNEL = 50;
 const MAX_SUGGESTIONS = 25;
 const BACKFILL_PER_CALL = 10;
 // Bump to rewrite every overview (e.g. when the overview prompt changes)
-const OVERVIEW_VERSION = 2;
+const OVERVIEW_VERSION = 3; // v3: + who the channel is made for (audience ages)
+// A child is suggested channels made for their age, give or take this many years
+const AGE_SLACK = 1;
 
 // A suggestion means "this channel suits your child", not "some of its videos do"
 // (a channel where only the mild Shorts pass is still not one to recommend):
@@ -64,6 +66,9 @@ export interface CatalogEntry {
   subscriberCount: number;
   overview: string;
   overviewVersion: number;
+  // Who the channel is made for (AI estimate). null max = "and up"; both null = all ages / unknown
+  audienceMinAge: number | null;
+  audienceMaxAge: number | null;
   topics: string[];
   analyzedCount: number; // videos with a profile we can score
   educationalCount: number;
@@ -133,10 +138,10 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
   const ref = db.doc(`channelCatalog/${channelId}`);
   const existing = (await ref.get()).data() as Partial<CatalogEntry> | undefined;
   const fresh = existing?.overview && existing.overviewVersion === OVERVIEW_VERSION;
-  const overview =
-    (fresh ? existing!.overview : null) ||
-    (await writeOverview(meta.name, meta.description ?? "", summaries, contentSummary(videos), openAiApiKey)) ||
-    String(meta.description ?? "").slice(0, 240);
+  const written = fresh
+    ? { overview: existing!.overview!, minAge: existing!.audienceMinAge ?? null, maxAge: existing!.audienceMaxAge ?? null }
+    : await writeOverview(meta.name, meta.description ?? "", summaries, contentSummary(videos), openAiApiKey);
+  const overview = written?.overview || String(meta.description ?? "").slice(0, 240);
 
   const entry: CatalogEntry = {
     channelId,
@@ -145,7 +150,10 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
     thumbnail: meta.thumbnail ?? "",
     subscriberCount: meta.subscriberCount ?? 0,
     overview,
-    overviewVersion: OVERVIEW_VERSION,
+    // No AI answer → keep the old version number so it's retried next time
+    overviewVersion: written ? OVERVIEW_VERSION : existing?.overviewVersion ?? 0,
+    audienceMinAge: written?.minAge ?? null,
+    audienceMaxAge: written?.maxAge ?? null,
     topics: [...topicCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t),
     analyzedCount: videos.length,
     educationalCount,
@@ -177,7 +185,7 @@ async function writeOverview(
   summaries: string[],
   content: string,
   apiKey: string
-): Promise<string | null> {
+): Promise<{ overview: string; minAge: number | null; maxAge: number | null } | null> {
   try {
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({
@@ -191,17 +199,29 @@ async function writeOverview(
             "Only use what you're given. You also get a count of videos with stronger content: if a notable share of " +
             "videos have it (roughly 1 in 5 or more), or any are at the strongest level, say so plainly in the last " +
             "sentence (e.g. \"Many videos include heavy drinking and strong swearing.\"). Never describe a channel as " +
-            "family-friendly or light-hearted if the counts say otherwise.",
+            "family-friendly or light-hearted if the counts say otherwise.\n" +
+            "Also say who the channel is MADE FOR (its intended audience, not who it's safe for): e.g. Ms Rachel → 1–4, " +
+            "Blippi → 2–6, SciShow Kids → 5–9, SciShow → 12 and up, a channel for adults → 18 and up. Use null for both " +
+            "only if it's truly for all ages.\n" +
+            'Respond with JSON only: {"overview": "…", "minAge": number | null, "maxAge": number | null (null = and up)}',
         },
         {
           role: "user",
           content: `CHANNEL: ${name}\nDescription: ${description.slice(0, 600)}\n\nRecent videos:\n${summaries.map((s) => `• ${s}`).join("\n")}\n\nStronger content across the checked videos:\n${content}`,
         },
       ],
-      max_tokens: 160,
+      response_format: { type: "json_object" },
+      max_tokens: 220,
       temperature: 0.2,
     });
-    return completion.choices[0]?.message?.content?.trim().slice(0, 500) || null;
+    const p = JSON.parse(completion.choices[0]?.message?.content ?? "{}");
+    const age = (v: unknown) => (typeof v === "number" && v >= 0 && v <= 99 ? Math.round(v) : null);
+    const overview = typeof p.overview === "string" ? p.overview.trim().slice(0, 500) : "";
+    if (!overview) return null;
+    let minAge = age(p.minAge);
+    const maxAge = age(p.maxAge);
+    if (minAge !== null && maxAge !== null && maxAge < minAge) minAge = maxAge;
+    return { overview, minAge, maxAge };
   } catch (err) {
     logger.error(`[channelCatalog] Overview failed for ${name}:`, err);
     return null;
@@ -225,6 +245,8 @@ export interface ChannelSuggestion {
   handle: string;
   thumbnail: string;
   overview: string;
+  audienceMinAge: number | null;
+  audienceMaxAge: number | null;
   topics: string[];
   analyzed: number; // checked videos (had a transcript)
   unchecked: number; // no transcript — left out of the fit share
@@ -259,6 +281,13 @@ function flagLabel(flag: string): string {
   if (value === "unknown") return `Couldn't tell the ${DIM_WORDS[dim]} level`;
   if (value === "glorified") return `${DIM_WORDS[dim][0].toUpperCase()}${DIM_WORDS[dim].slice(1)} made to look cool`;
   return LEVEL_LABELS[dim][Number(value)] ?? flag;
+}
+
+// Made for this child's age (± AGE_SLACK)? Ms Rachel isn't a suggestion for a 14-year-old.
+export function fitsAge(s: Pick<ChannelSuggestion, "audienceMinAge" | "audienceMaxAge">, age: number): boolean {
+  if (s.audienceMinAge !== null && age < s.audienceMinAge - AGE_SLACK) return false;
+  if (s.audienceMaxAge !== null && age > s.audienceMaxAge + AGE_SLACK) return false;
+  return true;
 }
 
 export function isSuggestable(s: ChannelSuggestion): boolean {
@@ -332,6 +361,8 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     handle: entry.handle,
     thumbnail: entry.thumbnail,
     overview: entry.overview,
+    audienceMinAge: entry.audienceMinAge ?? null,
+    audienceMaxAge: entry.audienceMaxAge ?? null,
     topics: entry.topics,
     analyzed: checked,
     unchecked: entry.videos.length - checked,
@@ -375,22 +406,28 @@ export const getChannelSuggestions = onCall(
     await backfillCatalog(db, OPENAI_API_KEY.value());
 
     const childPath = `users/${parentId}/children/${childId}`;
-    const [prefs, whitelisted, dismissed, catalog] = await Promise.all([
+    const [prefs, childSnap, whitelisted, dismissed, catalog] = await Promise.all([
       loadValueFiltersForChild(parentId, childId),
+      db.doc(childPath).get(),
       db.collection(`${childPath}/whitelistedChannels`).select().get(),
       db.collection(`${childPath}/dismissedSuggestions`).select().get(),
       db.collection("channelCatalog").get(),
     ]);
     const skip = new Set([...whitelisted.docs, ...dismissed.docs].map((d) => d.id));
+    const age = Number(childSnap.data()?.age) || prefs.ageGroup;
 
     const scored = catalog.docs
       .filter((d) => !skip.has(d.id))
       .map((d) => scoreChannel(d.data() as CatalogEntry, prefs));
-    for (const s of scored.filter((x) => !isSuggestable(x))) {
-      logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — ${whyNot(s)}`);
+    const ok = (x: ChannelSuggestion) => fitsAge(x, age) && isSuggestable(x);
+    for (const s of scored.filter((x) => !ok(x))) {
+      const why = fitsAge(s, age)
+        ? whyNot(s)
+        : `made for ages ${s.audienceMinAge ?? 0}–${s.audienceMaxAge ?? "up"}, child is ${age}`;
+      logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — ${why}`);
     }
     const suggestions = scored
-      .filter(isSuggestable)
+      .filter(ok)
       .map(({ severeExamples: _drop, ...s }) => s)
       .sort((a, b) => {
         const fit = b.fitting / b.analyzed - a.fitting / a.analyzed;
