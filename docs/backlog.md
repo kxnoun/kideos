@@ -127,6 +127,13 @@ analyse 500 channels with a prompt we're about to change.
 
 ## Done (Oct 2026)
 
+Oct 17–18 (`player-and-remote-control`): kid player hides share / YouTube button / More videos and makes
+title + channel untappable (two library patches; ⚠️ terms — see kid player above); fullscreen rotates to
+landscape; remote pause actually works on Android; Resume; End Session locks the whole kid app until "Let
+them watch again"; now-watching card shows Paused / Playing, summary, ratings with evidence, "Hide this
+video" (closes it on the kid's phone); Videos screen details sheet, Hide, multi-select hide.
+
+
 Fixed from the May list: kid feed channel names, "Add Another Child" getting stuck. Plus: Google
 sign-in/sign-out account picker, `snap.exists()` crashes and the pairing-code check, kid-app anonymous-auth
 race, analysis running as its own function (no more stalls), transcripts actually used and cached,
