@@ -30,6 +30,7 @@ interface YouTubeVideoContentDetails {
 interface YouTubeVideoStatus {
   madeForKids: boolean;
   privacyStatus: "public" | "private" | "unlisted";
+  embeddable?: boolean; // false = the owner blocks playback in other apps/sites (common for label music videos)
 }
 
 export interface YouTubeVideoDetails {
@@ -145,8 +146,9 @@ export async function getVideoDetails(
   const contentDetails: YouTubeVideoContentDetails = item.contentDetails;
   const status: YouTubeVideoStatus = item.status;
 
-  // Auto-block private/unlisted/age-restricted
-  const isPrivateOrRestricted = status.privacyStatus !== "public";
+  // Auto-block private/unlisted/age-restricted, and videos whose owner disabled
+  // embedding (they'd only show "Video unavailable" in the kid player)
+  const isPrivateOrRestricted = status.privacyStatus !== "public" || status.embeddable === false;
 
   return {
     videoId,

@@ -56,7 +56,7 @@ export function evaluateProfile(
   if (profile.status === "unavailable") {
     return {
       status: "hidden",
-      reason: "This video is private, age-restricted or no longer available.",
+      reason: "This video is private, no longer available, or its owner doesn't allow it to play in other apps.",
       flags: ["unavailable"],
       severity: "low",
     };
