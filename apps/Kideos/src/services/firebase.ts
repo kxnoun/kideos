@@ -97,6 +97,23 @@ export async function writeNowPlaying(
     });
 }
 
+// Is this video still allowed for this child? (a parent can hide it while it plays)
+export function subscribeToVideoAllowed(
+  parentId: string,
+  childId: string,
+  videoId: string,
+  onUpdate: (allowed: boolean) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`)
+    .onSnapshot(
+      (snap) => {
+        if (snap.exists()) onUpdate(snap.data()?.approved !== false);
+      },
+      (err) => console.warn("[videoAllowed] listener error:", err)
+    );
+}
+
 // So the parent app can show "Now watching" vs "Paused"
 export async function setNowPlayingPaused(parentId: string, childId: string, paused: boolean): Promise<void> {
   await firestore()

@@ -33,6 +33,7 @@ import {
   subscribeToPlaySignal,
   subscribeToVerdict,
   getVideoSummary,
+  hideVideo,
   claimPairingCode,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
@@ -323,6 +324,30 @@ export default function HomeScreen() {
                       </Text>
                     </TouchableOpacity>
                   </View>
+                  <TouchableOpacity
+                    style={styles.hideBtn}
+                    onPress={() =>
+                      Alert.alert(
+                        "Hide this video?",
+                        `It closes on ${selectedChild.profile.name}'s screen right away and won't be in their feed. You can undo it in ${selectedChild.profile.name}'s videos → Hidden.`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Hide video",
+                            style: "destructive",
+                            onPress: () =>
+                              parentId && selectedChildId
+                                ? hideVideo(parentId, selectedChildId, nowPlaying.videoId).catch(() =>
+                                    Alert.alert("Couldn't hide it. Check your connection.")
+                                  )
+                                : undefined,
+                          },
+                        ]
+                      )
+                    }
+                  >
+                    <Text style={styles.hideBtnText}>🚩 Hide this video</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ) : (
@@ -513,6 +538,8 @@ const styles = StyleSheet.create({
   measure: { position: "absolute", opacity: 0, left: 0, right: 0 },
   moreLink: { fontSize: 13, fontWeight: "700", color: "#6C63FF", marginTop: 2, marginBottom: 8 },
   nowChips: { marginBottom: 12 },
+  hideBtn: { marginTop: 10, paddingVertical: 10, alignItems: "center" },
+  hideBtnText: { fontSize: 14, fontWeight: "700", color: "#B23B3B" },
   nowFit: { fontSize: 13, fontWeight: "800", color: "#1E7A44", marginBottom: 6 },
   nowRating: { fontSize: 12, color: "#666", lineHeight: 18, marginBottom: 3 },
   nowRatingName: { fontWeight: "700", color: "#333" },

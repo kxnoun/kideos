@@ -28,6 +28,7 @@ import {
   StatusBar,
   Dimensions,
   Linking,
+  Alert,
 } from "react-native";
 import YoutubePlayer from "react-native-youtube-iframe";
 import type { ShouldStartLoadRequest, WebViewOpenWindowEvent } from "react-native-webview/lib/WebViewTypes";
@@ -36,6 +37,7 @@ import {
   writeNowPlaying,
   clearNowPlaying,
   setNowPlayingPaused,
+  subscribeToVideoAllowed,
   logWatchSessionStart,
   logWatchSessionEnd,
 } from "../services/firebase";
@@ -162,6 +164,16 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
     });
     return unsub;
   }, [parentId, childId]);
+
+  // A parent tapped "Hide this video" — close it right away
+  useEffect(() => {
+    return subscribeToVideoAllowed(parentId, childId, video.videoId, (allowed) => {
+      if (!allowed) {
+        onBack();
+        Alert.alert("This video was removed", "A parent removed this video. Pick another one!");
+      }
+    });
+  }, [parentId, childId, video.videoId, onBack]);
 
   const handleBack = useCallback(() => {
     setPlaying(false);

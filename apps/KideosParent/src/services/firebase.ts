@@ -335,6 +335,14 @@ export async function setShowAnyway(
   }
 }
 
+// "Hide this video" from the now-watching card: out of the kid's feed, and the kid
+// app closes it if it's playing. Undo = setShowAnyway(…, false).
+export async function hideVideo(parentId: string, childId: string, videoId: string): Promise<void> {
+  await firestore()
+    .doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`)
+    .update({ parentDecision: "hidden", approved: false });
+}
+
 // Free-text "anything else?" → concrete questionnaire changes (parent confirms before applying)
 export interface RuleChange {
   key: string;

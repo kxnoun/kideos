@@ -92,6 +92,7 @@ export default function VideosScreen({ route, navigation }: Props) {
 
   const renderItem = ({ item: v }: { item: VideoVerdict }) => {
     const overridden = v.parentDecision === "approved";
+    const hiddenByYou = v.parentDecision === "hidden";
     return (
       <View style={styles.card}>
         <View style={styles.row}>
@@ -120,6 +121,13 @@ export default function VideosScreen({ route, navigation }: Props) {
         {overridden ? (
           <View style={styles.footer}>
             <Text style={styles.overrideNote}>Shown because you allowed it</Text>
+            <TouchableOpacity onPress={() => change(v, false)} hitSlop={8}>
+              <Text style={styles.linkText}>Undo</Text>
+            </TouchableOpacity>
+          </View>
+        ) : hiddenByYou ? (
+          <View style={styles.footer}>
+            <Text style={styles.overrideNote}>You hid this</Text>
             <TouchableOpacity onPress={() => change(v, false)} hitSlop={8}>
               <Text style={styles.linkText}>Undo</Text>
             </TouchableOpacity>
