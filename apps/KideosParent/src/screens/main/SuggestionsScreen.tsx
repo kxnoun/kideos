@@ -222,6 +222,16 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
         ) : null}
       </View>
 
+      {s.severe > 0 ? (
+        <View style={styles.warnBox}>
+          <Text style={styles.warnText}>
+            ⚠ {s.severe === 1 ? "1 video has" : `${s.severe} videos have`} very strong content:{" "}
+            {s.severeLabels.map((l) => (l.count > 1 ? `${l.label} (${l.count})` : l.label)).join(", ")}. Those would be
+            hidden, but it's worth knowing before you add this channel.
+          </Text>
+        </View>
+      ) : null}
+
       <Text style={styles.sectionLabel}>In the videos that would show</Text>
       {s.ratings.length ? (
         <View style={styles.chips}>
@@ -312,6 +322,8 @@ const styles = StyleSheet.create({
   fitBoxWarn: { backgroundColor: "#FFF8EC" },
   fitTitleWarn: { color: "#A86200" },
   barFillWarn: { backgroundColor: "#E59A1F" },
+  warnBox: { backgroundColor: "#FFF4F4", borderRadius: 12, padding: 12, marginTop: 10 },
+  warnText: { fontSize: 13, color: "#B23B3B", lineHeight: 19, fontWeight: "600" },
   uncheckedText: { fontSize: 12, color: "#888", marginTop: 4 },
   hiddenText: { fontSize: 13, color: "#555", marginTop: 8, lineHeight: 19 },
   sectionLabel: { fontSize: 13, fontWeight: "800", color: "#1A1A2E", marginTop: 18, textTransform: "uppercase", letterSpacing: 0.5 },

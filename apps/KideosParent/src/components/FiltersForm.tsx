@@ -169,10 +169,13 @@ const QUESTIONS: Question[] = [
   {
     dim: "gambling",
     title: "Gambling",
-    hint: "Casino streams, betting, loot boxes, gambling sponsors.",
+    hint: "Betting, casinos, lotteries, loot boxes.",
     options: [
-      { level: 0, label: "Not allowed", example: "" },
-      { level: 4, label: "Allowed", example: "" },
+      { level: 0, label: "None", example: "" },
+      { level: 1, label: "Mentioned in passing", example: "A science video about a study that used a bet" },
+      { level: 2, label: "Discussed", example: "How odds work, the history of casinos" },
+      { level: 3, label: "Shown", example: "Casino games, betting, opening loot boxes" },
+      { level: 4, label: "Promoted", example: "Gambling sponsors, \"go bet on…\"" },
     ],
   },
 ];

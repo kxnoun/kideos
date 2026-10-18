@@ -30,6 +30,8 @@ export { suggestChannels, weeklyChannelSuggestions } from "./suggestChannels";
 
 export { getChannelSuggestions } from "./channelCatalog";
 
+export { reprofileOutdated } from "./reprofile";
+
 // parseCustomRules: questionnaire free text → concrete settings (parent confirms)
 export { parseCustomRules } from "./customRules";
 

@@ -115,6 +115,7 @@ export interface ValueFilters {
   religiousSensitivity: boolean; // + religion: free-text values check (AI on summary)
   religion: string;
   customRules: string; // free-text rules (AI on summary)
+  gamblingLadder?: boolean; // true once gambling uses the 0–4 ladder (older answers were 0 / 4 only)
 }
 
 // Level labels — used in block reasons (and mirrored in the parent app's questionnaire)
@@ -131,7 +132,7 @@ export const LEVEL_LABELS: Record<Dim, string[]> = {
   consumerism: ["No selling", "Brief sponsor mention", "Product promotion", "Unboxing/merch selling", "Constant selling"],
   politics: ["No politics", "Educational civics/history", "News", "Political opinion", "Extreme political content"],
   religion: ["No religion", "Educational religious content", "Worship/devotional content", "Trying to convert viewers", "Mocking religion"],
-  gambling: ["No gambling", "", "", "", "Gambling/loot boxes"],
+  gambling: ["No gambling", "Gambling mentioned", "Gambling discussed", "Gambling shown", "Gambling promoted"],
   crudeHumor: ["No crude humor", "Silly gross-out", "Toilet humor", "Frequent gross-out humor", "Extreme gross-out"],
   matureThemes: ["No mature themes", "Brief mention of death/illness", "Gently handled mature theme", "Heavy themes in depth", "Disturbing mature themes"],
   misinformation: ["No misinformation", "Unverified claims", "Pseudoscience/conspiracy as fact", "Harmful health/safety misinformation", "Extremist conspiracy"],
@@ -152,7 +153,7 @@ const AGE_TABLE: Record<Dim, number[]> = {
   consumerism: [1, 1, 2, 2, 3],
   politics: [0, 0, 1, 1, 2],
   religion: [3, 3, 3, 3, 3], // all religious content except mocking
-  gambling: [0, 0, 0, 0, 0],
+  gambling: [1, 1, 2, 2, 2], // passing mentions OK; shown/promoted never by default
   crudeHumor: [1, 2, 2, 3, 3],
   matureThemes: [1, 1, 2, 3, 3],
   misinformation: [1, 1, 1, 1, 1],
@@ -190,6 +191,7 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
     religiousSensitivity: false,
     religion: "",
     customRules: "",
+    gamblingLadder: true,
   };
 }
 
@@ -207,6 +209,9 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
       const m = raw2.rules?.[dim]?.max;
       if (typeof m === "number") rules[dim] = { max: m };
     }
+    // Gambling used to be present/absent: "Not allowed" (0) meant no real gambling,
+    // which is "passing mentions OK" (1) on the ladder
+    if (!raw2.gamblingLadder && rules.gambling.max === 0) rules.gambling = { max: 1 };
     const flags = { ...d.flags };
     for (const f of VALUE_FLAGS) if (raw2.flags?.[f]) flags[f] = okOrHide(raw2.flags[f]);
     const holidays = { ...d.holidays };
@@ -226,6 +231,7 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
       // earlier music options (all / background / vocals_only / none / review) → ok / hide
       music: raw2.music === undefined ? "ok" : okOrHide(raw2.music),
       lgbtq: lg === "allow" || lg === undefined ? "allow" : lg === "review" || lg === "hide_all" ? "hide_all" : "hide_discussion",
+      gamblingLadder: true,
     };
   }
   const age = Number(raw?.ageGroup) || fallbackAge;

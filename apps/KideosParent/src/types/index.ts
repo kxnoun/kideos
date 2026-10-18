@@ -103,7 +103,8 @@ export interface SuggestedChannel {
   analyzed: number; // checked videos
   unchecked: number; // no transcript, not counted
   fitting: number;
-  severe: number;
+  severe: number; // 1–2 allowed (shown as a warning); 3+ are never suggested
+  severeLabels: { label: string; count: number }[];
   educational: number;
   hiddenReasons: { label: string; count: number }[];
   ratings: { dim: Dim; maxLevel: number; count: number }[];

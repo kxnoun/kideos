@@ -18,11 +18,10 @@ Everything depends on the AI rating videos correctly, and we haven't measured it
 Plan: build a small labeling page (one video at a time, same questions, saves answers, outputs the
 agreement table). See [questionnaire-research.md](questionnaire-research.md) → Known limits.
 
-Known from real data (Oct 17): **gambling is over-detected.** It's present/absent only, and the AI marks
-passing mentions as present — SciShow's "Power Pose" video (a study measuring risk-taking with a bet),
-Casually Explained's "Sports II" ("mention of gambling on golf"). For a child with gambling = none these
-get hidden. Fix in the prompt: only actual betting/casino/loot-box content shown or promoted, not
-mentions — check it in the labeling round.
+Found in real data (Oct 17): gambling was present/absent only, so passing mentions counted as the worst
+level — SciShow's "Power Pose" video (a study using a bet), Casually Explained's "Sports II" ("mention of
+gambling on golf"). Fixed in profile v4 with a 0–4 gambling ladder (mentioned → discussed → shown →
+promoted). Include a few gambling-mention videos in the labeling round to confirm.
 
 ## 1b. Before launch: fill the suggestions catalog — *after the labeling check*
 
@@ -43,8 +42,8 @@ analyse 500 channels with a prompt we're about to change.
 - **Weekly digest broken end to end.** `generateWeeklyDigest` writes `users/{p}/children/{c}/digests/{week}`,
   the parent app reads `users/{p}/digests`, and `firestore.rules` has no rule for the child-level path (so
   the parent couldn't read it anyway). Fix the path (per child), the rule, and DigestScreen's per-child view.
-- **Re-apply skips videos with an old profile version** (they keep their old verdict until the channel is
-  re-added). Could regenerate missing/old profiles in the background instead.
+- Re-apply skips videos with *no* usable profile (older than v3). Older-version profiles are now upgraded
+  nightly by `reprofileOutdated` (cached transcripts only).
 - **Verdicts for removed channels linger.** The kid feed filters them out, but `videoVerdicts` for a
   removed channel stay (and show in the Videos screen). Clean up on whitelist delete.
 - **Weekly digest push** would need an FCM token, which the app never registers — fine for now (no

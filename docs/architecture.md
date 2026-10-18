@@ -28,8 +28,9 @@ questionnaire and profiles look this way see [questionnaire-research.md](questio
 
 1. **Content profile** (`videoProfiles/{videoId}`) — what a video contains, on fixed scales. Generated
    **once per video** by GPT-4o-mini from the transcript + metadata and **shared by every family**.
-   Filter-independent. Versioned (`PROFILE_VERSION` in `aiAnalysis.ts`): bump it and profiles regenerate
-   from cached transcripts on next analysis.
+   Filter-independent. Versioned (`PROFILE_VERSION` in `aiAnalysis.ts`, now 4): bump it and the nightly
+   **`reprofileOutdated`** regenerates old profiles from cached transcripts (never Supadata), rebuilds the
+   catalog and re-applies filters. Profiles ≥ `MIN_USABLE_PROFILE_VERSION` keep working meanwhile.
 2. **Questionnaire answers** (`users/{p}/children/{c}/valueFilters/current`) — per child, see
    [the questionnaire](#the-questionnaire).
 3. **Verdict** (`users/{p}/children/{c}/videoVerdicts/{videoId}`) — answers applied to the profile **in
@@ -143,12 +144,11 @@ No Supadata, no per-video AI — it reuses `videoProfiles`.
 Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannelSuggestions`**: runs
 `evaluateProfile` on every catalog video against the child's answers (pure code), skips channels already
 in the child's list or dismissed. **A suggestion vouches for the channel, so the bar is higher than for
-adding one:** ≥10 checked videos (no-transcript ones are left out — unknown, not bad), ≥75% of them fit, and *no*
-severe video — severe in absolute terms, not relative to the child's strictness: the top of a ladder the
-child hasn't allowed (strong swearing, graphic violence, drinking shown…) or self-harm ≥3. Gambling doesn't
-count (it's present/absent, so a passing mention would be "severe"). So a channel
-where only the mild Shorts pass (EpicMealTime) is never suggested, but SciShow isn't sunk by one predator
-video. Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
+adding one:** ≥10 checked videos (no-transcript ones are left out — unknown, not bad), ≥75% of them fit, and
+at most 2 severe videos (3+ rule it out; 1–2 show as a ⚠ warning on the card). Severe is absolute, not
+relative to the child's strictness: the top of a ladder the child hasn't allowed (strong swearing, graphic
+violence, gambling promoted…) or self-harm ≥3. So a channel where only the mild Shorts pass (EpicMealTime)
+is never suggested, but SciShow isn't sunk by one predator video. Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
 channel's content counts, so it mentions heavy content plainly. Then it ranks by share of fitting videos (then educational share if the parent
 ticked that). Each card: overview, "X of 50 videos fit", top reasons the rest would be hidden, what's in the
 videos that would show, sample videos. Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never
@@ -201,6 +201,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `youtube.ts` | `parseChannelInput`, `getChannelDetails`, `getChannelVideos`, `getVideoDetails`, `verifyChannelHandles` — never `search.list` |
 | `channelCatalog.ts` | Suggested channels: `buildCatalogEntry` (shared channel profile), `scoreChannel`, `getChannelSuggestions` callable |
 | `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
+| `reprofile.ts` | `reprofileOutdated` (nightly 04:00 UTC, or Force run in Cloud Scheduler): old-version profiles → current, cached transcripts only |
 | `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` |
 | `types.ts` | Firestore types (`ContentProfile`, `VideoVerdict`, `FlaggedContent`, …) |
 

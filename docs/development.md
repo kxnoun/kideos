@@ -49,8 +49,10 @@ Secrets (Firebase Secret Manager): `firebase functions:secrets:set OPENAI_API_KE
 `YOUTUBE_API_KEY`), then redeploy. Check one: `firebase functions:secrets:access OPENAI_API_KEY`.
 
 ### After changing the profile prompt
-Bump `PROFILE_VERSION` in `functions/src/aiAnalysis.ts`, deploy, then remove + re-add channels. Profiles
-regenerate from cached transcripts (OpenAI cost only, ~$0.0006/video). Changing questionnaire answers
+Bump `PROFILE_VERSION` in `functions/src/aiAnalysis.ts` and deploy. `reprofileOutdated` upgrades old
+profiles from cached transcripts that night (OpenAI only, ~$0.001/video; never Supadata). To do it now:
+Google Cloud console → Cloud Scheduler → the `reprofileOutdated` job → **Force run** (repeat if the log
+says "out of time"). Changing questionnaire answers
 does **not** need this.
 
 ### Clearing data for tests

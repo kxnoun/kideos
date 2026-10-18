@@ -22,6 +22,7 @@ import { getVideoDetails } from "./youtube";
 import { fetchTranscript, type TranscriptResult } from "./supadata";
 import {
   PROFILE_VERSION,
+  MIN_USABLE_PROFILE_VERSION,
   generateContentProfile,
   needsValuesCheck,
   hashValuesRules,
@@ -78,10 +79,13 @@ export async function analyzeAndTagVideo(params: AnalyzeAndTagParams): Promise<A
 // Returns null only on a transient failure (rate limit, AI error) — nothing is
 // stored then, so a later run retries.
 
-async function getOrCreateProfile(
+// cachedTranscriptsOnly: never call Supadata — a video without a cached transcript is
+// left as it is (used by reprofileOutdated)
+export async function getOrCreateProfile(
   db: Db,
   videoId: string,
-  keys: Pick<AnalyzeAndTagParams, "youtubeApiKey" | "supadataApiKey" | "openAiApiKey">
+  keys: Pick<AnalyzeAndTagParams, "youtubeApiKey" | "supadataApiKey" | "openAiApiKey">,
+  opts: { cachedTranscriptsOnly?: boolean } = {}
 ): Promise<ContentProfile | null> {
   const ref = db.doc(`videoProfiles/${videoId}`);
   const snap = await ref.get();
@@ -99,6 +103,7 @@ async function getOrCreateProfile(
     return placeholderProfile("unavailable", video?.title ?? "", video?.channelTitle ?? "");
   }
 
+  if (opts.cachedTranscriptsOnly && !(await db.doc(`transcriptCache/${videoId}`).get()).exists) return null;
   const transcript = await getTranscriptCached(db, videoId, keys.supadataApiKey);
   if (!transcript.available || !transcript.transcript) {
     if (!transcript.definitive) return null; // transient — retry later
@@ -253,7 +258,8 @@ export async function reapplyFiltersForChild(
         await Promise.all(
           chunk.slice(j, j + 5).map(async (videoDoc, k) => {
             const snap = profileSnaps[j + k];
-            if (!snap.exists || snap.data()!.version !== PROFILE_VERSION) return; // not analyzed yet — leave as is
+            // not analyzed yet — leave as is (older-but-usable profiles are upgraded by reprofileOutdated)
+            if (!snap.exists || (snap.data()!.version ?? 0) < MIN_USABLE_PROFILE_VERSION) return;
             const profile = snap.data() as ContentProfile;
             const decision = await decideForChild(db, videoDoc.id, profile, filters, openAiApiKey);
             const parentDecision = verdictSnaps[j + k].data()?.parentDecision;

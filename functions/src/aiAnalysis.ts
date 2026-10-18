@@ -19,7 +19,9 @@ import type { YouTubeVideoDetails } from "./youtube";
 
 // Bump when the profile prompt or schema changes — older profiles are then
 // regenerated (from cached transcripts, so no Supadata cost).
-export const PROFILE_VERSION = 3;
+export const PROFILE_VERSION = 4; // v4: gambling is a 0–4 ladder (was present/absent)
+// Oldest profile version still usable for filtering until reprofileOutdated upgrades it
+export const MIN_USABLE_PROFILE_VERSION = 3;
 
 const PROFILE_SYSTEM_PROMPT = `You describe the content of YouTube videos for a parental control app.
 You do NOT decide whether a video is appropriate — you only report what is in it, accurately, on fixed 0–4 ladders.
@@ -44,7 +46,7 @@ Respond with valid JSON only, in this exact shape:
   "consumerism": { "evidence": "", "level": 0 },
   "politics":    { "evidence": "", "level": 0 },
   "religion":    { "evidence": "", "level": 0, "traditions": [], "themes": [] },
-  "gambling":    { "evidence": "", "present": false },
+  "gambling":    { "evidence": "", "level": 0 },
   "crudeHumor":  { "evidence": "", "level": 0 },
   "matureThemes":{ "evidence": "", "level": 0 },
   "misinformation": { "evidence": "", "level": 0 },
@@ -77,7 +79,7 @@ Ladders (0 = none in every category):
 - music: transcripts mark music as "[Music]" or ♪, and song lyrics appear as text. none = no sign of music. background = music markers under talking. prominent = songs with lyrics or music as a main element. music_video = the video is a song/music video.
 - lgbtq: none. incidental = LGBTQ+ people present without being the topic. discussion = LGBTQ+ topics discussed. advocacy = the video argues a position on LGBTQ+ issues (either direction).
 - flags (true only with evidence): fantasyMagic = fictional magic (wizards, spells in a story). realOccult = presented as real: tarot, astrology, spells, Ouija, séances. prophetDepiction = a prophet (e.g. Muhammad, Moses, Jesus as prophet) is depicted/voiced/animated. religiousExclamations = God's or Jesus's name used as an exclamation ("oh my God", "Jesus Christ!"). pork / beef = shown or cooked as food. nonKosher = shellfish, or meat cooked with dairy. alcoholFood = cooking with alcohol. evolution = evolution or origins of life/humans is a topic. matureGames = gameplay of mature-rated games (GTA, Call of Duty, horror games).
-- gambling: present = true for casino, betting, loot boxes/gacha, gambling sponsors.
+- gambling (betting, casinos, lotteries, loot boxes/gacha): 1 mentioned in passing or as an example (a study that uses a bet, "it's a gamble"). 2 discussed or explained (how odds work, the history of casinos). 3 gambling shown or played (betting, casino games, opening loot boxes or gacha). 4 promoted: gambling sponsors or encouraging viewers to bet or buy loot boxes.
 - framing: "glorified" = shown as cool, funny, rewarded or desirable; "condemned" = consequences shown or presented as wrong; otherwise "neutral".
 - purpose: "educational" only if teaching is the clear main purpose (documentary, explainer, history).`;
 
@@ -156,7 +158,7 @@ export async function generateContentProfile(
     for (const dim of DIMS) {
       const d = p[dim] ?? {};
       const evidence = String(d.evidence ?? "").slice(0, 200);
-      const level = dim === "gambling" ? (d.present ? 4 : 0) : levelOf(d.level);
+      const level = levelOf(d.level);
       dims[dim] = { level, evidence };
     }
     // Code-counted swearing can only raise the AI's language level
