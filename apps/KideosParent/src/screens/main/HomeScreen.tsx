@@ -78,9 +78,13 @@ export default function HomeScreen() {
 
   // Summary + ratings of what's playing now
   const [nowSummary, setNowSummary] = useState("");
+  const [summaryOpen, setSummaryOpen] = useState(false); // "more" / "less"
+  const [summaryCut, setSummaryCut] = useState(false); // longer than 3 lines?
   useEffect(() => {
     setNowVerdict(null);
     setNowSummary("");
+    setSummaryOpen(false);
+    setSummaryCut(false);
     if (!parentId || !selectedChildId || !nowVideoId) return;
     getVideoSummary(nowVideoId).then(setNowSummary);
     return subscribeToVerdict(parentId, selectedChildId, nowVideoId, setNowVerdict);
@@ -242,9 +246,28 @@ export default function HomeScreen() {
                     {nowPlaying.channelName}
                   </Text>
                   {nowVerdict?.summary || nowSummary ? (
-                    <Text style={styles.nowSummary} numberOfLines={4}>
-                      {nowVerdict?.summary || nowSummary}
-                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      disabled={!summaryCut}
+                      onPress={() => setSummaryOpen((o) => !o)}
+                      style={!summaryCut && { marginBottom: 8 }}
+                    >
+                      {/* Measure once, unclamped and invisible, to know if it needs "more" */}
+                      {!summaryCut && !summaryOpen ? (
+                        <Text
+                          style={[styles.nowSummary, styles.measure]}
+                          onTextLayout={(e) => setSummaryCut(e.nativeEvent.lines.length > 3)}
+                        >
+                          {nowVerdict?.summary || nowSummary}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.nowSummary} numberOfLines={summaryOpen ? undefined : 3}>
+                        {nowVerdict?.summary || nowSummary}
+                      </Text>
+                      {summaryCut ? (
+                        <Text style={styles.moreLink}>{summaryOpen ? "less" : "more"}</Text>
+                      ) : null}
+                    </TouchableOpacity>
                   ) : null}
                   {nowVerdict ? (
                     <View style={styles.nowChips}>
@@ -486,7 +509,9 @@ const styles = StyleSheet.create({
   },
   nowPlayingChannel: { fontSize: 14, color: "#888", marginBottom: 10 },
   pausedLabel: { color: "#E59A1F" },
-  nowSummary: { fontSize: 13, color: "#444", lineHeight: 19, marginBottom: 8 },
+  nowSummary: { fontSize: 13, color: "#444", lineHeight: 19 },
+  measure: { position: "absolute", opacity: 0, left: 0, right: 0 },
+  moreLink: { fontSize: 13, fontWeight: "700", color: "#6C63FF", marginTop: 2, marginBottom: 8 },
   nowChips: { marginBottom: 12 },
   nowFit: { fontSize: 13, fontWeight: "800", color: "#1E7A44", marginBottom: 6 },
   nowRating: { fontSize: 12, color: "#666", lineHeight: 18, marginBottom: 3 },
