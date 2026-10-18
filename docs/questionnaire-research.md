@@ -1,7 +1,7 @@
 # Parent questionnaire — design and sources
 
 How Kideos decides what a child sees, and why it's built this way. Code: `functions/src/prefs.ts`
-(questions, age defaults, faith presets — copied to `apps/KideosParent/src/prefs.ts`),
+(questions, age defaults — copied to `apps/KideosParent/src/prefs.ts`),
 `functions/src/aiAnalysis.ts` (content profile prompt), `functions/src/contentFilter.ts` (matching).
 
 ## Design
@@ -15,7 +15,8 @@ How Kideos decides what a child sees, and why it's built this way. Code: `functi
   yes/no or 1–5 importance scales. Construct-specific items are more reliable than agree/disagree or
   yes/no (Krosnick & Presser; Saris et al.: .88–.93 vs .68–.71 reliability; Lelkes & Weiss 2015 found
   no difference — advantage real but not universal). Importance scales don't give a cut-point.
-- **Above the line: Hide, or Ask me first** (held out of the feed until the parent approves).
+- **Above the line: hidden.** No approval queue or notifications (parents wanted less work): the Videos
+  screen shows what's hidden and why, and "Show anyway" (behind a confirmation) lets one video through.
 - **Context modifiers:** educational videos +1 level (violence, scary, substances, politics);
   glamorized violence/substances/self-harm/cruelty hidden at any level (NTVS: risk highest when violence
   is attractive, justified, unpunished, consequence-free).
@@ -29,6 +30,10 @@ How Kideos decides what a child sees, and why it's built this way. Code: `functi
 Core: violence, scary, language, romance, sexual, substances, dangerous stunts, self-harm, meanness/pranks,
 consumerism, politics, religion, gambling. Advanced: crude humor, mature themes, misinformation, nudity
 (best effort), LGBTQ+ (neutral options — families differ), mature games.
+
+Gambling started as present/absent; real data showed passing mentions (a psychology study using a bet,
+a joke about betting on golf) landing at the worst level. Since profile v4 it's a ladder like the others:
+mentioned → discussed → shown → promoted (default for kids: passing mentions OK).
 
 - BBFC 2024 consultation (12,000 people): suicide/self-harm now the #2 concern; misogynistic/sexual
   language and glamorized drugs matter more than mere presence.
@@ -50,12 +55,12 @@ is exactly the generalization we want to avoid — and practice varies widely wi
 (research below), so wrong pre-filled answers would be trusted and left unchecked.
 
 Instead, every family sees the same concrete questions, all defaulting to OK: holidays (OK / in passing /
-ask me / hide), pork, non-kosher food, cooking with alcohol, beef, prophet depictions, God's name as an
+hide), pork, non-kosher food, cooking with alcohol, beef, prophet depictions, God's name as an
 exclamation, fantasy magic, real-world occult, evolution, videos with music. An optional "which faith is
 your family?" answer has one effect: that faith's own religious content doesn't count against the
 "other faiths" limit.
 
-**Music is best effort and deliberately simple** (OK / ask me / hide): transcripts only reveal music
+**Music is best effort and deliberately simple** (OK / hide): transcripts only reveal music
 through caption markers ("[Music]", ♪) and lyrics. Background music is often unmarked, and instruments
 vs voices (nasheeds) or who is singing can't be detected at all, so those options were dropped.
 
@@ -64,6 +69,17 @@ Research on what families in each tradition raise (kept for reference): Muslim �
 other-faith holidays, kashrut, wide variation within Orthodoxy; Christian — Plugged In (spiritual content,
 God's name, occult), USCCB (ridicule of faith); Hindu — beef, mocking portrayals; Sikh — general values.
 
+## Suggested channels — a higher bar than filtering
+
+Filtering a channel the parent chose is safe even if many of its videos are hidden — only the fitting
+ones show. Suggesting a channel is different: it vouches for the channel (and a kid who likes it will find
+the rest of it on YouTube). So a channel is suggested only if ≥75% of its checked videos fit the child,
+at most 2 are *severe* (the top of a ladder the parent hasn't allowed, or self-harm ≥3 — absolute, not
+relative to how strict the child's settings are), it has ≥10 checked videos, and it's **made for** the
+child's age (±1 year). Example from testing: EpicMealTime had 17/50 fitting Shorts for a 6-year-old — not
+suggested; SciShow isn't sunk by one predator video, but isn't suggested to a 6-year-old either (made for
+12+).
+
 ## Known limits
 
 - LLM accuracy evidence is from adjacent tasks (toxicity r≈0.61 vs humans; GPT-4 κ 0.54–0.62 on violent
@@ -71,7 +87,7 @@ God's name, occult), USCCB (ridicule of faith); Hindu — beef, mocking portraya
 - Transcripts can't show visuals: nudity, gore, music, who is singing are best effort.
 - Clickbait was left out: even trained human coders couldn't agree on it (Common Sense/Michigan study).
 - **Before launch:** label 300–500 videos with 2–3 raters; only use dimensions with weighted κ ≥ 0.7 as
-  hard filters, default the rest to "Ask me". Plan: [backlog.md](backlog.md) → *Check the AI against people*.
+  hard filters; fix the prompt for the rest (or make their defaults more conservative). Plan: [backlog.md](backlog.md) → *Check the AI against people*.
 
 ## Sources
 

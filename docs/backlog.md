@@ -13,7 +13,8 @@ Everything depends on the AI rating videos correctly, and we haven't measured it
    coders hit in the Common Sense/Michigan study). Research recommends 300–500 videos and 2–3 raters
    eventually.
 4. Act per dimension: reliable → keep as a hard filter; unreliable → improve that part of the prompt,
-   and/or default its action to "Ask me first" so mistakes land in the review queue.
+   and/or make its default limit more conservative. Bump `PROFILE_VERSION` → `reprofileOutdated` re-rates
+   everything from cached transcripts (OpenAI only).
 
 Plan: build a small labeling page (one video at a time, same questions, saves answers, outputs the
 agreement table). See [questionnaire-research.md](questionnaire-research.md) → Known limits.
@@ -65,7 +66,6 @@ analyse 500 channels with a prompt we're about to change.
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).
-- "Suggest channels by description" mode in ChannelsScreen (`suggestChannels` already exists).
 - Kid feed: orientation changes / tablet layout (`Dimensions.get` at module load).
 - Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
@@ -73,12 +73,15 @@ analyse 500 channels with a prompt we're about to change.
 
 - **Suggested channels: re-check channels over time.** A channel's content can drift. Re-analyse catalog
   channels every 6–12 months (channels someone follows already get new uploads analysed nightly).
+- Suggested channels don't apply custom rules / religion text (they apply once the channel is added).
+  Could run the values check on a channel's sample videos before suggesting.
+- Audience ages come from one AI guess per channel — spot-check them in the labeling round.
 
 ## 5. Questionnaire follow-ups
 
 - **Time-of-day rules** ("no gaming after 5pm"): the AI ignores time; enforcing it needs the kid app to
   hide matching videos by schedule.
-- One-tap "should have been hidden / this was fine" feedback on reviewed videos → suggest threshold changes.
+- One-tap "should have been hidden / this was fine" feedback in the Videos screen → suggest threshold changes.
 - Re-check borderline videos (within one level of a parent's limit) with a stronger model.
 - Prefer educational content (ranking boost in the feed) — not built; the feed is newest-first.
 - Visual signals (nudity, gore, music, who's singing) are best effort from transcripts — would need
@@ -105,7 +108,16 @@ Fixed from the May list: kid feed channel names, "Add Another Child" getting stu
 sign-in/sign-out account picker, `snap.exists()` crashes and the pairing-code check, kid-app anonymous-auth
 race, analysis running as its own function (no more stalls), transcripts actually used and cached,
 Supadata cost controls, per-child verdicts (fixed approvals being shared between families), content
-profiles + the research-based questionnaire, free text → settings. Oct 17: nightly refresh fixed (no
-stagger); "Ask me first" + review queue + push notifications replaced by the Videos screen (Shown / Hidden
-with reasons, confirmed "Show anyway"); suggested channels (shared channel profiles, swipe cards); deleting a child is recursive (device binding was
-reverted, see Security — so a kid device still doesn't notice its child was deleted until re-paired); fixed parent onboarding looping back to "Who is this for?" after Done.
+profiles + the research-based questionnaire, free text → settings.
+
+Oct 17 (merged as `videos-and-suggestions`):
+- Nightly refresh fixed (no stagger between channels).
+- "Ask me first", the review queue and push notifications replaced by the **Videos screen** (Shown /
+  Hidden with plain-words reasons and ratings; "Show anyway" behind a confirmation, with Undo).
+- **Suggested channels**: shared channel profiles (`channelCatalog`), swipe cards, ≥75% fit, ≤2 severe
+  (warned on the card), ≥10 checked videos, made for the child's age ±1, honest overviews.
+- **Gambling ladder** (profile v4) and **`reprofileOutdated`** (upgrades old profiles from cached
+  transcripts; first run: 149 videos, no Supadata).
+- Deleting a child is recursive; fixed parent onboarding looping back to "Who is this for?" after Done.
+- Device binding built, then reverted (see Security) — so a kid device still doesn't notice its child was
+  deleted until it's re-paired.
