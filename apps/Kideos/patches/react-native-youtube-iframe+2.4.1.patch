@@ -1,0 +1,46 @@
+diff --git a/node_modules/react-native-youtube-iframe/lib/commonjs/YoutubeIframe.js b/node_modules/react-native-youtube-iframe/lib/commonjs/YoutubeIframe.js
+index 0be2dad..65e50bd
+--- a/node_modules/react-native-youtube-iframe/lib/commonjs/YoutubeIframe.js
++++ b/node_modules/react-native-youtube-iframe/lib/commonjs/YoutubeIframe.js
+@@ -104,12 +104,14 @@ const YoutubeIframe = (props, ref) => {
+     }
+   }), []);
+   (0, _react.useEffect)(() => {
+-    if (play) {
+-      sendPostMessage('playVideo', {});
+-    } else {
+-      sendPostMessage('pauseVideo', {});
++    // Kideos patch: inject the command directly. On Android, react-native-webview's
++    // postMessage fires on `document`, but the player page listens on `window`, so
++    // play / pause never arrived.
++    if (!playerReady || !webViewRef.current) {
++      return;
+     }
+-  }, [play, sendPostMessage]);
++    webViewRef.current.injectJavaScript(play ? _PlayerScripts.PLAYER_FUNCTIONS.playVideo : _PlayerScripts.PLAYER_FUNCTIONS.pauseVideo);
++  }, [play, playerReady]);
+   (0, _react.useEffect)(() => {
+     if (mute) {
+       sendPostMessage('muteVideo', {});
+diff --git a/node_modules/react-native-youtube-iframe/src/YoutubeIframe.js b/node_modules/react-native-youtube-iframe/src/YoutubeIframe.js
+index 4bbf487..3172645
+--- a/node_modules/react-native-youtube-iframe/src/YoutubeIframe.js
++++ b/node_modules/react-native-youtube-iframe/src/YoutubeIframe.js
+@@ -126,12 +126,12 @@ const YoutubeIframe = (props, ref) => {
+   );
+ 
+   useEffect(() => {
+-    if (play) {
+-      sendPostMessage('playVideo', {});
+-    } else {
+-      sendPostMessage('pauseVideo', {});
++    // Kideos patch: inject the command directly (see lib/commonjs/YoutubeIframe.js)
++    if (!playerReady || !webViewRef.current) {
++      return;
+     }
+-  }, [play, sendPostMessage]);
++    webViewRef.current.injectJavaScript(play ? PLAYER_FUNCTIONS.playVideo : PLAYER_FUNCTIONS.pauseVideo);
++  }, [play, playerReady]);
+ 
+   useEffect(() => {
+     if (mute) {

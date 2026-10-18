@@ -89,17 +89,6 @@ const HIDE_IN_PLAYER = `(function () {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })(); true;`;
 
-// Android: react-native-webview delivers postMessage as a 'message' event on
-// `document`, but react-native-youtube-iframe's player page listens on `window` —
-// so the `play` prop (our pause / resume) never reached YouTube. Forward them.
-const FORWARD_MESSAGES = `(function () {
-  if (window.__kideosForward) return;
-  window.__kideosForward = true;
-  document.addEventListener('message', function (e) {
-    window.dispatchEvent(new MessageEvent('message', { data: e.data }));
-  });
-})(); true;`;
-
 // Backup at the web view level: YouTube pages never open (in the app, the browser or
 // the YouTube app); anything else — i.e. an ad's own link — opens as it normally would.
 const PLAYER_PAGE = "https://lonelycpp.github.io/react-native-youtube-iframe/iframe_v2.html";
@@ -197,7 +186,6 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
           webViewProps={{
             injectedJavaScriptBeforeContentLoaded: HIDE_IN_PLAYER,
             injectedJavaScriptBeforeContentLoadedForMainFrameOnly: false, // reach YouTube's iframe
-            injectedJavaScript: FORWARD_MESSAGES, // the player page (main frame)
             onShouldStartLoadWithRequest: allowLoad,
             onOpenWindow, // handling new windows ourselves = Android no longer sends them to the browser
           }}
