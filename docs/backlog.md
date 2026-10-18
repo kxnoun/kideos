@@ -73,11 +73,16 @@ analyse 500 channels with a prompt we're about to change.
   Before going public: ask YouTube API compliance / a lawyer, or remove `HIDE_IN_PLAYER`. Also: "Made for
   Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
   library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
+  The title, channel name and channel picture are untappable; YouTube links never open (web view level
+  too); ad links still open normally (left alone on purpose — don't interfere with ads). There is no
+  YouTube Kids API or embeddable YouTube Kids player.
 
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).
 - Kid feed: orientation changes / tablet layout (`Dimensions.get` at module load).
+- *Backburner:* landscape-only kid app for younger kids (YouTube Kids was landscape-only on phones until
+  it added portrait in Dec 2024). Also: Shorts get rotated to landscape in fullscreen — keep them upright.
 - Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
