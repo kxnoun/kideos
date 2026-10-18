@@ -5,16 +5,16 @@ questionnaire and profiles look this way see [questionnaire-research.md](questio
 
 ```
  ┌──────────────────────┐   writes answers, channels,     ┌───────────────────────────────┐
- │  Kideos for Parents  │   review decisions, commands    │           Firestore            │
+ │  Kideos for Parents  │   Show anyway, commands         │           Firestore            │
  │  (KideosParent)      │ ──────────────────────────────► │  users/{parent}/children/{kid} │
  │                      │ ◄────────────────────────────── │  videoProfiles, transcripts…   │
- └──────────────────────┘   review queue, now watching    └──────┬─────────────▲──────────┘
+ └──────────────────────┘   verdicts, now watching        └──────┬─────────────▲──────────┘
             │ callable functions                                  │ triggers    │ writes verdicts,
-            ▼                                                     ▼             │ profiles, queue
+            ▼                                                     ▼             │ profiles, catalog
  ┌───────────────────────────────────────────────────────────────────────────────┴──────────┐
  │  Cloud Functions (us-central1)                                                            │
  │  resolveAndAddChannel → [whitelist doc created] → onChannelWhitelisted → per-video pipeline│
- │  [answers saved] → onFiltersChanged → re-apply      parseCustomRules · suggestChannels …  │
+ │  [answers saved] → onFiltersChanged → re-apply   getChannelSuggestions · parseCustomRules │
  └──────┬────────────────────┬─────────────────────┬────────────────────────────────────────┘
         ▼                    ▼                     ▼
    YouTube Data API     Supadata (transcripts)   OpenAI GPT-4o-mini
@@ -47,8 +47,9 @@ Defined in `functions/src/prefs.ts` (copied to `apps/KideosParent/src/prefs.ts` 
 
 - **About the child:** age (drives defaults), sensitivity to scary content (shifts scary/mature themes ±1).
 - **13 core ladders** (0–4, examples on every rung): violence, scary, language, romance, sexual,
-  substances, dangerous stunts, self-harm, meanness/pranks, consumerism, politics, religion, gambling.
-  Each has `max` (highest allowed level); anything above it is hidden.
+  substances, dangerous stunts, self-harm, meanness/pranks, consumerism, politics, religion, gambling
+  (mentioned → discussed → shown → promoted; a ladder since profile v4 — before, any mention counted as
+  the top). Each has `max` (highest allowed level); anything above it is hidden.
 - **Global rules:** educational videos +1 level (violence/scary/substances/politics); always hide
   glamorized violence/substances/self-harm/cruelty; what to do when a video can't be checked
   (`unknown`: allow / hide — applies to "no transcript" too; default hide).
@@ -130,7 +131,11 @@ to `currentSession/playSignal` → kid app listener.
 - **`cleanupExpiredData`** (02:00 UTC): deletes `watchHistory` past `expiresAt` (COPPA 90 days) + legacy
   analysis-cache entries.
 - **`generateWeeklyDigest`** (Mon 08:00 UTC, Premium): GPT summary of the week. ⚠️ Path mismatch — see backlog.
-- **`weeklyChannelSuggestions`** (Mon 10:00 UTC): AI channel picks per child.
+- **`reprofileOutdated`** (04:00 UTC, or Force run in Cloud Scheduler): profiles older than
+  `PROFILE_VERSION` → regenerated from cached transcripts only (never Supadata), catalog entries rebuilt,
+  filters re-applied for affected children. Stops before the time limit; the next run continues.
+- **`weeklyChannelSuggestions`** (Mon 10:00 UTC): older AI-from-description channel picks per child
+  (Channels tab) — to be retired in favour of suggested channels.
 
 ### COPPA deletion
 Settings → delete child data → callable **`deleteChildData`**: `recursiveDelete` on the child doc — the doc
@@ -206,7 +211,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
 | `reprofile.ts` | `reprofileOutdated` (nightly 04:00 UTC, or Force run in Cloud Scheduler): old-version profiles → current, cached transcripts only |
 | `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` |
-| `types.ts` | Firestore types (`ContentProfile`, `VideoVerdict`, `FlaggedContent`, …) |
+| `types.ts` | Firestore types (`ContentProfile`, `VideoVerdict`, `ValueFilters`, …) |
 
 ## Apps
 
@@ -220,10 +225,12 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 (Zustand; `useSelectedChild()` is a hook), `components/FiltersForm.tsx` (questionnaire), `prefs.ts` (copy),
 screens: `auth/AuthScreen`, `onboarding/CreateChild · SetFilters · AddChannels`, `main/Home` (now watching,
 remote control, link to Videos, pairing), `main/VideosScreen` (Shown / Hidden + reasons, Show anyway),
-`main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
+`main/SuggestionsScreen` (suggested-channel cards: swipe left "Not for us", swipe right "maybe later",
+tap "Add to {child}'s feed"), `main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
 signs out of Google), children, `saveValueFilters` / `getValueFilters` (raw → `normalizePrefs`), channels
 (`addChannel` → `resolveAndAddChannel`, `removeChannel`), `subscribeToVerdicts`, `setShowAnyway`,
-`parseCustomRules`, `claimPairingCode` (also registers the kid device), `sendPlaySignal`, subscriptions,
+`getChannelSuggestions`, `dismissSuggestion`, `parseCustomRules`, `claimPairingCode`, `sendPlaySignal`,
+subscriptions,
 `callFunction` helper for callables.
 
 ## Cost controls
@@ -233,5 +240,7 @@ signs out of Google), children, `saveValueFilters` / `getValueFilters` (raw → 
   transcript; one request at a time, no retries; profile regeneration reuses cached transcripts.
 - **OpenAI:** one profile call per video (shared by all families); religion/custom-rule checks run on the
   short summary, only for videos that otherwise pass, cached per rule set; filter changes cost nothing.
+- **Suggested channels:** reuse existing profiles; the only AI call is one overview per channel (also gives
+  the audience ages), rewritten only when `OVERVIEW_VERSION` changes. Scoring is pure code.
 - **YouTube quota:** `channels.list` / `playlistItems.list` / `videos.list` only (1 unit each), never
   `search.list` (100 units). Kids never trigger API calls.

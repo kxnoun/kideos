@@ -29,6 +29,8 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 | Backend | `firebase functions:log --only <functionName> -n 50` (times are UTC — Toronto is UTC−4 in summer) |
 | Analysis progress | `firebase functions:log --only onChannelWhitelisted -n 20` → `Progress: X/50`, then `Done: … approved=X blocked=Y` |
 | AI profiles / decisions | `… \| Select-String "AI\] Profile"` / `"AI\] Values check"` |
+| Why a channel isn't suggested | `firebase functions:log --only getChannelSuggestions \| Select-String "Not suggested"` → fit %, severe videos (title + rating + evidence), or the channel's audience ages |
+| Profile upgrades | `firebase functions:log --only reprofileOutdated \| Select-String "upgraded="` → `— done` or `— out of time` (Force run again) |
 | Transcripts | `… \| Select-String "Supadata\|transcriptCache"` — `Unexpected status 429` = rate limit **or out of credits** (Supadata uses 429 for both; the log line includes their error message) |
 | Save to a file to share | `… \| Out-File something.txt` (UTF-16) |
 
@@ -40,7 +42,8 @@ older API style; harmless (migration is in the backlog).
 ```powershell
 cd functions; npm run build; cd ..        # REQUIRED — firebase.json has no predeploy build step,
                                           # so skipping this deploys stale code from functions/lib
-firebase deploy --only functions           # backend
+firebase deploy --only functions           # backend (all functions)
+firebase deploy --only functions:kideos-backend:getChannelSuggestions   # one function (codebase prefix needed)
 firebase deploy --only "firestore:rules,firestore:indexes"   # when rules/indexes change
 ```
 New composite indexes take a few minutes to build; queries that need them fail until then.
@@ -51,7 +54,8 @@ Secrets (Firebase Secret Manager): `firebase functions:secrets:set OPENAI_API_KE
 ### After changing the profile prompt
 Bump `PROFILE_VERSION` in `functions/src/aiAnalysis.ts` and deploy. `reprofileOutdated` upgrades old
 profiles from cached transcripts that night (OpenAI only, ~$0.001/video; never Supadata). To do it now:
-Google Cloud console → Cloud Scheduler → the `reprofileOutdated` job → **Force run** (repeat if the log
+Google Cloud console → Cloud Scheduler (console.cloud.google.com/cloudscheduler?project=kideos-io) → the
+`reprofileOutdated` job → ⋮ → **Force run** (repeat if the log
 says "out of time"). Changing questionnaire answers
 does **not** need this.
 
@@ -82,12 +86,16 @@ A new 50-video channel ≈ 50 credits + ~3¢. Re-adding channels, other families
 - The backend logic was verified with throwaway mock harnesses (fake Firestore / Supadata / OpenAI
   counting every call). They aren't in the repo yet — adding a real test suite is in the backlog.
 - **Firestore rules:** `tests/rules/` — real emulator tests (paired vs unpaired devices, Show anyway,
-  pairing). Run on your machine (needs Java):
+  pairing). ⚠️ They describe the device-binding rules, which were reverted — the binding cases fail
+  until binding returns. Run on your machine (needs Java 21: in PowerShell first
+  `$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; $env:Path = "$env:JAVA_HOME\bin;$env:Path"`):
   `cd tests\rules; npm install; cd ..\..; firebase emulators:exec --only firestore --project demo-kideos "node tests/rules/rules.test.mjs"`.
   Run them after any change to `firestore.rules`.
 - Manual end-to-end: add a channel → watch `onChannelWhitelisted` logs → kid feed; change an answer in
   Settings → feed updates within seconds; Home → Videos → Hidden shows each video's reason; "Show anyway…"
-  → confirm → it appears in the kid feed; Undo puts it back.
+  → confirm → it appears in the kid feed; Undo puts it back. Suggested channels: use a second test child
+  (suggestions skip channels the child already has), check a toddler channel isn't suggested to a teen and
+  an edgy channel isn't suggested to a young kid.
 
 ## Git
 

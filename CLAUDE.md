@@ -10,16 +10,21 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   `DocumentSnapshot.exists` is a **method**: `snap.exists()` (firebase-admin in `functions/` uses the property).
 - **Supadata costs money per request.** Only fetch transcripts through `getTranscriptCached`
   (`functions/src/analyzeVideo.ts`). Never delete `transcriptCache`. Changing the profile prompt → bump
-  `PROFILE_VERSION` (regenerates from cached transcripts), don't clear data.
+  `PROFILE_VERSION`; `reprofileOutdated` upgrades old profiles nightly from cached transcripts
+  (`cachedTranscriptsOnly` — it must never call Supadata). Don't clear data.
 - **`functions/src/prefs.ts` is copied to `apps/KideosParent/src/prefs.ts`** — change both (only the
   header comment differs).
 - **Deploying functions needs `npm run build` first** (no predeploy step; otherwise stale `lib/` deploys).
+  One function: `firebase deploy --only functions:kideos-backend:<name>` (the codebase is `kideos-backend`).
 - **Long work must not run after a callable returns** (Cloud Functions v2 throttles CPU) — use a
   Firestore trigger, like `onChannelWhitelisted`.
 - Firestore triggers are at-least-once: dedupe with `triggerEvents/{event.id}` `.create()`.
 - Verdicts are **per child** (`videoVerdicts`), `approved` or `hidden` — no approval queue, no push
   notifications (product decision: less work for parents). The parent's `parentDecision` ("Show anyway")
   always wins and must never be overwritten by the pipeline.
+- **A suggestion vouches for the channel** (`channelCatalog.ts`): ≥10 checked videos, ≥75% fit, ≤2 severe
+  (severe = absolute, not relative to the child), made for the child's age ±1. Tune with the
+  `Not suggested: … —` log lines, not by guessing; a wrong rating is a prompt problem, not a rule problem.
 - Device binding (`kidDeviceUids`) was reverted — kid paths allow any signed-in device for now. Redo it
   carefully (backlog → Security); `tests/rules/` still describes the binding version.
 - Android on Windows: two-terminal build (Metro `--port 8082`/`8083` + `gradlew app:installDebug
