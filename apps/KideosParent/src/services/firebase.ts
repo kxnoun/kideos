@@ -343,6 +343,20 @@ export async function hideVideo(parentId: string, childId: string, videoId: stri
     .update({ parentDecision: "hidden", approved: false });
 }
 
+// Hide several at once (Videos screen → Select)
+export async function hideVideos(parentId: string, childId: string, videoIds: string[]): Promise<void> {
+  for (let i = 0; i < videoIds.length; i += 400) {
+    const batch = firestore().batch();
+    for (const id of videoIds.slice(i, i + 400)) {
+      batch.update(firestore().doc(`users/${parentId}/children/${childId}/videoVerdicts/${id}`), {
+        parentDecision: "hidden",
+        approved: false,
+      });
+    }
+    await batch.commit();
+  }
+}
+
 // Free-text "anything else?" → concrete questionnaire changes (parent confirms before applying)
 export interface RuleChange {
   key: string;

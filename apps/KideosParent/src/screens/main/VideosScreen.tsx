@@ -5,6 +5,8 @@
 // video contains and (for hidden ones) why, in plain words. Parents come here
 // when they want to — nothing here needs action. "Show anyway" sits behind a
 // confirmation screen so it can't be tapped by accident.
+// Tap a video → details sheet (summary, each rating with its evidence, actions).
+// Shown tab: "Hide" per video, or Select → tick several → "Hide N videos".
 // ─────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -17,11 +19,12 @@ import {
   SafeAreaView,
   FlatList,
   Modal,
+  ScrollView,
   Alert,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList, VideoVerdict, Dim } from "../../types";
-import { subscribeToVerdicts, setShowAnyway } from "../../services/firebase";
+import { subscribeToVerdicts, setShowAnyway, hideVideo, hideVideos, getVideoSummary } from "../../services/firebase";
 import { LEVEL_LABELS } from "../../prefs";
 import { useStore } from "../../store/useStore";
 
@@ -71,6 +74,10 @@ export default function VideosScreen({ route, navigation }: Props) {
   const [verdicts, setVerdicts] = useState<VideoVerdict[]>([]);
   const [tab, setTab] = useState<"shown" | "hidden">("shown");
   const [confirming, setConfirming] = useState<VideoVerdict | null>(null);
+  const [details, setDetails] = useState<VideoVerdict | null>(null); // "learn more" sheet
+  const [detailsSummary, setDetailsSummary] = useState("");
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user) return;
@@ -80,6 +87,45 @@ export default function VideosScreen({ route, navigation }: Props) {
   const shown = useMemo(() => verdicts.filter((v) => v.approved), [verdicts]);
   const hidden = useMemo(() => verdicts.filter((v) => !v.approved), [verdicts]);
   const list = tab === "shown" ? shown : hidden;
+
+  useEffect(() => {
+    setDetailsSummary("");
+    if (details) getVideoSummary(details.videoId).then(setDetailsSummary);
+  }, [details]);
+  // keep the open sheet in step with live data (e.g. after Hide / Undo)
+  const detailsLive = details ? verdicts.find((v) => v.videoId === details.videoId) ?? details : null;
+
+  const hideOne = async (v: VideoVerdict) => {
+    if (!user) return;
+    try {
+      await hideVideo(user.uid, childId, v.videoId);
+    } catch {
+      Alert.alert("Couldn't hide it. Check your connection.");
+    }
+  };
+
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const stopSelecting = () => {
+    setSelecting(false);
+    setSelected(new Set());
+  };
+
+  const hideSelected = async () => {
+    if (!user || !selected.size) return;
+    try {
+      await hideVideos(user.uid, childId, [...selected]);
+      stopSelecting();
+    } catch {
+      Alert.alert("Couldn't hide those. Check your connection.");
+    }
+  };
 
   const change = async (v: VideoVerdict, show: boolean) => {
     if (!user) return;
@@ -93,9 +139,19 @@ export default function VideosScreen({ route, navigation }: Props) {
   const renderItem = ({ item: v }: { item: VideoVerdict }) => {
     const overridden = v.parentDecision === "approved";
     const hiddenByYou = v.parentDecision === "hidden";
+    const isSelected = selected.has(v.videoId);
     return (
-      <View style={styles.card}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        style={[styles.card, isSelected && styles.cardSelected]}
+        onPress={() => (selecting ? toggleSelected(v.videoId) : setDetails(v))}
+      >
         <View style={styles.row}>
+          {selecting ? (
+            <View style={[styles.check, isSelected && styles.checkOn]}>
+              {isSelected ? <Text style={styles.checkMark}>✓</Text> : null}
+            </View>
+          ) : null}
           {v.thumbnail ? <Image source={{ uri: v.thumbnail }} style={styles.thumb} /> : <View style={styles.thumb} />}
           <View style={{ flex: 1 }}>
             <Text style={styles.title} numberOfLines={2}>
@@ -139,8 +195,15 @@ export default function VideosScreen({ route, navigation }: Props) {
               <Text style={styles.showAnyway}>Show anyway…</Text>
             </TouchableOpacity>
           </View>
+        ) : !selecting ? (
+          <View style={styles.footer}>
+            <Text style={styles.detailsHint}>Details ›</Text>
+            <TouchableOpacity onPress={() => hideOne(v)} hitSlop={8}>
+              <Text style={styles.hideLink}>Hide</Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -150,10 +213,24 @@ export default function VideosScreen({ route, navigation }: Props) {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
           <Text style={styles.back}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={styles.heading}>{childName}'s videos</Text>
+        <View style={styles.headingRow}>
+          <Text style={styles.heading}>{childName}'s videos</Text>
+          {tab === "shown" && shown.length ? (
+            <TouchableOpacity onPress={selecting ? stopSelecting : () => setSelecting(true)} hitSlop={8}>
+              <Text style={styles.selectText}>{selecting ? "Cancel" : "Select"}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         <View style={styles.tabs}>
           {(["shown", "hidden"] as const).map((t) => (
-            <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
+            <TouchableOpacity
+              key={t}
+              style={[styles.tab, tab === t && styles.tabActive]}
+              onPress={() => {
+                stopSelecting();
+                setTab(t);
+              }}
+            >
               <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
                 {t === "shown" ? `Shown (${shown.length})` : `Hidden (${hidden.length})`}
               </Text>
@@ -175,6 +252,100 @@ export default function VideosScreen({ route, navigation }: Props) {
           </Text>
         }
       />
+
+      {selecting ? (
+        <View style={styles.selectBar}>
+          <TouchableOpacity
+            style={[styles.selectBarBtn, !selected.size && { opacity: 0.4 }]}
+            disabled={!selected.size}
+            onPress={hideSelected}
+          >
+            <Text style={styles.selectBarText}>
+              {selected.size ? `Hide ${selected.size} video${selected.size === 1 ? "" : "s"}` : "Tap videos to select"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {/* Details ("learn more") */}
+      <Modal visible={!!detailsLive} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setDetails(null)}>
+        {detailsLive && (
+          <SafeAreaView style={styles.modal}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+              <TouchableOpacity onPress={() => setDetails(null)} hitSlop={10} style={{ alignSelf: "flex-end" }}>
+                <Text style={styles.linkText}>Done</Text>
+              </TouchableOpacity>
+              {detailsLive.thumbnail ? (
+                <Image source={{ uri: detailsLive.thumbnail }} style={styles.detailsThumb} />
+              ) : null}
+              <Text style={styles.modalHeading}>{detailsLive.title}</Text>
+              {detailsLive.channelName ? <Text style={styles.channel}>{detailsLive.channelName}</Text> : null}
+              {detailsSummary ? <Text style={styles.detailsSummary}>{detailsSummary}</Text> : null}
+
+              <Text style={[styles.detailsStatus, !detailsLive.approved && styles.detailsStatusHidden]}>
+                {detailsLive.parentDecision === "approved"
+                  ? "Shown because you allowed it"
+                  : detailsLive.parentDecision === "hidden"
+                  ? "Hidden — you hid this"
+                  : detailsLive.approved
+                  ? `✓ Fits all of ${childName}'s settings`
+                  : "Hidden by your settings"}
+              </Text>
+              {!detailsLive.approved && detailsLive.reason ? (
+                <View style={styles.reasonBox}>
+                  <Text style={styles.reasonTitle}>Why it's hidden</Text>
+                  {detailsLive.reason.split("; ").map((r, i) => (
+                    <Text key={i} style={styles.reason}>
+                      • {r}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+
+              <Text style={styles.detailsSection}>What's in it</Text>
+              {Object.keys(detailsLive.ratings ?? {}).length ? (
+                (Object.entries(detailsLive.ratings ?? {}) as [Dim, { level: number | null; evidence: string }][]).map(
+                  ([dim, r]) => (
+                    <Text key={dim} style={styles.detailsRating}>
+                      <Text style={{ fontWeight: "700", color: "#333" }}>
+                        {DIM_TITLES[dim] ?? dim}: {r.level === null ? "can't tell" : LEVEL_LABELS[dim]?.[r.level] ?? r.level}
+                      </Text>
+                      {r.evidence ? ` — "${r.evidence}"` : ""}
+                    </Text>
+                  )
+                )
+              ) : (
+                <Text style={styles.detailsRating}>Nothing on any of your lists</Text>
+              )}
+
+              <View style={{ marginTop: 20 }}>
+                {detailsLive.parentDecision ? (
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => change(detailsLive, false)}>
+                    <Text style={styles.cancelText}>
+                      {detailsLive.parentDecision === "hidden" ? "Undo — show it again" : "Undo — hide it again"}
+                    </Text>
+                  </TouchableOpacity>
+                ) : detailsLive.approved ? (
+                  <TouchableOpacity style={styles.confirmBtn} onPress={() => hideOne(detailsLive)}>
+                    <Text style={styles.confirmText}>Hide this video</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.confirmBtn}
+                    onPress={() => {
+                      const v = detailsLive;
+                      setDetails(null);
+                      setConfirming(v);
+                    }}
+                  >
+                    <Text style={styles.confirmText}>Show anyway…</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </ScrollView>
+          </SafeAreaView>
+        )}
+      </Modal>
 
       {/* Confirmation screen for "Show anyway" */}
       <Modal visible={!!confirming} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setConfirming(null)}>
@@ -226,6 +397,33 @@ const styles = StyleSheet.create({
   tabTextActive: { color: "#1A1A2E" },
   list: { padding: 20, paddingBottom: 48 },
   empty: { textAlign: "center", color: "#888", marginTop: 40, fontSize: 15, lineHeight: 22 },
+  headingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  selectText: { fontSize: 15, fontWeight: "700", color: "#6C63FF", marginBottom: 12 },
+  cardSelected: { borderColor: "#6C63FF", backgroundColor: "#F4F3FF" },
+  check: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#C9C6F5",
+    marginRight: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+  },
+  checkOn: { backgroundColor: "#6C63FF", borderColor: "#6C63FF" },
+  checkMark: { color: "#fff", fontWeight: "900", fontSize: 13 },
+  detailsHint: { fontSize: 12, color: "#999", fontWeight: "600" },
+  hideLink: { fontSize: 13, color: "#B23B3B", fontWeight: "700" },
+  selectBar: { padding: 16, borderTopWidth: 1, borderTopColor: "#E8E8F0", backgroundColor: "#fff" },
+  selectBarBtn: { backgroundColor: "#D9534F", borderRadius: 14, paddingVertical: 15, alignItems: "center" },
+  selectBarText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  detailsThumb: { width: "100%", aspectRatio: 16 / 9, borderRadius: 12, backgroundColor: "#E8E8F0", marginTop: 12 },
+  detailsSummary: { fontSize: 15, color: "#333", lineHeight: 22, marginTop: 12 },
+  detailsStatus: { fontSize: 14, fontWeight: "800", color: "#1E7A44", marginTop: 16, marginBottom: 6 },
+  detailsStatusHidden: { color: "#B23B3B" },
+  detailsSection: { fontSize: 13, fontWeight: "800", color: "#1A1A2E", marginTop: 16, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 },
+  detailsRating: { fontSize: 13, color: "#666", lineHeight: 19, marginBottom: 6 },
   card: { backgroundColor: "#fff", borderRadius: 16, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: "#E8E8F0" },
   row: { flexDirection: "row", marginBottom: 10 },
   thumb: { width: 112, height: 63, borderRadius: 8, backgroundColor: "#E8E8F0", marginRight: 12 },
