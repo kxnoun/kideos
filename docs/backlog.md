@@ -83,6 +83,9 @@ analyse 500 channels with a prompt we're about to change.
 - Kid feed: orientation changes / tablet layout (`Dimensions.get` at module load).
 - *Backburner:* landscape-only kid app for younger kids (YouTube Kids was landscape-only on phones until
   it added portrait in Dec 2024). Also: Shorts get rotated to landscape in fullscreen — keep them upright.
+- *Backburner:* the player's settings (gear) menu — "Stats for nerds" fills the screen and kids tap
+  everything. Hide or disable it (or just that item), or make it a parent setting.
+- UI polish on both apps.
 - Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
