@@ -246,6 +246,21 @@ export function subscribeToNowPlaying(
     });
 }
 
+// What the kid app was last told (pause / play / stop). "stop" = watching is off
+// until the parent sends "play".
+export function subscribeToPlaySignal(
+  parentId: string,
+  childId: string,
+  onUpdate: (action: "play" | "pause" | "stop" | null) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/children/${childId}/currentSession/playSignal`)
+    .onSnapshot(
+      (snap) => onUpdate(snap.exists() ? (snap.data()?.action ?? null) : null),
+      () => onUpdate(null)
+    );
+}
+
 export async function sendPlaySignal(
   parentId: string,
   childId: string,

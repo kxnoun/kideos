@@ -119,8 +119,7 @@ interface Props {
 
 export default function PlayerScreen({ video, session, onBack }: Props) {
   const { parentId, childId } = session;
-  const [playing, setPlaying] = useState(true);
-  const [timeUp, setTimeUp] = useState(false);
+  const [playing, setPlaying] = useState(true); // kept in step with the real player (onChangeState)
   const sessionIdRef = useRef<string | null>(null);
   const startTimeRef = useRef<number>(Date.now());
 
@@ -147,13 +146,18 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
     };
   }, [parentId, childId, video]);
 
-  // Listen for parent remote commands
+  // Parent's pause / resume. The first snapshot is whatever was sent last (maybe
+  // long ago) — only react to commands sent while this video is open.
+  // ("stop" / time's up is handled for the whole app in App.tsx.)
   useEffect(() => {
+    let first = true;
     const unsub = subscribeToPlaySignal(parentId, childId, (signal) => {
-      if (!signal) return;
-      if (signal.action === "pause") setPlaying(false);
-      if (signal.action === "play") setPlaying(true);
-      if (signal.action === "stop") setTimeUp(true);
+      if (first) {
+        first = false;
+        return;
+      }
+      if (signal?.action === "pause") setPlaying(false);
+      if (signal?.action === "play") setPlaying(true);
     });
     return unsub;
   }, [parentId, childId]);
@@ -162,18 +166,6 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
     setPlaying(false);
     onBack();
   }, [onBack]);
-
-  if (timeUp) {
-    return (
-      <SafeAreaView style={styles.timeUpContainer}>
-        <Text style={styles.timeUpEmoji}>🌙</Text>
-        <Text style={styles.timeUpTitle}>Time's up for now!</Text>
-        <Text style={styles.timeUpText}>
-          A parent has ended your session. See you next time!
-        </Text>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -184,8 +176,11 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
           height={PLAYER_HEIGHT}
           videoId={video.videoId}
           play={playing}
-          onChangeState={(state) => {
+          onChangeState={(state: string) => {
             if (state === "ended") onBack();
+            // keep `playing` matching the real player, so a parent's pause is always a change
+            if (state === "playing") setPlaying(true);
+            if (state === "paused") setPlaying(false);
           }}
           webViewStyle={{ opacity: 0.99 }} // fixes RN rendering flicker
           webViewProps={{
@@ -243,29 +238,5 @@ const styles = StyleSheet.create({
   channel: {
     fontSize: 14,
     color: "#666",
-  },
-  timeUpContainer: {
-    flex: 1,
-    backgroundColor: "#1A1A2E",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 40,
-  },
-  timeUpEmoji: {
-    fontSize: 80,
-    marginBottom: 24,
-  },
-  timeUpTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#fff",
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  timeUpText: {
-    fontSize: 17,
-    color: "rgba(255,255,255,0.7)",
-    textAlign: "center",
-    lineHeight: 26,
   },
 });

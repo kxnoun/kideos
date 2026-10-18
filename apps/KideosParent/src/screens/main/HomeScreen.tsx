@@ -30,6 +30,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   subscribeToNowPlaying,
   sendPlaySignal,
+  subscribeToPlaySignal,
   claimPairingCode,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
@@ -42,6 +43,8 @@ export default function HomeScreen() {
   const selectedChild = useSelectedChild();
 
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [lastSignal, setLastSignal] = useState<"play" | "pause" | "stop" | null>(null);
+  const watchingOff = lastSignal === "stop";
   const [sendingSignal, setSendingSignal] = useState(false);
 
   // Pairing modal
@@ -57,7 +60,11 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!parentId || !selectedChildId) return;
     const unsub = subscribeToNowPlaying(parentId, selectedChildId, setNowPlaying);
-    return unsub;
+    const unsub2 = subscribeToPlaySignal(parentId, selectedChildId, setLastSignal);
+    return () => {
+      unsub();
+      unsub2();
+    };
   }, [parentId, selectedChildId]);
 
 
@@ -184,7 +191,21 @@ export default function HomeScreen() {
               {selectedChild.profile.name}'s Screen
             </Text>
 
-            {nowPlaying ? (
+            {watchingOff ? (
+              <View style={styles.notWatchingCard}>
+                <Text style={styles.notWatchingEmoji}>🌙</Text>
+                <Text style={styles.notWatchingText}>
+                  Watching is off for {selectedChild.profile.name}. Their app shows "Time's up".
+                </Text>
+                <TouchableOpacity
+                  style={[styles.controlBtn, styles.pauseBtn, styles.unlockBtn]}
+                  onPress={() => handleSignal("play")}
+                  disabled={sendingSignal}
+                >
+                  <Text style={styles.controlBtnText}>▶ Let them watch again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : nowPlaying ? (
               <View style={styles.nowPlayingCard}>
                 <Image
                   source={{ uri: nowPlaying.thumbnail }}
@@ -210,11 +231,18 @@ export default function HomeScreen() {
                       <Text style={styles.controlBtnText}>⏸ Pause</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      style={[styles.controlBtn, styles.pauseBtn]}
+                      onPress={() => handleSignal("play")}
+                      disabled={sendingSignal}
+                    >
+                      <Text style={styles.controlBtnText}>▶ Resume</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       style={[styles.controlBtn, styles.stopBtn]}
                       onPress={() =>
                         Alert.alert(
                           "End Session",
-                          `This will stop ${selectedChild.profile.name}'s video and show them a "time's up" screen.`,
+                          `This stops ${selectedChild.profile.name}'s video and shows a "time's up" screen until you let them watch again.`,
                           [
                             { text: "Cancel", style: "cancel" },
                             {
@@ -228,7 +256,7 @@ export default function HomeScreen() {
                       disabled={sendingSignal}
                     >
                       <Text style={[styles.controlBtnText, styles.stopBtnText]}>
-                        ⏹ End Session
+                        ⏹ End
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -428,6 +456,7 @@ const styles = StyleSheet.create({
   stopBtn: { backgroundColor: "#FFF0F0", borderWidth: 1, borderColor: "#FFD0D0" },
   controlBtnText: { fontSize: 15, fontWeight: "700", color: "#6C63FF" },
   stopBtnText: { color: "#FF5252" },
+  unlockBtn: { flex: 0, alignSelf: "stretch", marginTop: 16, paddingHorizontal: 16 },
 
   notWatchingCard: {
     backgroundColor: "#fff",
