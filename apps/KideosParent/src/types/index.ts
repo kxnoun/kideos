@@ -41,6 +41,7 @@ export interface VideoVerdict {
   flags: string[];
   severity: "low" | "medium" | "high" | null;
   ratings?: Partial<Record<Dim, { level: number | null; evidence: string }>>;
+  summary?: string; // what the video is about (verdicts written since Oct 18)
   title: string;
   thumbnail: string;
   publishedAt: Timestamp;
@@ -73,6 +74,7 @@ export interface NowPlaying {
   title: string;
   channelName: string;
   thumbnail: string;
+  paused?: boolean; // set by the kid app when the player pauses / plays
   startedAt: Timestamp;
 }
 

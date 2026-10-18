@@ -35,6 +35,7 @@ import {
   subscribeToPlaySignal,
   writeNowPlaying,
   clearNowPlaying,
+  setNowPlayingPaused,
   logWatchSessionStart,
   logWatchSessionEnd,
 } from "../services/firebase";
@@ -179,8 +180,14 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
           onChangeState={(state: string) => {
             if (state === "ended") onBack();
             // keep `playing` matching the real player, so a parent's pause is always a change
-            if (state === "playing") setPlaying(true);
-            if (state === "paused") setPlaying(false);
+            if (state === "playing") {
+              setPlaying(true);
+              setNowPlayingPaused(parentId, childId, false);
+            }
+            if (state === "paused") {
+              setPlaying(false);
+              setNowPlayingPaused(parentId, childId, true);
+            }
           }}
           webViewStyle={{ opacity: 0.99 }} // fixes RN rendering flicker
           webViewProps={{

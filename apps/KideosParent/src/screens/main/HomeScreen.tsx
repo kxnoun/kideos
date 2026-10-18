@@ -31,9 +31,12 @@ import {
   subscribeToNowPlaying,
   sendPlaySignal,
   subscribeToPlaySignal,
+  subscribeToVerdict,
   claimPairingCode,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
+import { RatingChips } from "./VideosScreen";
+import type { VideoVerdict } from "../../types";
 
 export default function HomeScreen() {
   const user = useStore((s) => s.user);
@@ -45,6 +48,8 @@ export default function HomeScreen() {
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [lastSignal, setLastSignal] = useState<"play" | "pause" | "stop" | null>(null);
   const watchingOff = lastSignal === "stop";
+  const [nowVerdict, setNowVerdict] = useState<VideoVerdict | null>(null);
+  const nowVideoId = nowPlaying?.videoId;
   const [sendingSignal, setSendingSignal] = useState(false);
 
   // Pairing modal
@@ -67,6 +72,13 @@ export default function HomeScreen() {
     };
   }, [parentId, selectedChildId]);
 
+
+  // Summary + ratings of what's playing now
+  useEffect(() => {
+    setNowVerdict(null);
+    if (!parentId || !selectedChildId || !nowVideoId) return;
+    return subscribeToVerdict(parentId, selectedChildId, nowVideoId, setNowVerdict);
+  }, [parentId, selectedChildId, nowVideoId]);
 
   const handleSignal = useCallback(
     async (action: "play" | "pause" | "stop") => {
@@ -213,29 +225,34 @@ export default function HomeScreen() {
                   resizeMode="cover"
                 />
                 <View style={styles.nowPlayingInfo}>
-                  <Text style={styles.nowPlayingLabel}>NOW WATCHING</Text>
+                  <Text style={[styles.nowPlayingLabel, nowPlaying.paused && styles.pausedLabel]}>
+                    {nowPlaying.paused ? "⏸ PAUSED" : "▶ NOW WATCHING"}
+                  </Text>
                   <Text style={styles.nowPlayingTitle} numberOfLines={2}>
                     {nowPlaying.title}
                   </Text>
                   <Text style={styles.nowPlayingChannel}>
                     {nowPlaying.channelName}
                   </Text>
+                  {nowVerdict?.summary ? (
+                    <Text style={styles.nowSummary} numberOfLines={3}>
+                      {nowVerdict.summary}
+                    </Text>
+                  ) : null}
+                  {nowVerdict ? (
+                    <View style={styles.nowChips}>
+                      <RatingChips v={nowVerdict} />
+                    </View>
+                  ) : null}
 
                   {/* Remote controls */}
                   <View style={styles.controls}>
                     <TouchableOpacity
                       style={[styles.controlBtn, styles.pauseBtn]}
-                      onPress={() => handleSignal("pause")}
+                      onPress={() => handleSignal(nowPlaying.paused ? "play" : "pause")}
                       disabled={sendingSignal}
                     >
-                      <Text style={styles.controlBtnText}>⏸ Pause</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.controlBtn, styles.pauseBtn]}
-                      onPress={() => handleSignal("play")}
-                      disabled={sendingSignal}
-                    >
-                      <Text style={styles.controlBtnText}>▶ Resume</Text>
+                      <Text style={styles.controlBtnText}>{nowPlaying.paused ? "▶ Resume" : "⏸ Pause"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.controlBtn, styles.stopBtn]}
@@ -256,7 +273,7 @@ export default function HomeScreen() {
                       disabled={sendingSignal}
                     >
                       <Text style={[styles.controlBtnText, styles.stopBtnText]}>
-                        ⏹ End
+                        ⏹ End Session
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -444,7 +461,10 @@ const styles = StyleSheet.create({
     color: "#1A1A2E",
     marginBottom: 4,
   },
-  nowPlayingChannel: { fontSize: 14, color: "#888", marginBottom: 16 },
+  nowPlayingChannel: { fontSize: 14, color: "#888", marginBottom: 10 },
+  pausedLabel: { color: "#E59A1F" },
+  nowSummary: { fontSize: 13, color: "#444", lineHeight: 19, marginBottom: 8 },
+  nowChips: { marginBottom: 12 },
   controls: { flexDirection: "row", gap: 10 },
   controlBtn: {
     flex: 1,

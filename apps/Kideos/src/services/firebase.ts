@@ -92,8 +92,17 @@ export async function writeNowPlaying(
       title,
       channelName,
       thumbnail,
+      paused: false,
       startedAt: firestore.FieldValue.serverTimestamp(),
     });
+}
+
+// So the parent app can show "Now watching" vs "Paused"
+export async function setNowPlayingPaused(parentId: string, childId: string, paused: boolean): Promise<void> {
+  await firestore()
+    .doc(`users/${parentId}/children/${childId}/currentSession/nowPlaying`)
+    .update({ paused })
+    .catch(() => {}); // the doc may already be gone (video closed)
 }
 
 export async function clearNowPlaying(

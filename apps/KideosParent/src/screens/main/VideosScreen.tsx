@@ -47,7 +47,7 @@ export const DIM_TITLES: Record<Dim, string> = {
   nudity: "Nudity",
 };
 
-function RatingChips({ v }: { v: VideoVerdict }) {
+export function RatingChips({ v }: { v: VideoVerdict }) {
   const entries = Object.entries(v.ratings ?? {}) as [Dim, { level: number | null }][];
   if (!entries.length) {
     return <Text style={styles.noRatings}>{v.status === "approved" ? "Nothing on any of your lists" : ""}</Text>;

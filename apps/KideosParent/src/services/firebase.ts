@@ -246,6 +246,21 @@ export function subscribeToNowPlaying(
     });
 }
 
+// One video's verdict for this child (summary + ratings for the now-watching card)
+export function subscribeToVerdict(
+  parentId: string,
+  childId: string,
+  videoId: string,
+  onUpdate: (verdict: VideoVerdict | null) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`)
+    .onSnapshot(
+      (snap) => onUpdate(snap.exists() ? ({ videoId: snap.id, ...snap.data() } as VideoVerdict) : null),
+      () => onUpdate(null)
+    );
+}
+
 // What the kid app was last told (pause / play / stop). "stop" = watching is off
 // until the parent sends "play".
 export function subscribeToPlaySignal(
