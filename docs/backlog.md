@@ -63,6 +63,17 @@ analyse 500 channels with a prompt we're about to change.
   calm moment: the rules + `tests/rules/` are in git history (commit bdf672f), plus a "paired devices" list
   in the parent app so it can be managed without the console.
 
+- **Kid player — decide before launch.** Inside YouTube's player we hide the share button, the YouTube
+  logo / "Watch on YouTube" button and "More videos" (`HIDE_IN_PLAYER` in
+  `apps/Kideos/src/screens/PlayerScreen.tsx`; on Android it reaches YouTube's iframe through
+  `apps/Kideos/patches/react-native-webview+13.16.1.patch`, applied on `npm install`). Everything else
+  (controls, fullscreen, skip ad, title) is YouTube's as normal. **Changing the player is against YouTube's
+  terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
+  explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
+  Before going public: ask YouTube API compliance / a lawyer, or remove `HIDE_IN_PLAYER`. Also: "Made for
+  Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
+  library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
+
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).

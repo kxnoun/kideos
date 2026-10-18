@@ -10,6 +10,11 @@
 // - Writes "now playing" so parent can see in real time
 // - Listens for parent's pause/stop command via Firestore
 // - Shows a friendly "time's up" screen on remote stop
+// - Hides YouTube's share button, YouTube (logo / "Watch on YouTube") button and
+//   "More videos" inside the player (HIDE_IN_PLAYER, run inside YouTube's iframe;
+//   on Android that needs patches/react-native-webview+13.16.1.patch).
+//   ⚠️ Changing the YouTube player is against YouTube's terms — decide before launch
+//   (docs/backlog.md → kid player).
 // ─────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
@@ -31,6 +36,40 @@ import {
   logWatchSessionEnd,
 } from "../services/firebase";
 import type { ApprovedVideo, ChildSession } from "../types";
+
+// Runs at document start in every frame; acts only inside YouTube's player.
+// Hides by class AND by label, so it keeps working if YouTube renames classes.
+const HIDE_IN_PLAYER = `(function () {
+  if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
+  if (window.__kideosHide) return;
+  window.__kideosHide = true;
+  var CSS = '.ytp-share-button,.ytp-share-button-visible,.ytp-youtube-button,.ytp-impression-link,' +
+    '.ytp-watermark,.ytp-pause-overlay,.ytp-expand-pause-overlay,.ytp-pause-overlay-container' +
+    '{display:none!important;pointer-events:none!important}';
+  var LABEL = /^(share|watch on youtube|more videos)\\b/i;
+  function addStyle() {
+    var root = document.head || document.documentElement;
+    if (!root) return false;
+    var st = document.createElement('style');
+    st.textContent = CSS;
+    root.appendChild(st);
+    return true;
+  }
+  function hideLabelled() {
+    var els = document.querySelectorAll('[aria-label],[title],[data-tooltip-text]');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      var l = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('data-tooltip-text') || '';
+      if (LABEL.test(l.trim())) { el.style.setProperty('display', 'none', 'important'); }
+    }
+  }
+  if (!addStyle()) document.addEventListener('DOMContentLoaded', addStyle);
+  var start = function () {
+    hideLabelled();
+    new MutationObserver(hideLabelled).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'title'] });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})(); true;`;
 
 const { width } = Dimensions.get("window");
 const PLAYER_HEIGHT = width * 0.5625; // 16:9
@@ -112,6 +151,10 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
             if (state === "ended") onBack();
           }}
           webViewStyle={{ opacity: 0.99 }} // fixes RN rendering flicker
+          webViewProps={{
+            injectedJavaScriptBeforeContentLoaded: HIDE_IN_PLAYER,
+            injectedJavaScriptBeforeContentLoadedForMainFrameOnly: false, // reach YouTube's iframe
+          }}
         />
       </View>
 
