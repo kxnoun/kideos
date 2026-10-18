@@ -29,7 +29,6 @@ import {
 import {
   subscribeToWhitelistedChannels,
   subscribeToApprovedVideos,
-  subscribeToPlaySignal,
 } from "../services/firebase";
 import type { ApprovedVideo, ChildSession, WhitelistedChannel } from "../types";
 
@@ -42,14 +41,12 @@ interface Props {
   session: ChildSession;
   onVideoPress: (video: ApprovedVideo) => void;
   onPaused: () => void;
-  onSessionEnded: () => void;
 }
 
 export default function FeedScreen({
   session,
   onVideoPress,
   onPaused,
-  onSessionEnded,
 }: Props) {
   const [channels, setChannels] = useState<WhitelistedChannel[]>([]);
   const [videos, setVideos] = useState<ApprovedVideo[]>([]);
@@ -82,15 +79,6 @@ export default function FeedScreen({
     const names = new Map(channels.map((c) => [c.channelId, c.name]));
     return videos.map((v) => ({ ...v, channelName: names.get(v.channelId) ?? "" }));
   }, [videos, channels]);
-
-  // Listen for parent remote commands (pause / stop)
-  useEffect(() => {
-    const unsub = subscribeToPlaySignal(parentId, childId, (signal) => {
-      if (!signal) return;
-      if (signal.action === "stop") onSessionEnded();
-    });
-    return unsub;
-  }, [parentId, childId, onSessionEnded]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

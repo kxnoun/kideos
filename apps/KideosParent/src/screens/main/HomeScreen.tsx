@@ -30,9 +30,17 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   subscribeToNowPlaying,
   sendPlaySignal,
+  subscribeToPlaySignal,
+  subscribeToVerdict,
+  getVideoSummary,
+  hideVideo,
   claimPairingCode,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
+import { DIM_TITLES } from "./VideosScreen";
+import { LEVEL_LABELS } from "../../prefs";
+import type { Dim } from "../../types";
+import type { VideoVerdict } from "../../types";
 
 export default function HomeScreen() {
   const user = useStore((s) => s.user);
@@ -42,6 +50,10 @@ export default function HomeScreen() {
   const selectedChild = useSelectedChild();
 
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [lastSignal, setLastSignal] = useState<"play" | "pause" | "stop" | null>(null);
+  const watchingOff = lastSignal === "stop";
+  const [nowVerdict, setNowVerdict] = useState<VideoVerdict | null>(null);
+  const nowVideoId = nowPlaying?.videoId;
   const [sendingSignal, setSendingSignal] = useState(false);
 
   // Pairing modal
@@ -57,9 +69,28 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!parentId || !selectedChildId) return;
     const unsub = subscribeToNowPlaying(parentId, selectedChildId, setNowPlaying);
-    return unsub;
+    const unsub2 = subscribeToPlaySignal(parentId, selectedChildId, setLastSignal);
+    return () => {
+      unsub();
+      unsub2();
+    };
   }, [parentId, selectedChildId]);
 
+
+  // Summary + ratings of what's playing now
+  const [nowSummary, setNowSummary] = useState("");
+  const [summaryOpen, setSummaryOpen] = useState(false); // "more" / "less"
+  const [summaryCut, setSummaryCut] = useState(false); // longer than 2 lines?
+  useEffect(() => {
+    setNowVerdict(null);
+    setNowSummary("");
+    setSummaryOpen(false);
+    setSummaryCut(false);
+    if (!parentId || !selectedChildId || !nowVideoId) return;
+    getVideoSummary(nowVideoId).then(setNowSummary);
+    return subscribeToVerdict(parentId, selectedChildId, nowVideoId, setNowVerdict);
+  }, [parentId, selectedChildId, nowVideoId]);
+  const nowRatings = Object.entries(nowVerdict?.ratings ?? {}) as [Dim, { level: number | null; evidence: string }][];
 
   const handleSignal = useCallback(
     async (action: "play" | "pause" | "stop") => {
@@ -184,7 +215,21 @@ export default function HomeScreen() {
               {selectedChild.profile.name}'s Screen
             </Text>
 
-            {nowPlaying ? (
+            {watchingOff ? (
+              <View style={styles.notWatchingCard}>
+                <Text style={styles.notWatchingEmoji}>🌙</Text>
+                <Text style={styles.notWatchingText}>
+                  Watching is off for {selectedChild.profile.name}. Their app shows "Time's up".
+                </Text>
+                <TouchableOpacity
+                  style={[styles.controlBtn, styles.pauseBtn, styles.unlockBtn]}
+                  onPress={() => handleSignal("play")}
+                  disabled={sendingSignal}
+                >
+                  <Text style={styles.controlBtnText}>▶ Let them watch again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : nowPlaying ? (
               <View style={styles.nowPlayingCard}>
                 <Image
                   source={{ uri: nowPlaying.thumbnail }}
@@ -192,29 +237,76 @@ export default function HomeScreen() {
                   resizeMode="cover"
                 />
                 <View style={styles.nowPlayingInfo}>
-                  <Text style={styles.nowPlayingLabel}>NOW WATCHING</Text>
+                  <Text style={[styles.nowPlayingLabel, nowPlaying.paused && styles.pausedLabel]}>
+                    {nowPlaying.paused ? "⏸ PAUSED" : "▶ NOW WATCHING"}
+                  </Text>
                   <Text style={styles.nowPlayingTitle} numberOfLines={2}>
                     {nowPlaying.title}
                   </Text>
                   <Text style={styles.nowPlayingChannel}>
                     {nowPlaying.channelName}
                   </Text>
+                  {nowVerdict?.summary || nowSummary ? (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      disabled={!summaryCut}
+                      onPress={() => setSummaryOpen((o) => !o)}
+                      style={!summaryCut && { marginBottom: 8 }}
+                    >
+                      {/* Measure once, unclamped and invisible, to know if it needs "more" */}
+                      {!summaryCut && !summaryOpen ? (
+                        <Text
+                          style={[styles.nowSummary, styles.measure]}
+                          onTextLayout={(e) => setSummaryCut(e.nativeEvent.lines.length > 2)}
+                        >
+                          {nowVerdict?.summary || nowSummary}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.nowSummary} numberOfLines={summaryOpen ? undefined : 2}>
+                        {nowVerdict?.summary || nowSummary}
+                      </Text>
+                      {summaryCut ? (
+                        <Text style={styles.moreLink}>{summaryOpen ? "less" : "more"}</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  ) : null}
+                  {nowVerdict ? (
+                    <View style={styles.nowChips}>
+                      <Text style={styles.nowFit}>
+                        {nowVerdict.parentDecision === "approved"
+                          ? "Shown because you allowed it"
+                          : `✓ Fits all of ${selectedChild.profile.name}'s settings`}
+                      </Text>
+                      {nowRatings.length ? (
+                        nowRatings.map(([dim, r]) => (
+                          <Text key={dim} style={styles.nowRating}>
+                            <Text style={styles.nowRatingName}>
+                              {DIM_TITLES[dim] ?? dim}: {r.level === null ? "can't tell" : LEVEL_LABELS[dim]?.[r.level] ?? r.level}
+                            </Text>
+                            {r.evidence ? ` — "${r.evidence}"` : ""}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text style={styles.nowRating}>Nothing on any of your lists</Text>
+                      )}
+                    </View>
+                  ) : null}
 
                   {/* Remote controls */}
                   <View style={styles.controls}>
                     <TouchableOpacity
                       style={[styles.controlBtn, styles.pauseBtn]}
-                      onPress={() => handleSignal("pause")}
+                      onPress={() => handleSignal(nowPlaying.paused ? "play" : "pause")}
                       disabled={sendingSignal}
                     >
-                      <Text style={styles.controlBtnText}>⏸ Pause</Text>
+                      <Text style={styles.controlBtnText}>{nowPlaying.paused ? "▶ Resume" : "⏸ Pause"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.controlBtn, styles.stopBtn]}
                       onPress={() =>
                         Alert.alert(
                           "End Session",
-                          `This will stop ${selectedChild.profile.name}'s video and show them a "time's up" screen.`,
+                          `This stops ${selectedChild.profile.name}'s video and shows a "time's up" screen until you let them watch again.`,
                           [
                             { text: "Cancel", style: "cancel" },
                             {
@@ -232,6 +324,30 @@ export default function HomeScreen() {
                       </Text>
                     </TouchableOpacity>
                   </View>
+                  <TouchableOpacity
+                    style={styles.hideBtn}
+                    onPress={() =>
+                      Alert.alert(
+                        "Hide this video?",
+                        `It closes on ${selectedChild.profile.name}'s screen right away and won't be in their feed. You can undo it in ${selectedChild.profile.name}'s videos → Hidden.`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Hide video",
+                            style: "destructive",
+                            onPress: () =>
+                              parentId && selectedChildId
+                                ? hideVideo(parentId, selectedChildId, nowPlaying.videoId).catch(() =>
+                                    Alert.alert("Couldn't hide it. Check your connection.")
+                                  )
+                                : undefined,
+                          },
+                        ]
+                      )
+                    }
+                  >
+                    <Text style={styles.hideBtnText}>🚩 Hide this video</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ) : (
@@ -416,7 +532,17 @@ const styles = StyleSheet.create({
     color: "#1A1A2E",
     marginBottom: 4,
   },
-  nowPlayingChannel: { fontSize: 14, color: "#888", marginBottom: 16 },
+  nowPlayingChannel: { fontSize: 14, color: "#888", marginBottom: 10 },
+  pausedLabel: { color: "#E59A1F" },
+  nowSummary: { fontSize: 13, color: "#444", lineHeight: 19 },
+  measure: { position: "absolute", opacity: 0, left: 0, right: 0 },
+  moreLink: { fontSize: 13, fontWeight: "700", color: "#6C63FF", marginTop: 2, marginBottom: 8 },
+  nowChips: { marginBottom: 12 },
+  hideBtn: { marginTop: 10, paddingVertical: 10, alignItems: "center" },
+  hideBtnText: { fontSize: 14, fontWeight: "700", color: "#B23B3B" },
+  nowFit: { fontSize: 13, fontWeight: "800", color: "#1E7A44", marginBottom: 6 },
+  nowRating: { fontSize: 12, color: "#666", lineHeight: 18, marginBottom: 3 },
+  nowRatingName: { fontWeight: "700", color: "#333" },
   controls: { flexDirection: "row", gap: 10 },
   controlBtn: {
     flex: 1,
@@ -428,6 +554,7 @@ const styles = StyleSheet.create({
   stopBtn: { backgroundColor: "#FFF0F0", borderWidth: 1, borderColor: "#FFD0D0" },
   controlBtnText: { fontSize: 15, fontWeight: "700", color: "#6C63FF" },
   stopBtnText: { color: "#FF5252" },
+  unlockBtn: { flex: 0, alignSelf: "stretch", marginTop: 16, paddingHorizontal: 16 },
 
   notWatchingCard: {
     backgroundColor: "#fff",

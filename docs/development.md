@@ -16,6 +16,12 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 - `adb` lives at `"$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"`. Re-run `adb reverse` after every
   reconnect, or the app shows "Unable to load script".
 - JS-only changes: Metro reloads, or press `r`. Only rebuild with Gradle after native/dependency changes.
+- The kid app patches two libraries (`apps/Kideos/patches/`, applied by `patch-package` on every
+  `npm install`): `react-native-webview` (native — rebuild the kid app after it changes) and
+  `react-native-youtube-iframe` (JS — restart Metro with `--reset-cache` after it changes).
+- Testing remote control with one phone: run the parent app on an emulator (`gradlew app:assembleDebug`,
+  then `adb -s emulator-5554 install -r app\build\outputs\apk\debug\app-debug.apk`) and `adb reverse` each
+  device to its own Metro port.
 - After an edit that adds/removes hooks or state, fully restart the app ("Should have a queue" = hot reload
   confusion, not a bug).
 - Reset the kid app's pairing: `adb shell pm clear com.kideos.app`, then pair again from the parent app

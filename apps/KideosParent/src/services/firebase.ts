@@ -246,6 +246,47 @@ export function subscribeToNowPlaying(
     });
 }
 
+// One video's verdict for this child (summary + ratings for the now-watching card)
+export function subscribeToVerdict(
+  parentId: string,
+  childId: string,
+  videoId: string,
+  onUpdate: (verdict: VideoVerdict | null) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`)
+    .onSnapshot(
+      (snap) => onUpdate(snap.exists() ? ({ videoId: snap.id, ...snap.data() } as VideoVerdict) : null),
+      () => onUpdate(null)
+    );
+}
+
+// What a video is about (its shared content profile) — for videos whose verdict
+// predates verdict summaries
+export async function getVideoSummary(videoId: string): Promise<string> {
+  try {
+    const snap = await firestore().doc(`videoProfiles/${videoId}`).get();
+    return (snap.data()?.summary as string | undefined) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// What the kid app was last told (pause / play / stop). "stop" = watching is off
+// until the parent sends "play".
+export function subscribeToPlaySignal(
+  parentId: string,
+  childId: string,
+  onUpdate: (action: "play" | "pause" | "stop" | null) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/children/${childId}/currentSession/playSignal`)
+    .onSnapshot(
+      (snap) => onUpdate(snap.exists() ? (snap.data()?.action ?? null) : null),
+      () => onUpdate(null)
+    );
+}
+
 export async function sendPlaySignal(
   parentId: string,
   childId: string,
@@ -291,6 +332,28 @@ export async function setShowAnyway(
     await ref.update({ parentDecision: "approved", approved: true });
   } else {
     await ref.update({ parentDecision: firestore.FieldValue.delete(), approved: verdict.status === "approved" });
+  }
+}
+
+// "Hide this video" from the now-watching card: out of the kid's feed, and the kid
+// app closes it if it's playing. Undo = setShowAnyway(…, false).
+export async function hideVideo(parentId: string, childId: string, videoId: string): Promise<void> {
+  await firestore()
+    .doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`)
+    .update({ parentDecision: "hidden", approved: false });
+}
+
+// Hide several at once (Videos screen → Select)
+export async function hideVideos(parentId: string, childId: string, videoIds: string[]): Promise<void> {
+  for (let i = 0; i < videoIds.length; i += 400) {
+    const batch = firestore().batch();
+    for (const id of videoIds.slice(i, i + 400)) {
+      batch.update(firestore().doc(`users/${parentId}/children/${childId}/videoVerdicts/${id}`), {
+        parentDecision: "hidden",
+        approved: false,
+      });
+    }
+    await batch.commit();
   }
 }
 

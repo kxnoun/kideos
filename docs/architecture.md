@@ -113,17 +113,38 @@ left as they are (re-add the channel to re-profile).
 Home → "{child}'s videos" → `VideosScreen`: all of the child's verdicts (`subscribeToVerdicts`), split into
 **Shown** and **Hidden**. Each card shows the video's ratings as chips; hidden ones show *why* in plain
 words, including the parent's limit (e.g. "Moderate swearing (sh\*t ×3) — your limit: Mild swearing").
-Nothing needs action — parents look when they want to. **"Show anyway…"** opens a confirmation screen
+Nothing needs action — parents look when they want to. **Tap a video** → details sheet (summary, every
+rating with its evidence, status, one action). **Hide** on a Shown card, or **Select** → tick several →
+**Hide N videos** (`hideVideo` / `hideVideos` → `parentDecision: "hidden"`, `approved: false`; shows as
+"You hid this" + Undo). **"Show anyway…"** opens a confirmation screen
 (the safe button is "Keep it hidden"); confirming calls `setShowAnyway` → `parentDecision: "approved"`,
 `approved: true`. **Undo** (on Shown) deletes `parentDecision` and puts `approved` back to `status`. Rules
 only allow those two fields and require `approved` to match.
 
 ### Watching + remote control
 Kid feed: `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first, filtered to
-currently whitelisted channels; channel names filled from the whitelist). Player
-(`react-native-youtube-iframe`) writes `currentSession/nowPlaying` and a `watchHistory` session
-(`expiresAt` +90 days). Parent pause/stop → `currentSession/parentCommand` → **`handleParentCommand`** relays
-to `currentSession/playSignal` → kid app listener.
+currently whitelisted channels; channel names filled from the whitelist).
+
+Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe`):
+- Inside YouTube's iframe, `HIDE_IN_PLAYER` hides the share button, the YouTube logo / "Watch on YouTube"
+  and "More videos", and makes the title / channel name / channel picture untappable. ⚠️ Against YouTube's
+  terms — decide before launch (backlog → kid player). On Android this needs
+  `patches/react-native-webview+13.16.1.patch` (document-start scripts in all frames; fullscreen →
+  landscape). Web-view-level backup: YouTube pages never open; ad links open as normal.
+- `patches/react-native-youtube-iframe+2.4.1.patch`: play / pause are injected directly (the library's
+  postMessage never reached the page on Android, so remote pause didn't work).
+- Writes `currentSession/nowPlaying` (+ `paused`, updated on play/pause) and a `watchHistory` session
+  (`expiresAt` +90 days); closes the video if its verdict stops being approved ("Hide this video").
+
+Remote control: parent → `currentSession/parentCommand` (`pause` / `play` / `stop`) →
+**`handleParentCommand`** → `currentSession/playSignal`. The kid player reacts only to commands sent while
+the video is open (the first snapshot is the last command, maybe old). `stop` locks the **whole** kid app
+on "Time's up" (App.tsx, survives restarts) until the parent sends `play` ("Let them watch again").
+
+Parent Home → "{child}'s Screen": ▶ Now watching / ⏸ Paused, a Pause/Resume toggle, End Session, the
+video's summary (2 lines, more/less — read from `videoProfiles`), "✓ Fits all of {child}'s settings" or
+"Shown because you allowed it", each rating with its evidence, and **🚩 Hide this video**
+(`parentDecision: "hidden"`). When watching is off: "Watching is off" + "Let them watch again".
 
 ### Nightly / weekly jobs
 - **`refreshChannelLibraries`** (03:00 UTC): new uploads per whitelisted channel → stubs → analyzed for each
@@ -177,13 +198,13 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `…/children/{c}/videoVerdicts/{v}` | `approved`, `status` (approved/hidden), `reason`, `ratings`, `flags`, `severity`, channel/title/thumbnail/publishedAt, `parentDecision?` | functions; parent may set/clear `parentDecision`+`approved` only | kid feed, Videos screen |
 | `…/children/{c}/flaggedContent/{v}` | **legacy** review queue — no longer written or shown | — | — |
 | `…/children/{c}/watchHistory/{id}` | video, start/end, duration, `expiresAt` | kid app | parent, digest |
-| `…/children/{c}/currentSession/nowPlaying·parentCommand·playSignal` | live session + remote control | kid / parent / function | both |
+| `…/children/{c}/currentSession/nowPlaying·parentCommand·playSignal` | live session (`nowPlaying.paused`) + remote control (`pause`/`play`/`stop`; last `stop` = kid app locked) | kid / parent / function | both |
 | `…/children/{c}/suggestions/{id}` | AI channel suggestions + `parentResponse` | functions | parent |
 | `…/children/{c}/digests/{week}` | weekly digest | functions | *(parent reads the wrong path — backlog)* |
 | `pairingCodes/{code}` | pairing handshake: `claimed`, `parentId`, `childId` | kid (create), parent (claim) | anyone |
 | `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata + video stubs (`approved` field is legacy) | functions | kid (metadata), functions |
 | `channelCatalog/{ch}` | shared channel profile for suggestions (compact video profiles, overview, topics) | functions | functions only |
-| `videoProfiles/{v}` (+ `/valuesChecks/{hash}`) | content profiles, values-check cache | functions | functions only |
+| `videoProfiles/{v}` (+ `/valuesChecks/{hash}`) | content profiles, values-check cache | functions | profiles: signed-in users (public-video analysis only); valuesChecks: functions only |
 | `transcriptCache/{v}` | transcript text, or `{available: false}` when confirmed none | functions | functions only |
 | `triggerEvents/{eventId}` | dedupe markers for at-least-once triggers | functions | functions only |
 | `videoAnalysisCache/…` | **legacy** (pre-profile verdict cache), unused — safe to delete | — | — |

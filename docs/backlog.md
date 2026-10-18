@@ -63,10 +63,33 @@ analyse 500 channels with a prompt we're about to change.
   calm moment: the rules + `tests/rules/` are in git history (commit bdf672f), plus a "paired devices" list
   in the parent app so it can be managed without the console.
 
+- **Kid player — decide before launch.** Inside YouTube's player we hide the share button, the YouTube
+  logo / "Watch on YouTube" button and "More videos" (`HIDE_IN_PLAYER` in
+  `apps/Kideos/src/screens/PlayerScreen.tsx`; on Android it reaches YouTube's iframe through
+  `apps/Kideos/patches/react-native-webview+13.16.1.patch`, applied on `npm install`). Everything else
+  (controls, fullscreen, skip ad, title) is YouTube's as normal. **Changing the player is against YouTube's
+  terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
+  explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
+  Before going public: ask YouTube API compliance / a lawyer, or remove `HIDE_IN_PLAYER`. Also: "Made for
+  Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
+  library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
+  The title, channel name and channel picture are untappable; YouTube links never open (web view level
+  too); ad links still open normally (left alone on purpose — don't interfere with ads). There is no
+  YouTube Kids API or embeddable YouTube Kids player.
+
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).
 - Kid feed: orientation changes / tablet layout (`Dimensions.get` at module load).
+- *Backburner:* landscape-only kid app for younger kids (YouTube Kids was landscape-only on phones until
+  it added portrait in Dec 2024). Also: Shorts get rotated to landscape in fullscreen — keep them upright.
+- *Backburner:* the player's settings (gear) menu — "Stats for nerds" fills the screen and kids tap
+  everything. Hide or disable it (or just that item), or make it a parent setting.
+- UI polish on both apps.
+- *Looked into, not possible (Oct 17):* using a parent's **YouTube Premium** to skip ads in the kid app.
+  Premium only applies inside another app if you're signed in to Google in that app's browser, and Google
+  blocks sign-in in embedded web views (since 2021); there's no API to pass Premium status. Copying the
+  parent's Google session onto a kid's device would be a security/COPPA problem — don't.
 - Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
@@ -103,6 +126,13 @@ analyse 500 channels with a prompt we're about to change.
   collection data and consider dropping the dependency.
 
 ## Done (Oct 2026)
+
+Oct 17–18 (`player-and-remote-control`): kid player hides share / YouTube button / More videos and makes
+title + channel untappable (two library patches; ⚠️ terms — see kid player above); fullscreen rotates to
+landscape; remote pause actually works on Android; Resume; End Session locks the whole kid app until "Let
+them watch again"; now-watching card shows Paused / Playing, summary, ratings with evidence, "Hide this
+video" (closes it on the kid's phone); Videos screen details sheet, Hide, multi-select hide.
+
 
 Fixed from the May list: kid feed channel names, "Add Another Child" getting stuck. Plus: Google
 sign-in/sign-out account picker, `snap.exists()` crashes and the pairing-code check, kid-app anonymous-auth

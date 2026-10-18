@@ -5,17 +5,20 @@
 //   unpaired → PairingScreen
 //   paired, no video → FeedScreen
 //   paired, video selected → PlayerScreen
+//   parent pressed End Session → "Time's up" over everything, until the parent
+//   lets them watch again (the last playSignal is "stop"; survives restarts)
 // ─────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ActivityIndicator, StyleSheet, SafeAreaView } from "react-native";
 import auth from "@react-native-firebase/auth";
 
 import { useSession } from "./src/hooks/useSession";
 import PairingScreen from "./src/screens/PairingScreen";
 import FeedScreen from "./src/screens/FeedScreen";
 import PlayerScreen from "./src/screens/PlayerScreen";
+import { subscribeToPlaySignal } from "./src/services/firebase";
 import type { ApprovedVideo, ChildSession } from "./src/types";
 
 export default function App() {
@@ -41,6 +44,17 @@ export default function App() {
     });
   }, []);
 
+  // End Session from the parent app locks the whole app until they send "play"
+  const [locked, setLocked] = useState(false);
+  useEffect(() => {
+    if (!authed || !session?.paired) return;
+    return subscribeToPlaySignal(session.parentId, session.childId, (signal) => {
+      const stop = signal?.action === "stop";
+      setLocked(stop);
+      if (stop) setCurrentVideo(null);
+    });
+  }, [authed, session?.paired, session?.parentId, session?.childId]);
+
   const handlePaired = useCallback(
     (newSession: ChildSession) => {
       saveSession(newSession);
@@ -53,10 +67,6 @@ export default function App() {
   }, []);
 
   const handleBack = useCallback(() => {
-    setCurrentVideo(null);
-  }, []);
-
-  const handleSessionEnded = useCallback(() => {
     setCurrentVideo(null);
   }, []);
 
@@ -73,6 +83,16 @@ export default function App() {
       <SafeAreaProvider>
         <PairingScreen onPaired={handlePaired} />
       </SafeAreaProvider>
+    );
+  }
+
+  if (locked) {
+    return (
+      <SafeAreaView style={styles.timeUp}>
+        <Text style={styles.timeUpEmoji}>🌙</Text>
+        <Text style={styles.timeUpTitle}>Time's up for now!</Text>
+        <Text style={styles.timeUpText}>A parent has ended your session. See you next time!</Text>
+      </SafeAreaView>
     );
   }
 
@@ -94,13 +114,16 @@ export default function App() {
         session={session}
         onVideoPress={handleVideoPress}
         onPaused={() => {}}
-        onSessionEnded={handleSessionEnded}
       />
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  timeUp: { flex: 1, backgroundColor: "#1A1A2E", alignItems: "center", justifyContent: "center", padding: 40 },
+  timeUpEmoji: { fontSize: 80, marginBottom: 24 },
+  timeUpTitle: { fontSize: 28, fontWeight: "800", color: "#fff", textAlign: "center", marginBottom: 12 },
+  timeUpText: { fontSize: 17, color: "rgba(255,255,255,0.7)", textAlign: "center", lineHeight: 26 },
   loading: {
     flex: 1,
     alignItems: "center",

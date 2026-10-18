@@ -295,6 +295,7 @@ export const handleParentCommand = onDocumentWritten(
         });
         break;
 
+      case "play": // resume, or let them watch again after "stop"
       case "unlock":
         await signalRef.set({
           action: "play",

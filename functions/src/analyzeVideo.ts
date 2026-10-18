@@ -203,6 +203,7 @@ function writeVerdict(
     // What the video contains (non-zero ladders only), so the parent app can show
     // why without reading server-only profiles
     ratings: profile && profile.status === "ok" ? summarizeRatings(profile) : {},
+    summary: profile && profile.status === "ok" ? (profile.summary ?? "").slice(0, 300) : "",
     channelName: profile?.channelName ?? "",
     title: stub.title ?? "",
     thumbnail: stub.thumbnail ?? "",

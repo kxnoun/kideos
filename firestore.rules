@@ -160,6 +160,15 @@ service cloud.firestore {
       }
     }
 
+    // ── Video content profiles ────────────────────────────────
+    // What a public YouTube video contains (summary, ratings) — no family data.
+    // Parents read the summary for the now-watching card. Written by functions only;
+    // valuesChecks (per-family rule results) stay server-only.
+    match /videoProfiles/{videoId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     // ── Default deny ──────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

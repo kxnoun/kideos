@@ -135,6 +135,7 @@ export interface VideoVerdict {
   status: "approved" | "hidden"; // result of the parent's answers
   parentDecision?: "approved" | "hidden"; // "Show anyway" from the parent app; always wins
   ratings: Partial<Record<Dim, DimRating>>; // the video's non-zero ladder ratings, for the parent app
+  summary: string; // what the video is about (from its profile), for the parent app
   channelName: string;
   reason: string; // empty when approved
   flags: string[];
