@@ -27,6 +27,12 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   `Not suggested: … —` log lines, not by guessing; a wrong rating is a prompt problem, not a rule problem.
 - Device binding (`kidDeviceUids`) was reverted — kid paths allow any signed-in device for now. Redo it
   carefully (backlog → Security); `tests/rules/` still describes the binding version.
+- **The kid app patches two libraries** (`apps/Kideos/patches/`, applied by `patch-package` on
+  `npm install`): `react-native-webview` (scripts in YouTube's iframe on Android; fullscreen → landscape)
+  and `react-native-youtube-iframe` (play/pause injected directly — remote pause). Upgrading either
+  library means re-making the patch, or the player silently loses those features.
+- The kid player hides parts of YouTube's player — against YouTube's terms, a deliberate pre-launch
+  decision (backlog). Don't block or interfere with **ads** (ad links stay clickable).
 - Android on Windows: two-terminal build (Metro `--port 8082`/`8083` + `gradlew app:installDebug
   -PreactNativeDevServerPort=…`), never `react-native run-android`. Physical phone needs `adb reverse`.
 - App logs are in `adb logcat -s ReactNativeJS`, **not** the Metro terminal (RN ≥ 0.77).
