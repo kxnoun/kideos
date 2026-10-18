@@ -2,6 +2,23 @@
 
 What's next, in rough priority order. Update this file as things land.
 
+## 0. Next up (agreed Oct 17)
+
+1. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
+   app already writes `watchHistory` sessions (kept 90 days); there's just no screen for them.
+2. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
+   channels, shown/hidden counts. Today it sends a child's watch history to OpenAI — avoid that (COPPA:
+   children's data to a third party). In-app screen only, no push.
+3. **Redo device binding** (see Security).
+4. **Compliance pack before launch** — COPPA's amended rule is in force since Apr 22, 2026 (not legal
+   advice; get it checked):
+   - a written, published **data retention policy** (watch history 90 days, verdicts, profiles…);
+   - a written **security program** (device binding is part of "reasonable security");
+   - a **privacy notice** naming the third parties that receive data (OpenAI, Supadata, YouTube/Google);
+   - **verifiable parental consent** at parent sign-up;
+   - **"Made for Kids" videos must have tracking off** in the embed (YouTube Developer Policies III.E.4.j);
+   - the **kid player decision** (hiding YouTube's buttons is against their terms — see kid player below).
+
 ## 1. Check the AI against people (labeling) — *on the backburner, do before real families use it*
 
 Everything depends on the AI rating videos correctly, and we haven't measured it yet.
@@ -40,6 +57,8 @@ analyse 500 channels with a prompt we're about to change.
 
 ## 2. Confirmed bugs
 
+- **Kid app closed by itself once** (Oct 17, after End Session, while testing remote control). Not seen
+  again after the End Session rework. If it happens: `adb -s <phone> logcat -b crash -d` right after.
 - **Weekly digest broken end to end.** `generateWeeklyDigest` writes `users/{p}/children/{c}/digests/{week}`,
   the parent app reads `users/{p}/digests`, and `firestore.rules` has no rule for the child-level path (so
   the parent couldn't read it anyway). Fix the path (per child), the rule, and DigestScreen's per-child view.
