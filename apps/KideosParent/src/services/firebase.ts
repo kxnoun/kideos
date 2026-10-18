@@ -261,6 +261,17 @@ export function subscribeToVerdict(
     );
 }
 
+// What a video is about (its shared content profile) — for videos whose verdict
+// predates verdict summaries
+export async function getVideoSummary(videoId: string): Promise<string> {
+  try {
+    const snap = await firestore().doc(`videoProfiles/${videoId}`).get();
+    return (snap.data()?.summary as string | undefined) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 // What the kid app was last told (pause / play / stop). "stop" = watching is off
 // until the parent sends "play".
 export function subscribeToPlaySignal(

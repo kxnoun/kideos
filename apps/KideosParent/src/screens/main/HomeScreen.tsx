@@ -32,10 +32,13 @@ import {
   sendPlaySignal,
   subscribeToPlaySignal,
   subscribeToVerdict,
+  getVideoSummary,
   claimPairingCode,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
-import { RatingChips } from "./VideosScreen";
+import { DIM_TITLES } from "./VideosScreen";
+import { LEVEL_LABELS } from "../../prefs";
+import type { Dim } from "../../types";
 import type { VideoVerdict } from "../../types";
 
 export default function HomeScreen() {
@@ -74,11 +77,15 @@ export default function HomeScreen() {
 
 
   // Summary + ratings of what's playing now
+  const [nowSummary, setNowSummary] = useState("");
   useEffect(() => {
     setNowVerdict(null);
+    setNowSummary("");
     if (!parentId || !selectedChildId || !nowVideoId) return;
+    getVideoSummary(nowVideoId).then(setNowSummary);
     return subscribeToVerdict(parentId, selectedChildId, nowVideoId, setNowVerdict);
   }, [parentId, selectedChildId, nowVideoId]);
+  const nowRatings = Object.entries(nowVerdict?.ratings ?? {}) as [Dim, { level: number | null; evidence: string }][];
 
   const handleSignal = useCallback(
     async (action: "play" | "pause" | "stop") => {
@@ -234,14 +241,30 @@ export default function HomeScreen() {
                   <Text style={styles.nowPlayingChannel}>
                     {nowPlaying.channelName}
                   </Text>
-                  {nowVerdict?.summary ? (
-                    <Text style={styles.nowSummary} numberOfLines={3}>
-                      {nowVerdict.summary}
+                  {nowVerdict?.summary || nowSummary ? (
+                    <Text style={styles.nowSummary} numberOfLines={4}>
+                      {nowVerdict?.summary || nowSummary}
                     </Text>
                   ) : null}
                   {nowVerdict ? (
                     <View style={styles.nowChips}>
-                      <RatingChips v={nowVerdict} />
+                      <Text style={styles.nowFit}>
+                        {nowVerdict.parentDecision === "approved"
+                          ? "Shown because you allowed it"
+                          : `✓ Fits all of ${selectedChild.profile.name}'s settings`}
+                      </Text>
+                      {nowRatings.length ? (
+                        nowRatings.map(([dim, r]) => (
+                          <Text key={dim} style={styles.nowRating}>
+                            <Text style={styles.nowRatingName}>
+                              {DIM_TITLES[dim] ?? dim}: {r.level === null ? "can't tell" : LEVEL_LABELS[dim]?.[r.level] ?? r.level}
+                            </Text>
+                            {r.evidence ? ` — "${r.evidence}"` : ""}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text style={styles.nowRating}>Nothing on any of your lists</Text>
+                      )}
                     </View>
                   ) : null}
 
@@ -465,6 +488,9 @@ const styles = StyleSheet.create({
   pausedLabel: { color: "#E59A1F" },
   nowSummary: { fontSize: 13, color: "#444", lineHeight: 19, marginBottom: 8 },
   nowChips: { marginBottom: 12 },
+  nowFit: { fontSize: 13, fontWeight: "800", color: "#1E7A44", marginBottom: 6 },
+  nowRating: { fontSize: 12, color: "#666", lineHeight: 18, marginBottom: 3 },
+  nowRatingName: { fontWeight: "700", color: "#333" },
   controls: { flexDirection: "row", gap: 10 },
   controlBtn: {
     flex: 1,
