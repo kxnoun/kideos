@@ -86,6 +86,10 @@ analyse 500 channels with a prompt we're about to change.
 - *Backburner:* the player's settings (gear) menu — "Stats for nerds" fills the screen and kids tap
   everything. Hide or disable it (or just that item), or make it a parent setting.
 - UI polish on both apps.
+- *Looked into, not possible (Oct 17):* using a parent's **YouTube Premium** to skip ads in the kid app.
+  Premium only applies inside another app if you're signed in to Google in that app's browser, and Google
+  blocks sign-in in embedded web views (since 2021); there's no API to pass Premium status. Copying the
+  parent's Google session onto a kid's device would be a security/COPPA problem — don't.
 - Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
