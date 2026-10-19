@@ -9,7 +9,8 @@
 // rating dimension). One Gemini Flash-Lite call:
 //   - the latest ~50 thumbnails + titles (what the child will see in the feed)
 //   - a Google Search for the channel's reputation (news, parents, Elsagate lists)
-// Cost: ~50 × 258 image tokens + text ≈ 0.4¢, plus one grounded search (~1–3.5¢).
+// Cost: low media resolution ≈ 50 × ~280 image tokens + text ≈ 0.5¢ (default resolution
+// measured 57.7k tokens ≈ 1.8¢), plus one grounded search.
 //
 // Conflicts with a child's settings are worked out in code from the shared
 // report's concerns (same 0–4 ladders as video profiles) — no AI per family.
@@ -24,7 +25,7 @@ import { getChannelDetails, getChannelVideos } from "./youtube";
 import { loadValueFiltersForChild } from "./analyzeVideo";
 import { DIMS, LEVEL_LABELS, VALUE_FLAGS, VALUE_FLAG_LABELS, type Dim, type ValueFlag } from "./prefs";
 
-export const CHECK_VERSION = 1; // bump when the criteria change (new dimension etc.) → channels re-checked on next add
+export const CHECK_VERSION = 2; // v2: low-resolution thumbnails (cost) — bump when the criteria change (new dimension etc.) → channels re-checked on next add
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const THUMBNAILS = 50;
 
@@ -112,7 +113,8 @@ async function askGemini(apiKey: string, parts: unknown[], withSearch: boolean):
       systemInstruction: { parts: [{ text: SYSTEM }] },
       contents: [{ role: "user", parts }],
       ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
-      generationConfig: { temperature: 0, maxOutputTokens: 2000 },
+      // Low resolution: ~280 tokens per thumbnail instead of ~1,100 (thumbnails are only 320×180)
+      generationConfig: { temperature: 0, maxOutputTokens: 2000, mediaResolution: "MEDIA_RESOLUTION_LOW" },
     }),
     signal: AbortSignal.timeout(90_000),
   });
