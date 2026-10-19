@@ -62,6 +62,9 @@ What's next, in rough priority order. Update this file as things land.
   one grounded search (~1–3.5¢) per channel, once. Per-video checks unchanged. Not yet on the Suggestions
   swipe cards (those come from analyzed channels already). Later: short Gemini clips (clip offsets + fps
   are controllable, ~0.3¢ for 3×1 min).
+- Backlog (Oct 19): **channel conflicts after filter changes** — a ⚠️ badge on the Channels screen next to
+  channels whose saved check conflicts with the child's CURRENT settings (code only, from
+  `channelChecks/{id}` concerns; no AI).
 - Next (agreed Oct 19): **compilations** switch (waiting for the sister's examples — Ms Rachel's "+ MORE"
   ones are fine), **cooldowns** (break between videos: off/30s/1m/2m; "must finish each video": Back/Up
   next show "Finish this one first! 3:12 left", only real play time counts, parent Hide/End Session is
