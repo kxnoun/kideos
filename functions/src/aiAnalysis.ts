@@ -13,21 +13,23 @@ import OpenAI from "openai";
 import { createHash } from "crypto";
 import { logger } from "firebase-functions/v2";
 import { APP_CONFIG } from "./config";
-import type { ContentProfile, DimRating, Framing, ValueFilters } from "./types";
+import type { ContentProfile, DimRating, Framing, PaceStats, ValueFilters } from "./types";
 import { DIMS, HOLIDAYS, VALUE_FLAGS, type Dim, type Holiday } from "./prefs";
 import type { YouTubeVideoDetails } from "./youtube";
 
 // Bump when the profile prompt or schema changes — older profiles are then
 // regenerated (from cached transcripts, so no Supadata cost).
-export const PROFILE_VERSION = 4; // v4: gambling is a 0–4 ladder (was present/absent)
+export const PROFILE_VERSION = 5; // v5: + stimulation ladder, 4 still images, pace stats, madeForKids (v4: gambling ladder)
 // Oldest profile version still usable for filtering until reprofileOutdated upgrades it
 export const MIN_USABLE_PROFILE_VERSION = 3;
 
 const PROFILE_SYSTEM_PROMPT = `You describe the content of YouTube videos for a parental control app.
 You do NOT decide whether a video is appropriate — you only report what is in it, accurately, on fixed 0–4 ladders.
-For each category, first write the evidence (what in the transcript/metadata supports the rating, quoting briefly), THEN the level.
+You get the metadata, PACE STATS counted from the transcript, the transcript, and (usually) 4 small still images: the thumbnail and 3 frames from the start, middle and end.
+For each category, first write the evidence (what in the transcript/metadata/images supports the rating, quoting briefly; cite images as "thumbnail" or "frame 1/2/3"), THEN the level.
+Use the images for every category: if they show something the transcript doesn't mention (violence, scary imagery, revealing clothing, gambling, dangerous stunts), rate it and cite the image.
 If there is no evidence for a category, its level is 0 and evidence is "".
-Use level null ONLY if the category depends on visuals and the transcript gives no way to tell.
+Use level null ONLY if the category depends on visuals and neither the transcript nor the images give a way to tell. Never use null for stimulation.
 
 Respond with valid JSON only, in this exact shape:
 {
@@ -47,6 +49,7 @@ Respond with valid JSON only, in this exact shape:
   "politics":    { "evidence": "", "level": 0 },
   "religion":    { "evidence": "", "level": 0, "traditions": [], "themes": [] },
   "gambling":    { "evidence": "", "level": 0 },
+  "stimulation": { "evidence": "", "level": 0 },
   "crudeHumor":  { "evidence": "", "level": 0 },
   "matureThemes":{ "evidence": "", "level": 0 },
   "misinformation": { "evidence": "", "level": 0 },
@@ -80,20 +83,77 @@ Ladders (0 = none in every category):
 - lgbtq: none. incidental = LGBTQ+ people present without being the topic. discussion = LGBTQ+ topics discussed. advocacy = the video argues a position on LGBTQ+ issues (either direction).
 - flags (true only with evidence): fantasyMagic = fictional magic (wizards, spells in a story). realOccult = presented as real: tarot, astrology, spells, Ouija, séances. prophetDepiction = a prophet (e.g. Muhammad, Moses, Jesus as prophet) is depicted/voiced/animated. religiousExclamations = God's or Jesus's name used as an exclamation ("oh my God", "Jesus Christ!"). pork / beef = shown or cooked as food. nonKosher = shellfish, or meat cooked with dairy. alcoholFood = cooking with alcohol. evolution = evolution or origins of life/humans is a topic. matureGames = gameplay of mature-rated games (GTA, Call of Duty, horror games).
 - gambling (betting, casinos, lotteries, loot boxes/gacha): 1 mentioned in passing or as an example (a study that uses a bet, "it's a gamble"). 2 discussed or explained (how odds work, the history of casinos). 3 gambling shown or played (betting, casino games, opening loot boxes or gacha). 4 promoted: gambling sponsors or encouraging viewers to bet or buy loot boxes.
+- stimulation (pace and sensory intensity — how hyper the video is, NOT whether its content is good): 0 calm and slow: gentle narration, long quiet stretches (Mister Rogers, slow nature footage). 1 gentle: relaxed talking or soft songs (Ms Rachel, Bob Ross). 2 lively: normal upbeat kids' show or explainer (Bluey, SciShow Kids, Numberblocks). 3 high energy: fast talking or nonstop songs, frequent sound effects, saturated colors, excited shouting (CoComelon, MrBeast, most toy-unboxing and gaming-reaction videos). 4 overstimulating: frantic, chaotic sensory overload with little or no story — rapid noise and visual chaos, "brainrot" memes (Skibidi Toilet), surprise-egg / color-learning spam, loud compilations.
+  Judge from all signals together: PACE STATS (normal narration is ~120–160 words/min; 200+ is very fast; many sound tags per minute and repetition above ~0.3 mean nonstop songs, chants or noise), the title (ALL CAPS, emoji strings, "!!!", "CRAZY", "1 HOUR"), and the images (neon or highly saturated colors, cluttered frames, exaggerated faces, big text, flashing effects). Use what you know about the channel's typical style. Evidence names the signals, e.g. "230 wpm, songs throughout, neon cluttered frames".
 - framing: "glorified" = shown as cool, funny, rewarded or desirable; "condemned" = consequences shown or presented as wrong; otherwise "neutral".
 - purpose: "educational" only if teaching is the clear main purpose (documentary, explainer, history).`;
 
-function profileUserPrompt(video: YouTubeVideoDetails, transcript: string): string {
+function profileUserPrompt(video: YouTubeVideoDetails, transcript: string, pace: PaceStats): string {
   const t = transcript.slice(0, 12000);
+  const title = titleSignals(video.title);
   return `VIDEO METADATA:
 - Title: ${video.title}
 - Channel: ${video.channelTitle}
 - Description: ${video.description.slice(0, 500)}
 - Tags: ${video.tags.slice(0, 20).join(", ")}
 - Duration: ${Math.floor(video.durationSeconds / 60)}m ${video.durationSeconds % 60}s
+- YouTube "made for kids": ${video.madeForKids ? "yes" : "no"}
+
+PACE STATS (counted in code):
+- Words per minute: ${pace.wordsPerMinute}
+- Sound tags per minute ([Music], [Applause], ♪…): ${pace.soundTagsPerMinute}
+- Repetition (repeated 4-word phrases, 0–1): ${pace.repetition ?? "too short to tell"}
+- Title: ${title}
 
 TRANSCRIPT:
 ${t}${transcript.length > 12000 ? "\n[transcript truncated for length]" : ""}`;
+}
+
+// ── Pace stats, counted in code ────────────────────────────────
+// Rough signals for the stimulation ladder; the AI combines them with the images.
+const SOUND_TAG = /\[\s*[a-z][^\]]{0,30}\]|♪+/gi; // [Music], [Applause], [Laughter], ♪ — not censored "[ __ ]"
+
+export function paceStats(transcript: string, durationSeconds: number): PaceStats {
+  const minutes = Math.max(durationSeconds, 10) / 60;
+  const tags = transcript.match(SOUND_TAG)?.length ?? 0;
+  const words = transcript
+    .replace(SOUND_TAG, " ")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]+/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  let repetition: number | null = null;
+  if (words.length >= 40) {
+    const grams = words.length - 3;
+    const seen = new Set<string>();
+    let repeats = 0;
+    for (let i = 0; i < grams; i++) {
+      const g = `${words[i]} ${words[i + 1]} ${words[i + 2]} ${words[i + 3]}`;
+      if (seen.has(g)) repeats++;
+      else seen.add(g);
+    }
+    repetition = Math.round((repeats / grams) * 100) / 100;
+  }
+  return {
+    wordsPerMinute: Math.round(words.length / minutes),
+    soundTagsPerMinute: Math.round((tags / minutes) * 10) / 10,
+    repetition,
+  };
+}
+
+function titleSignals(title: string): string {
+  const letters = title.match(/\p{L}/gu) ?? [];
+  const caps = letters.filter((c) => c !== c.toLowerCase()).length;
+  const capsPct = letters.length ? Math.round((caps / letters.length) * 100) : 0;
+  const emoji = title.match(/\p{Extended_Pictographic}/gu)?.length ?? 0;
+  const bangs = title.match(/!/g)?.length ?? 0;
+  return `${capsPct}% capital letters, ${emoji} emoji, ${bangs} "!"`;
+}
+
+// Thumbnail + YouTube's 3 automatic frames (start / middle / end, 120×90). Low detail = cheap.
+function stillImages(video: YouTubeVideoDetails): string[] {
+  const frames = [1, 2, 3].map((n) => `https://i.ytimg.com/vi/${video.videoId}/${n}.jpg`);
+  return video.thumbnail ? [video.thumbnail, ...frames] : frames;
 }
 
 // ── Swear-word floor, counted in code ──────────────────────────
@@ -139,17 +199,36 @@ export async function generateContentProfile(
   openAiApiKey: string
 ): Promise<Omit<ContentProfile, "createdAt"> | null> {
   const client = new OpenAI({ apiKey: openAiApiKey });
-  try {
-    const completion = await client.chat.completions.create({
+  const pace = paceStats(transcript, video.durationSeconds);
+  const text = profileUserPrompt(video, transcript, pace);
+  const ask = (withImages: boolean) =>
+    client.chat.completions.create({
       model: APP_CONFIG.AI_MODEL,
       messages: [
         { role: "system", content: PROFILE_SYSTEM_PROMPT },
-        { role: "user", content: profileUserPrompt(video, transcript) },
+        {
+          role: "user",
+          content: withImages
+            ? [
+                { type: "text" as const, text },
+                ...stillImages(video).map((url) => ({ type: "image_url" as const, image_url: { url, detail: "low" as const } })),
+              ]
+            : text + "\n\n(No images available — rate visual categories from the text only.)",
+        },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 1600,
+      max_tokens: 1700,
       temperature: 0,
     });
+  try {
+    let completion;
+    try {
+      completion = await ask(true);
+    } catch (err) {
+      // e.g. an image URL that won't load — the profile is still worth having without them
+      logger.warn(`[AI] Profile with images failed for "${video.title}", retrying text-only:`, err);
+      completion = await ask(false);
+    }
     const raw = completion.choices[0]?.message?.content;
     if (!raw) throw new Error("Empty response from OpenAI");
     const p = JSON.parse(raw);
@@ -202,9 +281,11 @@ export async function generateContentProfile(
       religiousThemes: strList(p.religion?.themes),
       topics: strList(p.topics),
       summary: typeof p.summary === "string" ? p.summary.slice(0, 600) : "",
+      madeForKids: video.madeForKids,
+      pace,
     };
     logger.info(
-      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} topics=${JSON.stringify(profile.topics)}`
+      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} pace=${JSON.stringify(pace)} mfk=${video.madeForKids} topics=${JSON.stringify(profile.topics)}`
     );
     return profile;
   } catch (err) {

@@ -24,7 +24,14 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList, VideoVerdict, Dim } from "../../types";
-import { subscribeToVerdicts, setShowAnyway, hideVideo, hideVideos, getVideoSummary } from "../../services/firebase";
+import {
+  subscribeToVerdicts,
+  setShowAnyway,
+  hideVideo,
+  hideVideos,
+  reportTooHyper,
+  getVideoSummary,
+} from "../../services/firebase";
 import { LEVEL_LABELS } from "../../prefs";
 import { useStore } from "../../store/useStore";
 import VideoPreview from "../../components/VideoPreview";
@@ -45,6 +52,7 @@ export const DIM_TITLES: Record<Dim, string> = {
   politics: "Politics",
   religion: "Religion",
   gambling: "Gambling",
+  stimulation: "Pace",
   crudeHumor: "Crude humor",
   matureThemes: "Mature themes",
   misinformation: "Misinformation",
@@ -100,6 +108,15 @@ export default function VideosScreen({ route, navigation }: Props) {
     if (!user) return;
     try {
       await hideVideo(user.uid, childId, v.videoId);
+    } catch {
+      Alert.alert("Couldn't hide it. Check your connection.");
+    }
+  };
+
+  const tooHyper = async (v: VideoVerdict) => {
+    if (!user) return;
+    try {
+      await reportTooHyper(user.uid, childId, v.videoId);
     } catch {
       Alert.alert("Couldn't hide it. Check your connection.");
     }
@@ -285,7 +302,12 @@ export default function VideosScreen({ route, navigation }: Props) {
                 />
               ) : null}
               <Text style={styles.modalHeading}>{detailsLive.title}</Text>
-              {detailsLive.channelName ? <Text style={styles.channel}>{detailsLive.channelName}</Text> : null}
+              {detailsLive.channelName ? (
+                <Text style={styles.channel}>
+                  {detailsLive.channelName}
+                  {detailsLive.madeForKids ? " · Made for kids" : ""}
+                </Text>
+              ) : null}
               {detailsSummary ? <Text style={styles.detailsSummary}>{detailsSummary}</Text> : null}
 
               <Text style={[styles.detailsStatus, !detailsLive.approved && styles.detailsStatusHidden]}>
@@ -332,9 +354,14 @@ export default function VideosScreen({ route, navigation }: Props) {
                     </Text>
                   </TouchableOpacity>
                 ) : detailsLive.approved ? (
-                  <TouchableOpacity style={styles.confirmBtn} onPress={() => hideOne(detailsLive)}>
-                    <Text style={styles.confirmText}>Hide this video</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity style={styles.confirmBtn} onPress={() => hideOne(detailsLive)}>
+                      <Text style={styles.confirmText}>Hide this video</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.hyperBtn} onPress={() => tooHyper(detailsLive)} hitSlop={8}>
+                      <Text style={styles.hyperText}>Too hyper? Hide it and tell us</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
                   <TouchableOpacity
                     style={styles.confirmBtn}
@@ -454,4 +481,6 @@ const styles = StyleSheet.create({
   cancelText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   confirmBtn: { borderRadius: 14, paddingVertical: 14, alignItems: "center", borderWidth: 1, borderColor: "#D9534F" },
   confirmText: { color: "#D9534F", fontSize: 15, fontWeight: "700" },
+  hyperBtn: { alignItems: "center", paddingVertical: 12 },
+  hyperText: { color: "#6C63FF", fontSize: 14, fontWeight: "600" },
 });

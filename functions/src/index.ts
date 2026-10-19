@@ -32,6 +32,9 @@ export { getChannelSuggestions } from "./channelCatalog";
 
 export { reprofileOutdated } from "./reprofile";
 
+// onPaceReport: parent taps "Too hyper" → count reports on the video's profile
+export { onPaceReport } from "./paceReports";
+
 // parseCustomRules: questionnaire free text → concrete settings (parent confirms)
 export { parseCustomRules } from "./customRules";
 

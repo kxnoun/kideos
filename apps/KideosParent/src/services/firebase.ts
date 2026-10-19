@@ -343,6 +343,15 @@ export async function hideVideo(parentId: string, childId: string, videoId: stri
     .update({ parentDecision: "hidden", approved: false });
 }
 
+// "Too hyper": hide it for this child, and report it — once enough families report a
+// video it counts as overstimulating for everyone (functions: onPaceReport)
+export async function reportTooHyper(parentId: string, childId: string, videoId: string): Promise<void> {
+  await hideVideo(parentId, childId, videoId);
+  await firestore()
+    .doc(`videoProfiles/${videoId}/paceReports/${parentId}`)
+    .set({ childId, reportedAt: firestore.FieldValue.serverTimestamp() });
+}
+
 // Hide several at once (Videos screen → Select)
 export async function hideVideos(parentId: string, childId: string, videoIds: string[]): Promise<void> {
   for (let i = 0; i < videoIds.length; i += 400) {

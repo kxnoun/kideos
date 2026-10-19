@@ -169,6 +169,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // "Too hyper" reports: one per parent per video, counted by onPaceReport
+    match /videoProfiles/{videoId}/paceReports/{parentId} {
+      allow create, update: if isParent(parentId);
+      allow read, delete: if false;
+    }
+
     // ── Default deny ──────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

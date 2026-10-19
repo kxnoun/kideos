@@ -33,6 +33,7 @@ import {
   subscribeToVerdict,
   getVideoSummary,
   hideVideo,
+  reportTooHyper,
   claimPairingCode,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
@@ -328,6 +329,15 @@ export default function HomeScreen() {
                         `It closes on ${selectedChild.profile.name}'s screen right away and won't be in their feed. You can undo it in ${selectedChild.profile.name}'s videos → Hidden.`,
                         [
                           { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Too hyper",
+                            onPress: () =>
+                              parentId && selectedChildId
+                                ? reportTooHyper(parentId, selectedChildId, nowPlaying.videoId).catch(() =>
+                                    Alert.alert("Couldn't hide it. Check your connection.")
+                                  )
+                                : undefined,
+                          },
                           {
                             text: "Hide video",
                             style: "destructive",

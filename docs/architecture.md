@@ -28,7 +28,9 @@ questionnaire and profiles look this way see [questionnaire-research.md](questio
 
 1. **Content profile** (`videoProfiles/{videoId}`) — what a video contains, on fixed scales. Generated
    **once per video** by GPT-4o-mini from the transcript + metadata and **shared by every family**.
-   Filter-independent. Versioned (`PROFILE_VERSION` in `aiAnalysis.ts`, now 4): bump it and the nightly
+   Filter-independent. Since v5 the AI also sees 4 still images (thumbnail + YouTube's 3 auto frames) and
+   code-counted pace stats, and the profile stores YouTube's `madeForKids` label. Versioned
+   (`PROFILE_VERSION` in `aiAnalysis.ts`, now 5): bump it and the nightly
    **`reprofileOutdated`** regenerates old profiles from cached transcripts (never Supadata), rebuilds the
    catalog and re-applies filters. Profiles ≥ `MIN_USABLE_PROFILE_VERSION` keep working meanwhile.
 2. **Questionnaire answers** (`users/{p}/children/{c}/valueFilters/current`) — per child, see
@@ -46,11 +48,12 @@ Defined in `functions/src/prefs.ts` (copied to `apps/KideosParent/src/prefs.ts` 
 `apps/KideosParent/src/components/FiltersForm.tsx` (used by onboarding and Settings).
 
 - **About the child:** age (drives defaults), sensitivity to scary content (shifts scary/mature themes ±1).
-- **13 core ladders** (0–4, examples on every rung): violence, scary, language, romance, sexual,
+- **14 core ladders** (0–4, examples on every rung): violence, scary, language, romance, sexual,
   substances, dangerous stunts, self-harm, meanness/pranks, consumerism, politics, religion, gambling
   (mentioned → discussed → shown → promoted; a ladder since profile v4 — before, any mention counted as
-  the top). Each has `max` (highest allowed level); anything above it is hidden.
-- **Global rules:** educational videos +1 level (violence/scary/substances/politics); always hide
+  the top), pace & stimulation (calm → overstimulating, profile v5; raised to 4 once 2+ families tap
+  "Too hyper" — `paceReports` + `onPaceReport`). Each has `max` (highest allowed level); anything above it is hidden.
+- **Global rules:** "made for kids" videos only (YouTube's label; off by default); educational videos +1 level (violence/scary/substances/politics); always hide
   glamorized violence/substances/self-harm/cruelty; what to do when a video can't be checked
   (`unknown`: allow / hide — applies to "no transcript" too; default hide).
 - **Faith & family values (optional):** "which faith is your family" (only effect: own faith's religious

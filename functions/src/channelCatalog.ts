@@ -19,7 +19,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import OpenAI from "openai";
 import { APP_CONFIG, OPENAI_API_KEY } from "./config";
 import { PROFILE_VERSION, MIN_USABLE_PROFILE_VERSION } from "./aiAnalysis";
-import { evaluateProfile } from "./contentFilter";
+import { evaluateProfile, effectiveDims } from "./contentFilter";
 import { loadValueFiltersForChild } from "./analyzeVideo";
 import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
 import type { ContentProfile } from "./types";
@@ -47,7 +47,7 @@ const MAX_SEVERE = 2;
 // Just what evaluateProfile needs, so a channel's 50 videos fit in one doc
 type CompactProfile = Pick<
   ContentProfile,
-  "status" | "purpose" | "dims" | "violenceRealism" | "framing" | "religionTraditions" | "holidays" | "music" | "lgbtq" | "flags"
+  "status" | "purpose" | "dims" | "violenceRealism" | "framing" | "religionTraditions" | "holidays" | "music" | "lgbtq" | "flags" | "madeForKids"
 >;
 
 interface CatalogVideo {
@@ -105,8 +105,9 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
     if ((prof.version ?? 0) < MIN_USABLE_PROFILE_VERSION || prof.status === "unavailable") return;
     const s = stub.data();
     const dims = {} as ContentProfile["dims"];
+    const full = effectiveDims(prof); // missing dims as 0, "Too hyper" reports applied
     for (const dim of DIMS) {
-      const d = prof.dims?.[dim] ?? { level: 0, evidence: "" };
+      const d = full[dim];
       dims[dim] = { level: d.level, evidence: (d.evidence ?? "").slice(0, 80) };
     }
     videos.push({
@@ -125,6 +126,7 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
         music: prof.music ?? { level: "none" },
         lgbtq: prof.lgbtq ?? "none",
         flags: prof.flags,
+        ...(prof.madeForKids === undefined ? {} : { madeForKids: prof.madeForKids }),
       },
     });
     if (prof.status === "ok") {
@@ -265,7 +267,7 @@ const DIM_WORDS: Record<Dim, string> = {
   sexual: "sexual references", substances: "substances", dangerous: "stunts", selfHarm: "self-harm",
   meanness: "meanness", consumerism: "selling", politics: "politics", religion: "religion",
   gambling: "gambling", crudeHumor: "crude humor", matureThemes: "mature themes",
-  misinformation: "misinformation", nudity: "nudity",
+  misinformation: "misinformation", nudity: "nudity", stimulation: "overstimulation",
 };
 
 // Turn evaluateProfile's flags into short labels a parent can scan
@@ -276,6 +278,7 @@ function flagLabel(flag: string): string {
   if (kind === "flag") return VALUE_FLAG_LABELS[value as keyof typeof VALUE_FLAG_LABELS] ?? value;
   if (kind === "music") return "Music";
   if (kind === "lgbtq") return "LGBTQ+ content";
+  if (kind === "not_made_for_kids") return "Not made for kids";
   const dim = kind as Dim;
   if (!DIMS.includes(dim)) return flag;
   if (value === "unknown") return `Couldn't tell the ${DIM_WORDS[dim]} level`;

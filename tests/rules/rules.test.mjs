@@ -108,6 +108,15 @@ await t("can't re-claim a claimed code", async () => {
   await assertFails(updateDoc(doc(as(OTHER_PARENT), "pairingCodes/ABC123"), { claimed: true, parentId: OTHER_PARENT }));
 });
 
+// ── "Too hyper" reports ──
+await t("parent reports a video as too hyper", () =>
+  assertSucceeds(setDoc(doc(as(P), `videoProfiles/v1/paceReports/${P}`), { childId: C })));
+await t("can't report in another parent's name", () =>
+  assertFails(setDoc(doc(as(P), `videoProfiles/v1/paceReports/${OTHER_PARENT}`), { childId: C })));
+await t("can't read others' reports", () => assertFails(getDoc(doc(as(OTHER_PARENT), `videoProfiles/v1/paceReports/${P}`))));
+await t("parent can't write the profile itself", () =>
+  assertFails(setDoc(doc(as(P), "videoProfiles/v1"), { tooHyperReports: 99 })));
+
 await env.cleanup();
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 process.exit(fails ? 1 : 0);

@@ -30,12 +30,19 @@ What's next, in rough priority order. Update this file as things land.
   YouTube's own supervised settings apply). Trade-off: no hiding YouTube's buttons, no remote pause (End
   Session / Hide still close it). **First: 2-minute test** — youtube.com/embed/<id> in Chrome signed in vs
   Incognito; ads gone signed in → build it.
-- **"Pace & stimulation" ladder** (CoComelon-style / brainrot): 0 calm → 4 noise & shock, from music/
-  song share, repetition, shouting, title style, and the channel's known reputation; a parent "allow up to"
-  setting. Research: Lillard & Peterson 2011 (fast-paced cartoons → worse executive function in
-  4-year-olds). Needs a profile version bump (re-analysis from cached transcripts).
-- **Visual check from 4 stills** (thumbnail + YouTube's 3 auto frames at 25/50/75%) with a vision model for
-  nudity / gore / scary imagery (~$0.001/video). Do it in the same version bump as Pace & stimulation.
+- ✅ **Pace & stimulation** (Oct 19, profile v5, branch `pace-and-stimulation`): a 0–4 ladder (calm →
+  gentle → lively → high energy → overstimulating) from code-counted pace stats (words/min, [Music]-style
+  tags/min, repeated phrases), title style, the 4 stills and the channel's reputation. Defaults by age
+  2/3/3/4/4. Parents' **"Too hyper"** (Home hide dialog, video details) hides it for that child and
+  reports it; from 2 families on a video counts as overstimulating everywhere (`onPaceReport`).
+  Limits: we can't measure cut speed (needs the video itself) — a quiet video with frantic cuts can slip.
+  Research: Lillard & Peterson 2011.
+- ✅ **4 stills** (thumbnail + YouTube's 3 auto frames, low detail, ~$0.002/video) go into the same AI call
+  and count for every category, not just pace. If an image won't load, the call retries text-only.
+- ✅ **"Made for kids only"** switch per child (YouTube's own `madeForKids` label, stored on profiles and
+  verdicts; shown in video details). Kids' videos carry far fewer ads — but we don't claim "ad-free"
+  (YouTube's API policy forbids estimating monetization). Premium itself: embedded players seem to show
+  ads even signed in to Premium (Adam's test, Oct 18) — so no in-app Premium path; parked.
 - Embedding-blocked videos (common for record-label music) are now hidden automatically; already-analyzed
   ones get caught on the next re-analysis (and the kid player closes them gracefully meanwhile).
 
