@@ -37,6 +37,17 @@ What's next, in rough priority order. Update this file as things land.
   reports it; from 2 families on a video counts as overstimulating everywhere (`onPaceReport`).
   Limits: we can't measure cut speed (needs the video itself) — a quiet video with frantic cuts can slip.
   Research: Lillard & Peterson 2011.
+- ✅ **Profile v6** (Oct 19): **junk** ladder (low effort → clickbait/knock-offs → looped "effects" spam →
+  Elsagate), defaults 1/1/1/2/2. **Videos without captions are now rated** from title, description, tags and
+  the stills (`basis: "metadata"`, noted in video details) instead of "couldn't check" — the "can't tell"
+  setting now only covers ratings the AI leaves null. Known-channel pace floor (`KNOWN_STIMULATION` in
+  aiAnalysis.ts: CoComelon, Little Baby Bum, ChuChu TV, Blippi, MrBeast → 3; Skibidi → 4) because the AI
+  rated a CoComelon song "gentle". Supadata requests now start 1.1s apart instead of one-at-a-time
+  (a 50-video channel was outlasting the 9-minute limit).
+- Next (agreed Oct 19): **compilations** switch (waiting for the sister's examples — Ms Rachel's "+ MORE"
+  ones are fine), **cooldowns** (break between videos: off/30s/1m/2m; "must finish each video": Back/Up
+  next show "Finish this one first! 3:12 left", only real play time counts, parent Hide/End Session is
+  the escape hatch).
 - ✅ **4 stills** (thumbnail + YouTube's 3 auto frames, low detail, ~$0.002/video) go into the same AI call
   and count for every category, not just pace. If an image won't load, the call retries text-only.
 - ✅ **"Made for kids only"** switch per child (YouTube's own `madeForKids` label, stored on profiles and

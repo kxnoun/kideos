@@ -105,14 +105,10 @@ export async function getOrCreateProfile(
 
   if (opts.cachedTranscriptsOnly && !(await db.doc(`transcriptCache/${videoId}`).get()).exists) return null;
   const transcript = await getTranscriptCached(db, videoId, keys.supadataApiKey);
-  if (!transcript.available || !transcript.transcript) {
-    if (!transcript.definitive) return null; // transient — retry later
-    const p = placeholderProfile("no_transcript", video.title, video.channelTitle, video.madeForKids);
-    await ref.set(p);
-    return p;
-  }
+  if ((!transcript.available || !transcript.transcript) && !transcript.definitive) return null; // transient — retry later
 
-  const generated = await generateContentProfile(video, transcript.transcript, keys.openAiApiKey);
+  // No captions (definitive): rated from title, description, tags and images instead
+  const generated = await generateContentProfile(video, transcript.transcript ?? "", keys.openAiApiKey);
   if (!generated) return null;
   const profile: ContentProfile = { ...generated, createdAt: Timestamp.now() };
   // Parents' "Too hyper" reports survive re-profiling (counted by onPaceReport)
@@ -210,6 +206,7 @@ function writeVerdict(
     ratings: profile && profile.status === "ok" ? summarizeRatings(profile) : {},
     summary: profile && profile.status === "ok" ? (profile.summary ?? "").slice(0, 300) : "",
     ...(profile?.madeForKids === undefined ? {} : { madeForKids: profile.madeForKids }),
+    ...(profile?.basis ? { basis: profile.basis } : {}),
     channelName: profile?.channelName ?? "",
     title: stub.title ?? "",
     thumbnail: stub.thumbnail ?? "",

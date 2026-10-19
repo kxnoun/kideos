@@ -53,6 +53,7 @@ export const DIM_TITLES: Record<Dim, string> = {
   religion: "Religion",
   gambling: "Gambling",
   stimulation: "Pace",
+  junk: "Junk",
   crudeHumor: "Crude humor",
   matureThemes: "Mature themes",
   misinformation: "Misinformation",
@@ -309,6 +310,11 @@ export default function VideosScreen({ route, navigation }: Props) {
                 </Text>
               ) : null}
               {detailsSummary ? <Text style={styles.detailsSummary}>{detailsSummary}</Text> : null}
+              {detailsLive.basis === "metadata" ? (
+                <Text style={styles.detailsRating}>
+                  No captions — rated from the title, description and a few still images, so less sure than usual.
+                </Text>
+              ) : null}
 
               <Text style={[styles.detailsStatus, !detailsLive.approved && styles.detailsStatusHidden]}>
                 {detailsLive.parentDecision === "approved"

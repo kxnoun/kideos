@@ -267,7 +267,7 @@ const DIM_WORDS: Record<Dim, string> = {
   sexual: "sexual references", substances: "substances", dangerous: "stunts", selfHarm: "self-harm",
   meanness: "meanness", consumerism: "selling", politics: "politics", religion: "religion",
   gambling: "gambling", crudeHumor: "crude humor", matureThemes: "mature themes",
-  misinformation: "misinformation", nudity: "nudity", stimulation: "overstimulation",
+  misinformation: "misinformation", nudity: "nudity", stimulation: "overstimulation", junk: "junk content",
 };
 
 // Turn evaluateProfile's flags into short labels a parent can scan

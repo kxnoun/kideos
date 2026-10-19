@@ -43,6 +43,7 @@ export interface VideoVerdict {
   ratings?: Partial<Record<Dim, { level: number | null; evidence: string }>>;
   summary?: string; // what the video is about (verdicts written since Oct 18)
   madeForKids?: boolean; // YouTube's "made for kids" label (verdicts written since Oct 19)
+  basis?: "transcript" | "metadata"; // "metadata" = no captions, rated from title/description/images
   title: string;
   thumbnail: string;
   publishedAt: Timestamp;

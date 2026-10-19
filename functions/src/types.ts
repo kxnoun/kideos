@@ -119,6 +119,7 @@ export interface ContentProfile {
   topics: string[];
   summary: string;
   madeForKids?: boolean; // YouTube's own label (videos.list status.madeForKids); v5+
+  basis?: "transcript" | "metadata"; // v6+: "metadata" = no captions, rated from title/description/tags/images
   pace?: PaceStats; // counted in code from the transcript; v5+
   tooHyperReports?: number; // parents who tapped "Too hyper" (onPaceReport); ≥2 → treated as overstimulating
   createdAt: Timestamp;
@@ -146,6 +147,7 @@ export interface VideoVerdict {
   ratings: Partial<Record<Dim, DimRating>>; // the video's non-zero ladder ratings, for the parent app
   summary: string; // what the video is about (from its profile), for the parent app
   madeForKids?: boolean; // YouTube's "made for kids" label
+  basis?: "transcript" | "metadata"; // "metadata" = no captions — rated from title, description and images
   channelName: string;
   reason: string; // empty when approved
   flags: string[];

@@ -190,6 +190,17 @@ const QUESTIONS: Question[] = [
       { level: 4, label: "Anything", example: "Including “brainrot” like Skibidi Toilet" },
     ],
   },
+  {
+    dim: "junk",
+    title: "Junk and knock-off videos",
+    hint: "Spam, knock-off characters and creepy fake kids' videos (“Elsagate”). Often has no speech, so we judge it from the title and images.",
+    options: [
+      { level: 0, label: "Real shows and creators only", example: "" },
+      { level: 1, label: "Low effort is OK", example: "Simple toy videos, slideshows, reuploads" },
+      { level: 2, label: "Clickbait is OK", example: "“Spiderman Elsa Hulk Learn Colors”, knock-off characters" },
+      { level: 3, label: "Spam is OK", example: "The same clip looped with “effects”" },
+    ],
+  },
 ];
 
 const ADVANCED_QUESTIONS: Question[] = [
@@ -452,7 +463,9 @@ export default function FiltersForm({
             trackColor={{ true: "#6C63FF" }}
           />
         </View>
-        <Text style={styles.label}>When we can't check a video (e.g. it has no transcript):</Text>
+        <Text style={styles.label}>
+          When we can't tell a rating (rare — e.g. a video without captions whose images don't show enough):
+        </Text>
         <Segment
           options={[
             { value: "allow", label: "Allow it" },

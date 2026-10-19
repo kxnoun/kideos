@@ -19,7 +19,7 @@ import type { YouTubeVideoDetails } from "./youtube";
 
 // Bump when the profile prompt or schema changes — older profiles are then
 // regenerated (from cached transcripts, so no Supadata cost).
-export const PROFILE_VERSION = 5; // v5: + stimulation ladder, 4 still images, pace stats, madeForKids (v4: gambling ladder)
+export const PROFILE_VERSION = 6; // v6: + junk ladder, videos without captions rated from metadata + images, known-channel pace floor (v5: stimulation, stills, madeForKids; v4: gambling ladder)
 // Oldest profile version still usable for filtering until reprofileOutdated upgrades it
 export const MIN_USABLE_PROFILE_VERSION = 3;
 
@@ -50,6 +50,7 @@ Respond with valid JSON only, in this exact shape:
   "religion":    { "evidence": "", "level": 0, "traditions": [], "themes": [] },
   "gambling":    { "evidence": "", "level": 0 },
   "stimulation": { "evidence": "", "level": 0 },
+  "junk":        { "evidence": "", "level": 0 },
   "crudeHumor":  { "evidence": "", "level": 0 },
   "matureThemes":{ "evidence": "", "level": 0 },
   "misinformation": { "evidence": "", "level": 0 },
@@ -85,12 +86,19 @@ Ladders (0 = none in every category):
 - gambling (betting, casinos, lotteries, loot boxes/gacha): 1 mentioned in passing or as an example (a study that uses a bet, "it's a gamble"). 2 discussed or explained (how odds work, the history of casinos). 3 gambling shown or played (betting, casino games, opening loot boxes or gacha). 4 promoted: gambling sponsors or encouraging viewers to bet or buy loot boxes.
 - stimulation (pace and sensory intensity — how hyper the video is, NOT whether its content is good): 0 calm and slow: gentle narration, long quiet stretches (Mister Rogers, slow nature footage). 1 gentle: relaxed talking or soft songs (Ms Rachel, Bob Ross). 2 lively: normal upbeat kids' show or explainer (Bluey, SciShow Kids, Numberblocks). 3 high energy: fast talking or nonstop songs, frequent sound effects, saturated colors, excited shouting (CoComelon, MrBeast, most toy-unboxing and gaming-reaction videos). 4 overstimulating: frantic, chaotic sensory overload with little or no story — rapid noise and visual chaos, "brainrot" memes (Skibidi Toilet), surprise-egg / color-learning spam, loud compilations.
   Judge from all signals together: PACE STATS (normal narration is ~120–160 words/min; 200+ is very fast; many sound tags per minute and repetition above ~0.3 mean nonstop songs, chants or noise), the title (ALL CAPS, emoji strings, "!!!", "CRAZY", "1 HOUR"), and the images (neon or highly saturated colors, cluttered frames, exaggerated faces, big text, flashing effects). Use what you know about the channel's typical style. Evidence names the signals, e.g. "230 wpm, songs throughout, neon cluttered frames".
+- junk (low-effort, spam and fake kids' content — NOT about whether you like the topic): 0 a real show, creator or explainer. 1 low effort but harmless: slideshows, simple reuploads, toy videos with little to them. 2 clickbait or knock-offs: keyword-stuffed titles ("Spiderman Elsa Hulk Baby Bottle Learn Colors"), famous characters mashed together by a channel that clearly doesn't own them, misleading thumbnails. 3 spam or nonsense: the same clip looped with "effects" (e.g. "preview 2 effects", "sponsored by klasky csupo"), random mashups with no story, mass-produced filler. 4 disturbing content disguised as kids' content ("Elsagate"): cartoon or toy characters in violent, scary, medical (injections), toilet, pregnancy or sexualized situations.
+  Judge from the title, description, tags, channel and images as much as the transcript — junk often has little or no speech.
 - framing: "glorified" = shown as cool, funny, rewarded or desirable; "condemned" = consequences shown or presented as wrong; otherwise "neutral".
 - purpose: "educational" only if teaching is the clear main purpose (documentary, explainer, history).`;
 
-function profileUserPrompt(video: YouTubeVideoDetails, transcript: string, pace: PaceStats): string {
+function profileUserPrompt(video: YouTubeVideoDetails, transcript: string, pace: PaceStats | undefined): string {
   const t = transcript.slice(0, 12000);
   const title = titleSignals(video.title);
+  const paceLines = pace
+    ? `- Words per minute: ${pace.wordsPerMinute}
+- Sound tags per minute ([Music], [Applause], ♪…): ${pace.soundTagsPerMinute}
+- Repetition (repeated 4-word phrases, 0–1): ${pace.repetition ?? "too short to tell"}`
+    : "- No captions: words per minute and repetition unknown";
   return `VIDEO METADATA:
 - Title: ${video.title}
 - Channel: ${video.channelTitle}
@@ -100,13 +108,16 @@ function profileUserPrompt(video: YouTubeVideoDetails, transcript: string, pace:
 - YouTube "made for kids": ${video.madeForKids ? "yes" : "no"}
 
 PACE STATS (counted in code):
-- Words per minute: ${pace.wordsPerMinute}
-- Sound tags per minute ([Music], [Applause], ♪…): ${pace.soundTagsPerMinute}
-- Repetition (repeated 4-word phrases, 0–1): ${pace.repetition ?? "too short to tell"}
+${paceLines}
 - Title: ${title}
 
-TRANSCRIPT:
-${t}${transcript.length > 12000 ? "\n[transcript truncated for length]" : ""}`;
+${
+  transcript
+    ? `TRANSCRIPT:
+${t}${transcript.length > 12000 ? "\n[transcript truncated for length]" : ""}`
+    : `TRANSCRIPT: none — this video has no captions (often music-only, or spam/junk with no speech).
+Rate every category from the metadata and the images. Use null only where you truly can't tell; never null for stimulation or junk.`
+}`;
 }
 
 // ── Pace stats, counted in code ────────────────────────────────
@@ -148,6 +159,24 @@ function titleSignals(title: string): string {
   const emoji = title.match(/\p{Extended_Pictographic}/gu)?.length ?? 0;
   const bangs = title.match(/!/g)?.length ?? 0;
   return `${capsPct}% capital letters, ${emoji} emoji, ${bangs} "!"`;
+}
+
+// Channels whose style is well known: the AI rates single videos too low (a CoComelon
+// song came out "gentle"), so their typical level is a floor. Lowercase substrings of
+// the channel name. Edit freely — it only raises ratings.
+const KNOWN_STIMULATION: [string, number][] = [
+  ["cocomelon", 3],
+  ["little baby bum", 3],
+  ["chuchu tv", 3],
+  ["blippi", 3],
+  ["mrbeast", 3],
+  ["skibidi", 4],
+];
+
+function knownStimulation(channelTitle: string): { level: number; evidence: string } | null {
+  const name = channelTitle.toLowerCase();
+  const hit = KNOWN_STIMULATION.find(([n]) => name.includes(n));
+  return hit ? { level: hit[1], evidence: `${channelTitle}'s typical style` } : null;
 }
 
 // Thumbnail + YouTube's 3 automatic frames (start / middle / end, 120×90). Low detail = cheap.
@@ -199,7 +228,7 @@ export async function generateContentProfile(
   openAiApiKey: string
 ): Promise<Omit<ContentProfile, "createdAt"> | null> {
   const client = new OpenAI({ apiKey: openAiApiKey });
-  const pace = paceStats(transcript, video.durationSeconds);
+  const pace = transcript ? paceStats(transcript, video.durationSeconds) : undefined;
   const text = profileUserPrompt(video, transcript, pace);
   const ask = (withImages: boolean) =>
     client.chat.completions.create({
@@ -243,6 +272,11 @@ export async function generateContentProfile(
     // Code-counted swearing can only raise the AI's language level
     const floor = swearFloor(transcript);
     if (floor.level > (dims.language.level ?? 0)) dims.language = floor;
+    const known = knownStimulation(video.channelTitle);
+    if (known && known.level > (dims.stimulation.level ?? 0)) {
+      const ai = dims.stimulation.evidence;
+      dims.stimulation = { level: known.level, evidence: ai ? `${known.evidence}; ${ai}` : known.evidence };
+    }
 
     const holidaysOut = (Array.isArray(p.holidays) ? p.holidays : [])
       .filter((h: { name?: string }) => (HOLIDAYS as readonly string[]).includes(String(h?.name)))
@@ -282,10 +316,11 @@ export async function generateContentProfile(
       topics: strList(p.topics),
       summary: typeof p.summary === "string" ? p.summary.slice(0, 600) : "",
       madeForKids: video.madeForKids,
-      pace,
+      basis: transcript ? "transcript" : "metadata",
+      ...(pace ? { pace } : {}),
     };
     logger.info(
-      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} pace=${JSON.stringify(pace)} mfk=${video.madeForKids} topics=${JSON.stringify(profile.topics)}`
+      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} basis=${profile.basis} pace=${JSON.stringify(pace ?? null)} mfk=${video.madeForKids} topics=${JSON.stringify(profile.topics)}`
     );
     return profile;
   } catch (err) {
