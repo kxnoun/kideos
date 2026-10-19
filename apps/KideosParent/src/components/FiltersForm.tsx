@@ -463,6 +463,14 @@ export default function FiltersForm({
             trackColor={{ true: "#6C63FF" }}
           />
         </View>
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>No Shorts (short vertical videos)</Text>
+          <Switch
+            value={Boolean(value.hideShorts)}
+            onValueChange={(hideShorts) => onChange({ ...value, hideShorts })}
+            trackColor={{ true: "#6C63FF" }}
+          />
+        </View>
         <Text style={styles.label}>
           When we can't tell a rating (rare — e.g. a video without captions whose images don't show enough):
         </Text>

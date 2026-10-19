@@ -15,11 +15,12 @@ import { logger } from "firebase-functions/v2";
 import { APP_CONFIG } from "./config";
 import type { ContentProfile, DimRating, Framing, PaceStats, ValueFilters } from "./types";
 import { DIMS, HOLIDAYS, VALUE_FLAGS, type Dim, type Holiday } from "./prefs";
-import type { YouTubeVideoDetails } from "./youtube";
+import { checkIsShort, type YouTubeVideoDetails } from "./youtube";
+import { moderateImages, applyVisualFloors } from "./visualCheck";
 
 // Bump when the profile prompt or schema changes — older profiles are then
 // regenerated (from cached transcripts, so no Supadata cost).
-export const PROFILE_VERSION = 6; // v6: + junk ladder, videos without captions rated from metadata + images, known-channel pace floor (v5: stimulation, stills, madeForKids; v4: gambling ladder)
+export const PROFILE_VERSION = 7; // v7: image moderation floors, bigger frames, isShort. v6: + junk ladder, videos without captions rated from metadata + images, known-channel pace floor (v5: stimulation, stills, madeForKids; v4: gambling ladder)
 // Oldest profile version still usable for filtering until reprofileOutdated upgrades it
 export const MIN_USABLE_PROFILE_VERSION = 3;
 
@@ -28,6 +29,7 @@ You do NOT decide whether a video is appropriate — you only report what is in 
 You get the metadata, PACE STATS counted from the transcript, the transcript, and (usually) 4 small still images: the thumbnail and 3 frames from the start, middle and end.
 For each category, first write the evidence (what in the transcript/metadata/images supports the rating, quoting briefly; cite images as "thumbnail" or "frame 1/2/3"), THEN the level.
 Use the images for every category: if they show something the transcript doesn't mention (violence, scary imagery, revealing clothing, gambling, dangerous stunts), rate it and cite the image.
+The images can only make a rating HIGHER, never lower. When the images and the words disagree, trust the images: innocent-sounding dialogue ("that was amazing, wanna do it again?") over a suggestive or sexual scene is a sexual scene. Look for: suggestive poses or outfits, characters in bed or kissing, sexualized bodies (including cartoons), creepy or disturbing imagery (distorted faces, gore, horror makeup), and adult cartoons made to look like kids' content.
 If there is no evidence for a category, its level is 0 and evidence is "".
 Use level null ONLY if the category depends on visuals and neither the transcript nor the images give a way to tell. Never use null for stimulation.
 
@@ -179,10 +181,11 @@ function knownStimulation(channelTitle: string): { level: number; evidence: stri
   return hit ? { level: hit[1], evidence: `${channelTitle}'s typical style` } : null;
 }
 
-// Thumbnail + YouTube's 3 automatic frames (start / middle / end, 120×90). Low detail = cheap.
-function stillImages(video: YouTubeVideoDetails): string[] {
-  const frames = [1, 2, 3].map((n) => `https://i.ytimg.com/vi/${video.videoId}/${n}.jpg`);
-  return video.thumbnail ? [video.thumbnail, ...frames] : frames;
+// Thumbnail + YouTube's 3 automatic frames (start / middle / end) at 480×360 ("hq1–3";
+// the plain 1–3.jpg are 120×90 — too small to see anything). Low detail = cheap.
+function stillImages(video: YouTubeVideoDetails): { url: string; label: string }[] {
+  const frames = [1, 2, 3].map((n) => ({ url: `https://i.ytimg.com/vi/${video.videoId}/hq${n}.jpg`, label: `frame ${n}` }));
+  return video.thumbnail ? [{ url: video.thumbnail, label: "thumbnail" }, ...frames] : frames;
 }
 
 // ── Swear-word floor, counted in code ──────────────────────────
@@ -240,7 +243,7 @@ export async function generateContentProfile(
           content: withImages
             ? [
                 { type: "text" as const, text },
-                ...stillImages(video).map((url) => ({ type: "image_url" as const, image_url: { url, detail: "low" as const } })),
+                ...stillImages(video).map(({ url }) => ({ type: "image_url" as const, image_url: { url, detail: "low" as const } })),
               ]
             : text + "\n\n(No images available — rate visual categories from the text only.)",
         },
@@ -250,6 +253,9 @@ export async function generateContentProfile(
       temperature: 0,
     });
   try {
+    // Image safety check + Shorts check run alongside the profile call
+    const visualP = moderateImages(client, stillImages(video)).catch(() => null);
+    const shortP = checkIsShort(video);
     let completion;
     try {
       completion = await ask(true);
@@ -272,6 +278,10 @@ export async function generateContentProfile(
     // Code-counted swearing can only raise the AI's language level
     const floor = swearFloor(transcript);
     if (floor.level > (dims.language.level ?? 0)) dims.language = floor;
+    const visual = await visualP;
+    const raised = visual ? applyVisualFloors(dims, visual) : [];
+    if (raised.length) logger.info(`[visualCheck] "${video.title}": raised ${raised.join(" ")}`);
+    const isShort = await shortP;
     const known = knownStimulation(video.channelTitle);
     if (known && known.level > (dims.stimulation.level ?? 0)) {
       const ai = dims.stimulation.evidence;
@@ -317,10 +327,23 @@ export async function generateContentProfile(
       summary: typeof p.summary === "string" ? p.summary.slice(0, 600) : "",
       madeForKids: video.madeForKids,
       basis: transcript ? "transcript" : "metadata",
+      isShort,
+      ...(visual
+        ? {
+            visual: {
+              sexual: visual.sexual,
+              sexualMinors: visual.sexualMinors,
+              violence: visual.violence,
+              graphic: visual.graphic,
+              selfHarm: visual.selfHarm,
+              checked: visual.checked,
+            },
+          }
+        : {}),
       ...(pace ? { pace } : {}),
     };
     logger.info(
-      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} basis=${profile.basis} pace=${JSON.stringify(pace ?? null)} mfk=${video.madeForKids} topics=${JSON.stringify(profile.topics)}`
+      `[AI] Profile for "${video.title}": ${DIMS.map((d) => `${d}=${dims[d].level}`).join(" ")} purpose=${profile.purpose} basis=${profile.basis} short=${isShort} visual=${visual ? `sex ${visual.sexual.toFixed(2)} viol ${visual.violence.toFixed(2)} (${visual.checked} imgs)` : "none"} pace=${JSON.stringify(pace ?? null)} mfk=${video.madeForKids} topics=${JSON.stringify(profile.topics)}`
     );
     return profile;
   } catch (err) {

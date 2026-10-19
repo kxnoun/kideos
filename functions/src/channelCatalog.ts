@@ -47,7 +47,7 @@ const MAX_SEVERE = 2;
 // Just what evaluateProfile needs, so a channel's 50 videos fit in one doc
 type CompactProfile = Pick<
   ContentProfile,
-  "status" | "purpose" | "dims" | "violenceRealism" | "framing" | "religionTraditions" | "holidays" | "music" | "lgbtq" | "flags" | "madeForKids"
+  "status" | "purpose" | "dims" | "violenceRealism" | "framing" | "religionTraditions" | "holidays" | "music" | "lgbtq" | "flags" | "madeForKids" | "isShort"
 >;
 
 interface CatalogVideo {
@@ -127,6 +127,7 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
         lgbtq: prof.lgbtq ?? "none",
         flags: prof.flags,
         ...(prof.madeForKids === undefined ? {} : { madeForKids: prof.madeForKids }),
+        ...(prof.isShort === undefined ? {} : { isShort: prof.isShort }),
       },
     });
     if (prof.status === "ok") {
@@ -279,6 +280,7 @@ function flagLabel(flag: string): string {
   if (kind === "music") return "Music";
   if (kind === "lgbtq") return "LGBTQ+ content";
   if (kind === "not_made_for_kids") return "Not made for kids";
+  if (kind === "short") return "Shorts";
   const dim = kind as Dim;
   if (!DIMS.includes(dim)) return flag;
   if (value === "unknown") return `Couldn't tell the ${DIM_WORDS[dim]} level`;

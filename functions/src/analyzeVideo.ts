@@ -207,6 +207,7 @@ function writeVerdict(
     summary: profile && profile.status === "ok" ? (profile.summary ?? "").slice(0, 300) : "",
     ...(profile?.madeForKids === undefined ? {} : { madeForKids: profile.madeForKids }),
     ...(profile?.basis ? { basis: profile.basis } : {}),
+    ...(profile?.isShort === undefined ? {} : { isShort: profile.isShort }),
     channelName: profile?.channelName ?? "",
     title: stub.title ?? "",
     thumbnail: stub.thumbnail ?? "",

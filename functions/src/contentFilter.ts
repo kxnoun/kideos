@@ -101,6 +101,7 @@ export function evaluateProfile(
   };
 
   if (notForKids) note(NOT_MADE_FOR_KIDS, "not_made_for_kids", "low");
+  if (prefs.hideShorts && profile.isShort) note("A YouTube Short — you chose no Shorts", "short", "low");
 
   const dims = effectiveDims(profile);
   for (const dim of DIMS) {

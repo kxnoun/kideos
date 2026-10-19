@@ -118,6 +118,7 @@ export interface ValueFilters {
   religion: string;
   customRules: string; // free-text rules (AI on summary)
   madeForKidsOnly?: boolean; // only videos the creator marked "made for kids" (YouTube's own label)
+  hideShorts?: boolean; // no YouTube Shorts
   gamblingLadder?: boolean; // true once gambling uses the 0–4 ladder (older answers were 0 / 4 only)
 }
 
@@ -199,6 +200,7 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
     religion: "",
     customRules: "",
     madeForKidsOnly: false,
+    hideShorts: false,
     gamblingLadder: true,
   };
 }
@@ -240,6 +242,7 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
       music: raw2.music === undefined ? "ok" : okOrHide(raw2.music),
       lgbtq: lg === "allow" || lg === undefined ? "allow" : lg === "review" || lg === "hide_all" ? "hide_all" : "hide_discussion",
       madeForKidsOnly: Boolean(raw2.madeForKidsOnly),
+      hideShorts: Boolean(raw2.hideShorts),
       gamblingLadder: true,
     };
   }

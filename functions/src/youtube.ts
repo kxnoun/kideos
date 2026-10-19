@@ -170,6 +170,27 @@ export async function getVideoDetails(
   };
 }
 
+// ── Is it a Short? ─────────────────────────────────────────────
+// The Data API doesn't say. youtube.com/shorts/{id} answers 200 for a Short and
+// redirects to the normal watch page otherwise. Only videos ≤ 3 min can be Shorts.
+// If YouTube doesn't answer clearly: ≤ 60s or "#shorts" in the title/description.
+export async function checkIsShort(video: YouTubeVideoDetails): Promise<boolean> {
+  if (video.durationSeconds > 180) return false;
+  const guess = video.durationSeconds <= 60 || /#shorts?\b/i.test(`${video.title} ${video.description}`);
+  try {
+    const res = await fetch(`https://www.youtube.com/shorts/${video.videoId}`, {
+      method: "HEAD",
+      redirect: "manual",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.status === 200) return true;
+    if (res.status >= 300 && res.status < 400) return false;
+    return guess;
+  } catch {
+    return guess;
+  }
+}
+
 // ── channels.list — 1 unit per call ───────────────────────────
 
 export async function getChannelDetails(

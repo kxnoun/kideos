@@ -44,6 +44,14 @@ What's next, in rough priority order. Update this file as things land.
   aiAnalysis.ts: CoComelon, Little Baby Bum, ChuChu TV, Blippi, MrBeast → 3; Skibidi → 4) because the AI
   rated a CoComelon song "gentle". Supadata requests now start 1.1s apart instead of one-at-a-time
   (a 50-video channel was outlasting the 9-minute limit).
+- ✅ **Profile v7** (Oct 19): a "Cougar MacDowall" video with a sexual scene passed because the words were
+  innocent ("wanna do it again") and the profile AI leaned on them. Now every still also goes through
+  **OpenAI's image moderation** (`visualCheck.ts`, free): its scores are a floor the profile AI can't lower
+  (sexual ≥25% → 2, ≥50% → 3, ≥85% → 4, + nudity; minors ≥10% → 4 + junk 4; graphic ≥40% → violence 4;
+  violent ≥50% → 3; self-harm ≥50% → 3). Frames are now 480×360 (`hq1–3.jpg`, were 120×90). The prompt says
+  images only raise ratings and win over innocent-sounding words. Thresholds are a first guess — tune from
+  the `visual=` numbers in the logs. Also **"No Shorts"** switch per child (`isShort`: youtube.com/shorts/{id}
+  answers 200 for a Short; fallback ≤60s or #shorts).
 - Next (agreed Oct 19): **compilations** switch (waiting for the sister's examples — Ms Rachel's "+ MORE"
   ones are fine), **cooldowns** (break between videos: off/30s/1m/2m; "must finish each video": Back/Up
   next show "Finish this one first! 3:12 left", only real play time counts, parent Hide/End Session is
