@@ -30,6 +30,10 @@ export { suggestChannels, weeklyChannelSuggestions } from "./suggestChannels";
 
 export { getChannelSuggestions } from "./channelCatalog";
 
+// checkChannel: before a parent adds a channel — thumbnails + reputation search (Gemini),
+// one shared report per channel, conflicts with the child's settings worked out in code
+export { checkChannel } from "./channelCheck";
+
 export { reprofileOutdated } from "./reprofile";
 
 // onPaceReport: parent taps "Too hyper" → count reports on the video's profile

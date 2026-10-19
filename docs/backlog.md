@@ -52,6 +52,16 @@ What's next, in rough priority order. Update this file as things land.
   images only raise ratings and win over innocent-sounding words. Thresholds are a first guess — tune from
   the `visual=` numbers in the logs. Also **"No Shorts"** switch per child (`isShort`: youtube.com/shorts/{id}
   answers 200 for a Short; fallback ≤60s or #shorts).
+- ✅ **Channel check before adding** (Oct 19, `channelCheck.ts` → `checkChannel`): the parent types a
+  channel → review sheet BEFORE it's added ("Add anyway" / "Don't add it"). One shared report per channel
+  (`channelChecks/{id}`), made once and re-made only when `CHECK_VERSION` changes (e.g. a new dimension).
+  Gemini Flash-Lite (`gemini-3.5-flash-lite`) looks at the latest 50 thumbnails + titles and searches
+  Google for the channel's reputation (news, parents, Elsagate lists) → verdict, who it's for, concerns on
+  our 0–4 ladders, sources; small channels are labelled "couldn't find much". Conflicts with the child's
+  settings are computed in code from the concerns (no AI per family). Cost estimate ~0.4¢ thumbnails +
+  one grounded search (~1–3.5¢) per channel, once. Per-video checks unchanged. Not yet on the Suggestions
+  swipe cards (those come from analyzed channels already). Later: short Gemini clips (clip offsets + fps
+  are controllable, ~0.3¢ for 3×1 min).
 - Next (agreed Oct 19): **compilations** switch (waiting for the sister's examples — Ms Rachel's "+ MORE"
   ones are fine), **cooldowns** (break between videos: off/30s/1m/2m; "must finish each video": Back/Up
   next show "Finish this one first! 3:12 left", only real play time counts, parent Hide/End Session is

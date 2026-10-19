@@ -208,6 +208,29 @@ export async function addChannel(
   );
 }
 
+// Before adding: checks the channel (thumbnails + reputation, shared per channel)
+// and returns what conflicts with this child's settings. Nothing is added.
+export interface CheckChannelResult {
+  channel: { channelId: string; name: string; handle: string; thumbnail: string; subscriberCount: number };
+  alreadyAdded: boolean;
+  report: {
+    verdict: "good" | "caution" | "not_recommended" | "unchecked";
+    summary: string;
+    reputation: string;
+    wellKnown: boolean;
+    audienceMinAge: number | null;
+    audienceMaxAge: number | null;
+    concerns: { dim: string | null; flag: string | null; level: number; what: string; basis: "thumbnails" | "reputation" }[];
+    sources: { title: string; uri: string }[];
+    thumbnailsChecked: number;
+  } | null;
+  conflicts: string[];
+  ageNote: string;
+}
+export async function checkChannel(parentId: string, childId: string, input: string): Promise<CheckChannelResult> {
+  return callFunction<CheckChannelResult>("checkChannel", { parentId, childId, input });
+}
+
 // ─── Suggested channels ──────────────────────────────────────
 
 export async function getChannelSuggestions(parentId: string, childId: string): Promise<SuggestedChannel[]> {
