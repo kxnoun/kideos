@@ -50,7 +50,7 @@ import { useWatched } from "../watched";
 import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
 import BackButton from "../components/BackButton";
-import type { ApprovedVideo, ChildSession, KidProfile, WhitelistedChannel } from "../types";
+import type { ApprovedVideo, ChildSession, KidProfile, TileRect, WhitelistedChannel } from "../types";
 
 const NEW_COUNT = 15;
 const LITTLE_NEW_COUNT = 30;
@@ -61,7 +61,7 @@ interface Props {
   session: ChildSession;
   profile: KidProfile;
   // pool = the videos "up next" can come from (same channel, same kind)
-  onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[]) => void;
+  onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[], from?: TileRect) => void;
   onSwitchProfile?: () => void; // only on devices with 2+ children
   onReady?: () => void; // the first channels + videos have arrived (App's "Hi Simon!" card waits for it)
 }
@@ -84,6 +84,8 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
   const [channelsLoaded, setChannelsLoaded] = useState(false);
   const [videosFor, setVideosFor] = useState<string | null>(null);
   const [openChannelId, setOpenChannelId] = useState<string | null>(null);
+  const openChannelIdRef = useRef(openChannelId);
+  openChannelIdRef.current = openChannelId;
   const layout = useLayout();
   const mode = modeForAge(profile.age);
 
@@ -137,10 +139,11 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
   }, [longVideos, channelById]);
 
   const play = useCallback(
-    (v: ApprovedVideo) =>
+    (v: ApprovedVideo, from?: TileRect) =>
       onVideoPress(
         v,
-        named.filter((o) => o.channelId === v.channelId && Boolean(o.isShort) === Boolean(v.isShort))
+        named.filter((o) => o.channelId === v.channelId && Boolean(o.isShort) === Boolean(v.isShort)),
+        from
       ),
     [named, onVideoPress]
   );
@@ -163,7 +166,12 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
     () => (openChannelId ? named.filter((v) => v.channelId === openChannelId) : []),
     [named, openChannelId]
   );
-  const closeChannel = useCallback(() => setOpenChannelId(null), []);
+  // Called when the slide-out has finished: the page is off-screen, so throwing its grid
+  // away can wait a moment (doing it right away made the end of the slide stutter)
+  const closeChannel = useCallback(() => {
+    const closed = openChannelIdRef.current;
+    setTimeout(() => setOpenChannelId((id) => (id === closed ? null : id)), 300);
+  }, []);
 
   const statusBar = <StatusBar hidden />;
 
@@ -204,6 +212,7 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
       {/* "See all": slides in over the home screen, which stays as it was underneath */}
       {openChannelId ? (
         <ChannelPage
+          key={openChannelId}
           channel={channelById.get(openChannelId)}
           videos={channelVideos}
           layout={layout}
@@ -230,7 +239,7 @@ function LittleHome({
   profile: KidProfile;
   layout: Layout;
   channelById: Map<string, WhitelistedChannel>;
-  onPlay: (v: ApprovedVideo) => void;
+  onPlay: (v: ApprovedVideo, from?: TileRect) => void;
   onSwitchProfile?: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -356,7 +365,7 @@ function BigHome({
   profile: KidProfile;
   layout: Layout;
   channelById: Map<string, WhitelistedChannel>;
-  onPlay: (v: ApprovedVideo) => void;
+  onPlay: (v: ApprovedVideo, from?: TileRect) => void;
   onOpenChannel: (channelId: string) => void;
   onSwitchProfile?: () => void;
 }) {
@@ -616,7 +625,7 @@ function ChannelPage({
   layout: Layout;
   showDuration: boolean;
   onBack: () => void;
-  onPlay: (v: ApprovedVideo) => void;
+  onPlay: (v: ApprovedVideo, from?: TileRect) => void;
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();

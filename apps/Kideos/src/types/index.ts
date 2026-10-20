@@ -77,6 +77,14 @@ export interface ApprovedVideo {
   isShort?: boolean; // a YouTube Short (verdicts since profile v7)
 }
 
+// Where a tapped thumbnail sits on screen (window coordinates) — the player zooms out of it
+export interface TileRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 // Parent's viewing rules (child doc → viewing): stay at least this long on a video
 // before switching — 0 (off) / 30 / 60 / 120 seconds, or -1 = the whole video.
 export interface ViewingRules {

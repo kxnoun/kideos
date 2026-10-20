@@ -30,6 +30,7 @@ import {
   AppState,
   Animated,
   InteractionManager,
+  Dimensions,
 } from "react-native";
 import auth from "@react-native-firebase/auth";
 
@@ -57,6 +58,7 @@ import {
   type ChildSession,
   type DeviceChild,
   type KidDevice,
+  type TileRect,
 } from "./src/types";
 
 const TAP_DEBOUNCE_MS = 600;
@@ -94,6 +96,7 @@ function Root() {
   const [pool, setPool] = useState<ApprovedVideo[]>([]); // where "up next" comes from
   const [resume, setResume] = useState<Unfinished | null>(null); // where to pick an unfinished video up
   const [notice, setNotice] = useState<string | null>(null);
+  const [openFrom, setOpenFrom] = useState<TileRect | null>(null); // the tapped thumbnail (player zooms out of it)
   const [curtain, setCurtain] = useState<DeviceChild | null>(null); // "Hi Simon!" after picking
   const [feedReady, setFeedReady] = useState(false); // the picked child's videos have arrived
   const markFeedReady = useCallback(() => setFeedReady(true), []);
@@ -295,10 +298,14 @@ function Root() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  const handleVideoPress = useCallback((video: ApprovedVideo, fromPool: ApprovedVideo[]) => {
+  const handleVideoPress = useCallback((video: ApprovedVideo, fromPool: ApprovedVideo[], from?: TileRect) => {
     const now = Date.now();
     if (now - lastTap.current < TAP_DEBOUNCE_MS) return; // excited double taps
     lastTap.current = now;
+    // A long video held upright turns the phone sideways as it opens — the tile's spot means
+    // nothing after that, so it zooms from the centre instead
+    const { width, height } = Dimensions.get("window");
+    setOpenFrom(video.isShort || width > height ? from ?? null : null);
     setResume(null);
     setPool(fromPool);
     setCurrentVideo(video);
@@ -306,6 +313,7 @@ function Root() {
 
   // Picked from the end card / "More from" — same pool
   const handlePlayNext = useCallback((video: ApprovedVideo) => {
+    setOpenFrom(null);
     setResume(null);
     if (activeRef.current) clearUnfinished(activeRef.current);
     setCurrentVideo(video);
@@ -394,6 +402,7 @@ function Root() {
                   minWatchSeconds={rules.minWatchSeconds}
                   resume={resume && resume.video.videoId === currentVideo.videoId ? resume : null}
                   upNext={upNext}
+                  from={openFrom}
                   onPlay={handlePlayNext}
                   onBack={handleBack}
                 />
@@ -561,7 +570,7 @@ function TimesUp({ name, onSwitch }: { name: string; onSwitch?: () => void }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   // Layers over the feed — explicit order, or Android lets the feed's chip bar show through
-  playerLayer: { backgroundColor: "#000", zIndex: 10, elevation: 10 },
+  playerLayer: { zIndex: 10, elevation: 10 }, // see-through: the player fades its own black in/out over the feed
   whoLayer: { backgroundColor: colors.bg, zIndex: 20, elevation: 20 },
   curtainLayer: { zIndex: 30, elevation: 30 },
   curtainHi: { color: colors.text, fontFamily: fonts.displayBold, fontSize: 40, marginTop: 12 },

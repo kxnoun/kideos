@@ -122,8 +122,14 @@ start felt heavy, linear felt mechanical:
 - **"See all"** slides in from the right; Back slides it out to the right. The home screen stays alive
   underneath (no rebuild, same scroll position); the grid fills in right after the slide (placeholders
   first), so the slide starts at once.
-- **A video** zooms in; swipe down drops it away. The feed stays alive under the player, so Back from a video
-  is instant and lands where the kid was (even on a channel page).
+- **A video** grows out of the tile you tapped: the thumbnail zooms from its spot into the player while the
+  black fades in over the feed, and stays as the picture until the video really plays, then fades into it
+  (a long video opened with the phone upright rotates it, so that case zooms from the centre). **Dragging
+  down** moves and shrinks the video with the finger while the feed shows through; let go far enough and it
+  carries on down and away, otherwise it springs back (owed minimum time: it only stretches, then "Watch a
+  little more!"). The feed stays alive under the player, so it's instantly there (even on a channel page).
+- Back from "See all": the page's grid is thrown away 300 ms after the slide ends (off-screen) — doing it at
+  once made the end of the slide stutter.
 - **"Who's watching?"** slides down over the screen; picking a child shows a "Hi Simon!" card with their
   avatar until their feed has its videos (`FeedScreen` `onReady`; ≥ 450 ms, ≤ 4 s), then the card slides up.
   The feed draws nothing until its first channels + videos arrive — no "Getting ready" flash.
