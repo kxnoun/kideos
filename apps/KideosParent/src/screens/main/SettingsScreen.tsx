@@ -3,6 +3,7 @@
 //
 // - Child profile management (view / add / delete)
 // - Content filter editing per child
+// - Viewing rules per child (minimum time on a video before switching)
 // - Data & Privacy: delete child watch history
 // - Sign out
 // ─────────────────────────────────────────────────────────────
@@ -20,13 +21,22 @@ import {
   Modal,
   ActivityIndicator,
 } from "react-native";
-import type { ValueFilters } from "../../types";
+import type { ValueFilters, ViewingRules } from "../../types";
 import {
   signOut,
   saveValueFilters,
   getValueFilters,
   deleteChildData,
+  updateChild,
 } from "../../services/firebase";
+
+const MIN_WATCH: { value: number; label: string }[] = [
+  { value: 0, label: "Off" },
+  { value: 30, label: "30 s" },
+  { value: 60, label: "1 min" },
+  { value: 120, label: "2 min" },
+  { value: -1, label: "Whole" },
+];
 import { useStore } from "../../store/useStore";
 import FiltersForm from "../../components/FiltersForm";
 import { defaultPrefs, normalizePrefs } from "../../prefs";
@@ -44,6 +54,35 @@ export default function SettingsScreen() {
   const [filters, setFilters] = useState<ValueFilters>(() => defaultPrefs(8));
   const [savingFilters, setSavingFilters] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(false);
+  const [viewingChildId, setViewingChildId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ViewingRules>({ minWatchSeconds: 0 });
+  const [savingViewing, setSavingViewing] = useState(false);
+
+  const openViewing = useCallback(
+    (childId: string) => {
+      const v = children.find((c) => c.id === childId)?.profile.viewing as
+        | (ViewingRules & { mustFinish?: boolean })
+        | undefined;
+      const n = Number(v?.minWatchSeconds);
+      setViewing({ minWatchSeconds: [0, 30, 60, 120, -1].includes(n) ? n : v?.mustFinish ? -1 : 0 });
+      setViewingChildId(childId);
+    },
+    [children]
+  );
+
+  const handleSaveViewing = useCallback(async () => {
+    if (!user || !viewingChildId) return;
+    setSavingViewing(true);
+    try {
+      await updateChild(user.uid, viewingChildId, { viewing });
+      setViewingChildId(null);
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to save.");
+    } finally {
+      setSavingViewing(false);
+    }
+  }, [user, viewingChildId, viewing]);
+  const viewingChildName = children.find((c) => c.id === viewingChildId)?.profile.name ?? "your child";
 
   const openFilters = useCallback(
     async (childId: string) => {
@@ -139,6 +178,9 @@ export default function SettingsScreen() {
                 >
                   <Text style={styles.childActionText}>Filters</Text>
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.childActionBtn} onPress={() => openViewing(c.id)}>
+                  <Text style={styles.childActionText}>Viewing</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.childActionBtn, styles.childActionBtnDanger]}
                   onPress={() => handleDeleteChild(c.id, c.profile.name)}
@@ -177,6 +219,58 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Viewing rules Modal */}
+      <Modal
+        visible={viewingChildId !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setViewingChildId(null)}
+      >
+        <SafeAreaView style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setViewingChildId(null)}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Viewing rules</Text>
+            <TouchableOpacity onPress={handleSaveViewing} disabled={savingViewing}>
+              {savingViewing ? (
+                <ActivityIndicator size="small" color="#6C63FF" />
+              ) : (
+                <Text style={styles.modalSave}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Before switching videos, stay at least</Text>
+              <View style={styles.segment}>
+                {MIN_WATCH.map((m) => (
+                  <TouchableOpacity
+                    key={m.value}
+                    style={[styles.segmentBtn, viewing.minWatchSeconds === m.value && styles.segmentBtnActive]}
+                    onPress={() => setViewing({ minWatchSeconds: m.value })}
+                  >
+                    <Text style={[styles.segmentText, viewing.minWatchSeconds === m.value && styles.segmentTextActive]}>
+                      {m.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.hint}>
+                {viewing.minWatchSeconds === 0
+                  ? `${viewingChildName} can switch videos any time.`
+                  : viewing.minWatchSeconds === -1
+                  ? `${viewingChildName} can't leave a video until most of it has actually played — skipping ahead doesn't count.`
+                  : `Counts from when the video starts playing — pausing counts too. Until then, Back keeps ${viewingChildName} on the video with a “Watch a little more!” message.`}
+                {viewing.minWatchSeconds !== 0
+                  ? " To get them out sooner, use Hide this video or End Session on Home."
+                  : ""}
+              </Text>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
       {/* Filters Edit Modal */}
       <Modal
@@ -354,4 +448,5 @@ const styles = StyleSheet.create({
     borderColor: "#E8E8F0",
   },
   textArea: { minHeight: 80, textAlignVertical: "top" },
+  hint: { fontSize: 13, color: "#888", lineHeight: 19, marginTop: 8 },
 });

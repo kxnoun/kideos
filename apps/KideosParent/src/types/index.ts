@@ -12,11 +12,19 @@ export type ChildMode = "young" | "older";
 export type { ValueFilters, Dim, DimRule } from "../prefs";
 import type { Dim } from "../prefs";
 
+// Viewing rules — on the child doc so the kid app can read them.
+// Before switching videos, stay at least: 0 (off) / 30 / 60 / 120 seconds (from when
+// it starts playing, pauses count) or -1 = the whole video (~90% actually played).
+export interface ViewingRules {
+  minWatchSeconds: number;
+}
+
 export interface ChildProfile {
   name: string;
   age: number;
   avatar: string;
   mode: ChildMode;
+  viewing?: ViewingRules;
 }
 
 export interface WhitelistedChannel {
