@@ -86,6 +86,16 @@ analyse 500 channels with a prompt we're about to change.
 
 ## 2. Confirmed bugs
 
+**Fix first (found Oct 20 on the 6T):**
+- **Shorts play tiny, stuck at the top of the screen**, with a big empty space under them. Cause:
+  `react-native-youtube-iframe`'s player page always sizes YouTube's iframe as 16:9 *of its width*
+  (`.container { padding-bottom: 56.25% }` in `PlayerScripts.js`). For a Short our player box is tall and
+  narrow (9:16), so the iframe gets the box's width × 0.5625 — a small strip at the top. Fix options: give the
+  page a full-height container (load our own HTML via `useLocalHTML` / a patch to the library's HTML, which we
+  also need for hosting our own player page — see Security → kid player), or size the iframe from the box's
+  height for Shorts. Check the zoom-open thumbnail and the drag gestures on Shorts afterwards.
+- **Kid pairing code expires but stays on screen** (below).
+
 - **Kid app closed by itself once** (Oct 17, after End Session, while testing remote control). Not seen
   again after the End Session rework. If it happens: `adb -s <phone> logcat -b crash -d` right after.
 - **Weekly digest broken end to end.** `generateWeeklyDigest` writes `users/{p}/children/{c}/digests/{week}`,
