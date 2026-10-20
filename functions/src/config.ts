@@ -43,7 +43,12 @@ export const APP_CONFIG = {
   CHANNEL_SEED_MAX_VIDEOS: 50, // fallback (mixed uploads list) and nightly new-upload check
   CHANNEL_SEED_LONG: 40, // a new channel: its 40 latest long videos…
   CHANNEL_SEED_SHORTS: 10, // …and 10 latest Shorts
-  LOAD_MORE_VIDEOS: 50, // "Load more videos": the next 50 older long videos
+  // "Load more videos": the next 20 older long videos per tap; only offered while the child has
+  // fewer than LOAD_MORE_BELOW videos shown from the channel; once per channel per day per child;
+  // LOAD_MORE_PER_DAY taps per family per day. Videos another family already loaded cost nothing.
+  LOAD_MORE_VIDEOS: 20,
+  LOAD_MORE_BELOW: 20,
+  LOAD_MORE_PER_DAY: 10,
   CHANNEL_SEED_MAX_PAGES: 5, // 5 pages × 1 unit = max 5 units per seed
 
   // Pre-analysis: number of feed videos to pre-analyze in background

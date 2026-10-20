@@ -34,7 +34,7 @@ const CATALOG_SHORTS = 10;
 const MAX_SUGGESTIONS = 25;
 const BACKFILL_PER_CALL = 10;
 // Bump to rewrite every overview (e.g. when the overview prompt changes)
-const OVERVIEW_VERSION = 3; // v3: + who the channel is made for (audience ages)
+const OVERVIEW_VERSION = 4; // v4: ages = who it suits (youngest age it's suitable & interesting for), not "made for" (SmarterEveryDay was 12+). v3: + audience ages
 // A child is suggested channels made for their age, give or take this many years
 const AGE_SLACK = 1;
 
@@ -218,9 +218,13 @@ async function writeOverview(
             "videos have it (roughly 1 in 5 or more), or any are at the strongest level, say so plainly in the last " +
             "sentence (e.g. \"Many videos include heavy drinking and strong swearing.\"). Never describe a channel as " +
             "family-friendly or light-hearted if the counts say otherwise.\n" +
-            "Also say who the channel is MADE FOR (its intended audience, not who it's safe for): e.g. Ms Rachel → 1–4, " +
-            "Blippi → 2–6, SciShow Kids → 5–9, SciShow → 12 and up, a channel for adults → 18 and up. Use null for both " +
-            "only if it's truly for all ages.\n" +
+"Also give the AGE RANGE it suits: minAge = the youngest age its videos are suitable for AND interesting to; " +
+            "maxAge = the oldest age it still appeals to (set it only for clearly little-kid channels). Judge the AUDIENCE, not " +
+            "how strict a parent might be — the app checks each video's content against the parent's settings separately. A " +
+            "general-audience channel that's fine for kids gets the age kids start enjoying it, not 12 or 18. Examples: Ms " +
+            "Rachel → 1–5, Blippi → 2–7, SciShow Kids → 5–10, a general science or engineering channel → around 8 and up, a " +
+            "channel only adults should watch (drinking, sexual content) → 18 and up. Use null for both only if it truly " +
+            "suits every age.\n" +
             'Respond with JSON only: {"overview": "…", "minAge": number | null, "maxAge": number | null (null = and up)}',
         },
         {
@@ -454,29 +458,39 @@ export const getChannelSuggestions = onCall(
     const age = Number(childSnap.data()?.age) || prefs.ageGroup;
 
     const entries = new Map(catalog.docs.map((d) => [d.id, d.data() as CatalogEntry]));
-    const scored = catalog.docs
-      .filter((d) => !skip.has(d.id))
-      .map((d) => scoreChannel(d.data() as CatalogEntry, prefs));
+    const candidates = catalog.docs.filter((d) => !skip.has(d.id));
+    // Saved channel checks (only ones someone already made — no AI here)
+    const checkSnaps = candidates.length ? await db.getAll(...candidates.map((d) => db.doc(`channelChecks/${d.id}`))) : [];
+    const savedChecks = new Map<string, Omit<ChannelReport, "createdAt">>();
+    checkSnaps.forEach((snap) => {
+      if (!snap.exists || snap.data()!.version !== CHECK_VERSION) return;
+      const { createdAt: _c, ...saved } = snap.data() as ChannelReport;
+      savedChecks.set(snap.id, saved);
+    });
+    const scored = candidates.map((d) => {
+      const s = scoreChannel(d.data() as CatalogEntry, prefs);
+      // The channel check's ages are backed by a Google search — prefer them
+      const c = savedChecks.get(d.id);
+      return c ? { ...s, audienceMinAge: c.audienceMinAge, audienceMaxAge: c.audienceMaxAge } : s;
+    });
     const ok = (x: ChannelSuggestion) => fitsAge(x, age) && isSuggestable(x);
     for (const s of scored.filter((x) => !ok(x))) {
       const why = fitsAge(s, age)
         ? whyNot(s)
-        : `made for ages ${s.audienceMinAge ?? 0}–${s.audienceMaxAge ?? "up"}, child is ${age}`;
+        : `suits ages ${s.audienceMinAge ?? 0}–${s.audienceMaxAge ?? "up"}, child is ${age}`;
       logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — ${why}`);
     }
 
     // Saved channel checks (only ones someone already made — no AI here): a channel that's
     // "not a fit" for this child isn't suggested; otherwise its things-to-know go on the card
     const passing = scored.filter(ok);
-    const checkSnaps = passing.length ? await db.getAll(...passing.map((s) => db.doc(`channelChecks/${s.channelId}`))) : [];
     const withChecks: ChannelSuggestion[] = [];
-    passing.forEach((s, i) => {
-      const snap = checkSnaps[i];
-      if (!snap?.exists || snap.data()!.version !== CHECK_VERSION) {
+    passing.forEach((s) => {
+      const saved = savedChecks.get(s.channelId);
+      if (!saved) {
         withChecks.push(s);
         return;
       }
-      const { createdAt: _c, ...saved } = snap.data() as ChannelReport;
       const report = applyVideoFloors(saved, entries.get(s.channelId)?.videos ?? []);
       const { fit, conflicts } = fitForChild(report, prefs);
       if (fit === "not_fit") {

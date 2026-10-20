@@ -31,6 +31,8 @@ export interface WhitelistedChannel {
   channelId: string;
   name: string;
   thumbnail: string;
+  moreRequestedAt?: Timestamp; // last "Load more videos" (once per channel per day)
+  moreExhausted?: boolean; // YouTube has no older long videos left
   addedAt: Timestamp;
   addedBy: "parent" | "ai_suggestion";
   seedingStatus: SeedingStatus;

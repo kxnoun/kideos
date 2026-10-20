@@ -115,8 +115,9 @@ changing those doesn't need a bump.
 
 Per new video: 1 YouTube unit (free quota), 1 Supadata credit, one GPT-4o-mini call with transcript + 4
 low-detail images (~15k input tokens ≈ $0.002–0.003), free image moderation, one HEAD request for the
-Shorts check. A new channel (40 long videos + 10 Shorts) ≈ 50 credits + ~10–15¢; "Load more videos" ≈ 50
-credits + ~12¢ each time a parent taps it (shared after); the one-time nightly top-up of older channels ≈ up
+Shorts check. A new channel (40 long videos + 10 Shorts) ≈ 50 credits + ~10–15¢; "Load more videos" ≈ 20
+credits + ~5¢ per tap, only for videos nobody analyzed before (limited: < 20 shown, once per channel per
+day, 10 per family per day); the one-time nightly top-up of older channels ≈ up
 to 40 credits per channel. Plus, the first time anyone checks a channel:
 one Gemini Flash-Lite call (measured ~16k in / ~1k out ≈ 0.5–0.7¢) + one grounded Google Search.
 Re-adding channels, other families, filter changes, repeat channel checks: free. A `PROFILE_VERSION` bump

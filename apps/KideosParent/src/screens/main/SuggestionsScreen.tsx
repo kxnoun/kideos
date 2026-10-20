@@ -226,8 +226,8 @@ export default function SuggestionsScreen({ route, navigation }: Props) {
 
 function audienceLabel(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return "All ages";
-  if (max === null) return `Made for ages ${min}+`;
-  return `Made for ages ${min ?? 0}–${max}`;
+  if (max === null) return `Suits ages ${min}+`;
+  return `Suits ages ${min ?? 0}–${max}`;
 }
 
 function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: string }) {

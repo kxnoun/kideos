@@ -479,22 +479,56 @@ async function seedAndAnalyzeInBackground(
 // ── "Load more videos" ──────────────────────────────────────────
 // Parent taps "Load more videos" on a channel → loadMoreVideos (callable) marks the
 // child's whitelist doc → onMoreVideosRequested (trigger, full CPU, 9 min) seeds the
-// next LOAD_MORE_VIDEOS older long videos (continuing YouTube's page token) and
-// analyzes them for that child. Paid per new video (Supadata + OpenAI), shared after.
+// next LOAD_MORE_VIDEOS (20) older long videos (continuing YouTube's page token) and
+// analyzes them for that child. Paid only for videos nobody analyzed before (profiles are
+// shared). Limits (loadMoreVideos): only while the child has < 20 shown from the channel,
+// once per channel per day, 10 per family per day, never past the channel's last video.
+
+export type LoadMoreRefusal = "no_more" | "busy" | "enough" | "today" | "daily_limit";
 
 export const loadMoreVideos = onCall(
   { region: APP_CONFIG.FUNCTIONS_REGION, timeoutSeconds: 30, memory: "256MiB" },
-  async (request): Promise<{ queued: boolean; reason?: string }> => {
+  async (request): Promise<{ queued: boolean; reason?: LoadMoreRefusal }> => {
     const { parentId, childId, channelId } = request.data as { parentId?: string; childId?: string; channelId?: string };
     if (!parentId || !childId || !channelId) throw new HttpsError("invalid-argument", "parentId, childId, channelId are required");
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
     const db = getFirestore();
-    const ref = db.doc(`users/${parentId}/children/${childId}/whitelistedChannels/${channelId}`);
+    const childPath = `users/${parentId}/children/${childId}`;
+    const ref = db.doc(`${childPath}/whitelistedChannels/${channelId}`);
     const wl = await ref.get();
     if (!wl.exists) throw new HttpsError("not-found", "That channel isn't on this child's list");
-    if (wl.data()!.seedingStatus === "pending") return { queued: false, reason: "busy" };
+    const w = wl.data()!;
+    if (w.seedingStatus === "pending") return { queued: false, reason: "busy" };
+    if (w.moreExhausted) return { queued: false, reason: "no_more" };
     const cache = (await db.doc(`channelLibraryCache/${channelId}`).get()).data();
-    if (cache?.longSeededAt && cache.longExhausted) return { queued: false, reason: "no_more" };
+    if (cache?.longSeededAt && cache.longExhausted) {
+      await ref.set({ moreExhausted: true }, { merge: true });
+      return { queued: false, reason: "no_more" };
+    }
+    // Only when it's needed: the child already has plenty from this channel
+    let shown = Number(w.videoCount) || 0;
+    try {
+      shown = (
+        await db.collection(`${childPath}/videoVerdicts`).where("channelId", "==", channelId).where("approved", "==", true).count().get()
+      ).data().count;
+    } catch (err) {
+      logger.warn("[loadMoreVideos] Count query failed, using videoCount:", err);
+    }
+    if (shown >= APP_CONFIG.LOAD_MORE_BELOW) return { queued: false, reason: "enough" };
+    // Once per channel per day (per child)
+    const last = w.moreRequestedAt?.toMillis?.() ?? 0;
+    if (Date.now() - last < 24 * 60 * 60 * 1000) return { queued: false, reason: "today" };
+    // LOAD_MORE_PER_DAY per family per day (UTC day), counted on the parent doc
+    const day = new Date().toISOString().slice(0, 10);
+    const parentRef = db.doc(`users/${parentId}`);
+    const allowed = await db.runTransaction(async (tx) => {
+      const used = (await tx.get(parentRef)).data()?.loadMore;
+      const count = used?.day === day ? Number(used.count) || 0 : 0;
+      if (count >= APP_CONFIG.LOAD_MORE_PER_DAY) return false;
+      tx.set(parentRef, { loadMore: { day, count: count + 1 } }, { merge: true });
+      return true;
+    });
+    if (!allowed) return { queued: false, reason: "daily_limit" };
     await ref.set({ seedingStatus: "pending", moreRequestedAt: Timestamp.now() }, { merge: true });
     return { queued: true };
   }
@@ -553,7 +587,12 @@ export const onMoreVideosRequested = onDocumentUpdated(
           })
         : { approved: 0 };
       await ref.set(
-        { seedingStatus: "ready", videoCount: (Number(after.videoCount) || 0) + approved, moreAddedCount: approved },
+        {
+          seedingStatus: "ready",
+          videoCount: (Number(after.videoCount) || 0) + approved,
+          moreAddedCount: approved,
+          moreExhausted: !page.nextPageToken,
+        },
         { merge: true }
       );
       // The suggestions catalog picks the latest long videos — refresh it with the new ones

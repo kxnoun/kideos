@@ -262,12 +262,15 @@ with its evidence, and **🚩 Hide this video** → Cancel / **Too hyper** (hide
   **One-time top-up** for channels seeded before Oct 20 (no `longSeededAt`): their 40 latest long videos are
   added and analyzed too — at most 2 channels a night, only in the first 4 minutes; the flag is set after
   analysis, so a run that times out redoes it next night (existing profiles are reused).
-- **"Load more videos"** (Channels screen, under each ready channel) → callable **`loadMoreVideos`** marks
-  the child's whitelist doc (`moreRequestedAt`, "Analyzing…") → trigger **`onMoreVideosRequested`**: the next
-  50 older long videos (continuing `longPageToken`; channels from before Oct 20 start at the newest long
-  videos, skipping ones already there) → analyzed for that child → `videoCount` updated. "That's
-  everything" when `longExhausted`. Paid per new video (Supadata + OpenAI), shared after; other children
-  with the channel don't get those older videos unless they load more too.
+- **"Load more videos"** (Channels screen) → callable **`loadMoreVideos`** marks the child's whitelist doc
+  (`moreRequestedAt`, "Analyzing…") → trigger **`onMoreVideosRequested`**: the next **20** older long videos
+  (continuing `longPageToken`; channels from before Oct 20 start at the newest long videos, skipping ones
+  already there) → analyzed for that child → `videoCount` updated, suggestions catalog rebuilt. Only paid for
+  videos nobody analyzed before (profiles are shared). **Limits:** the link only shows while the child has
+  fewer than 20 videos shown from the channel and YouTube has more (`moreExhausted`); once per channel per
+  day per child ("More videos available tomorrow"); 10 taps per family per day (`users/{p}.loadMore`, UTC
+  day). The callable re-checks all of these (`reason`: enough / today / daily_limit / no_more / busy). Other
+  children with the channel don't get those older videos unless they load more too.
 - **`cleanupExpiredData`** (02:00 UTC): deletes `watchHistory` past `expiresAt` (COPPA 90 days) + legacy
   analysis-cache entries.
 - **`generateWeeklyDigest`** (Mon 08:00 UTC, Premium): GPT summary of the week. ⚠️ Path mismatch — see backlog.
@@ -306,9 +309,12 @@ at most 2 severe videos (3+ rule it out; 1–2 show as a ⚠ warning on the card
 relative to the child's strictness: the top of a ladder the child hasn't allowed (strong swearing, graphic
 violence, gambling promoted…) or self-harm ≥3. So a channel where only the mild Shorts pass (EpicMealTime)
 is never suggested, but SciShow isn't sunk by one predator video. Suggestions are also **for the child's age**: the overview call
-estimates who the channel is made for (`audienceMinAge`/`audienceMaxAge`, e.g. Ms Rachel 1–4, SciShow 12+);
+estimates the ages the channel **suits** (`audienceMinAge` = youngest age its videos are suitable for and
+interesting to, `audienceMaxAge` only for little-kid channels — e.g. Ms Rachel 1–5, a general science
+channel ~8+, adult-only 18+; since `OVERVIEW_VERSION` 4 — "made for" put SmarterEveryDay at 12+); a saved
+channel check's ages (backed by a Google search) are used instead when one exists;
 a channel is suggested only within ±1 year of that (all-ages channels to everyone), and the card shows
-"Made for ages …". Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
+"Suits ages …". Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
 channel's content counts, so it mentions heavy content plainly. Then it ranks by share of fitting videos (then educational share if the parent
 ticked that). Each card: overview, "X of 50 videos fit", top reasons the rest would be hidden, what's in the
 videos that would show, sample videos. Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never

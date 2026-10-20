@@ -85,7 +85,7 @@ export default function ChannelsScreen() {
     if (!parentId || !selectedChildId) return;
     Alert.alert(
       "Load more videos?",
-      `We'll check ${channel.name}'s next 50 older videos. Ones that fit ${selectedChild?.profile.name ?? "your child"}'s settings show up in a few minutes.`,
+      `We'll check ${channel.name}'s next 20 older videos. Ones that fit ${selectedChild?.profile.name ?? "your child"}'s settings show up in a few minutes.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -93,8 +93,14 @@ export default function ChannelsScreen() {
           onPress: async () => {
             try {
               const r = await loadMoreVideos(parentId, selectedChildId, channel.channelId);
-              if (r.reason === "no_more") Alert.alert("That's everything", `We've already checked all of ${channel.name}'s videos.`);
-              else if (r.reason === "busy") Alert.alert("Still working", `${channel.name} is still being analyzed — try again in a few minutes.`);
+              const msg: Record<string, [string, string]> = {
+                no_more: ["That's everything", `We've already checked all of ${channel.name}'s videos.`],
+                busy: ["Still working", `${channel.name} is still being analyzed — try again in a few minutes.`],
+                enough: ["Plenty already", `${channel.name} already has 20 or more videos in the feed.`],
+                today: ["Once a day", `You loaded more from ${channel.name} today — try again tomorrow.`],
+                daily_limit: ["That's today's limit", "You can load more videos for up to 10 channels a day. Try again tomorrow."],
+              };
+              if (r.reason && msg[r.reason]) Alert.alert(...msg[r.reason]);
             } catch {
               Alert.alert("Couldn't do that", "Check your connection and try again.");
             }
@@ -257,10 +263,15 @@ export default function ChannelsScreen() {
               <Text style={styles.videoCount}> · {item.videoCount} videos</Text>
             )}
           </View>
-          {item.seedingStatus === "ready" ? (
-            <TouchableOpacity onPress={() => moreVideos(item)} hitSlop={6}>
-              <Text style={styles.moreLink}>＋ Load more videos</Text>
-            </TouchableOpacity>
+          {/* Only when it'd help: fewer than 20 videos shown, YouTube has more, not already today */}
+          {item.seedingStatus === "ready" && item.videoCount < 20 && !item.moreExhausted ? (
+            item.moreRequestedAt && Date.now() - item.moreRequestedAt.toMillis() < 24 * 60 * 60 * 1000 ? (
+              <Text style={styles.moreDone}>More videos available tomorrow</Text>
+            ) : (
+              <TouchableOpacity onPress={() => moreVideos(item)} hitSlop={6}>
+                <Text style={styles.moreLink}>＋ Load more videos</Text>
+              </TouchableOpacity>
+            )
           ) : null}
           {fits[item.channelId] && fits[item.channelId].fit !== "good" ? (
             <TouchableOpacity onPress={() => showFit(item.name, fits[item.channelId])} hitSlop={6}>
@@ -542,6 +553,7 @@ const styles = StyleSheet.create({
   channelMeta: { flexDirection: "row", alignItems: "center" },
   fitBadge: { fontSize: 12, fontWeight: "700", color: "#8A5A00", marginTop: 4 },
   moreLink: { fontSize: 12, fontWeight: "700", color: "#6C63FF", marginTop: 4 },
+  moreDone: { fontSize: 12, color: "#999", marginTop: 4 },
   fitBadgeBad: { color: "#C62828" },
   statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
   statusLabel: { fontSize: 12, fontWeight: "600" },

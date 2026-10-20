@@ -238,7 +238,7 @@ export async function loadMoreVideos(
   parentId: string,
   childId: string,
   channelId: string
-): Promise<{ queued: boolean; reason?: "no_more" | "busy" }> {
+): Promise<{ queued: boolean; reason?: "no_more" | "busy" | "enough" | "today" | "daily_limit" }> {
   return callFunction("loadMoreVideos", { parentId, childId, channelId });
 }
 
