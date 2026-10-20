@@ -116,14 +116,18 @@ Hide or a video that won't play returns to the feed with a friendly yellow note 
 
 ## Motion and speed
 
-Every move has a direction, so the app feels like one place you move around in:
+Every move has a direction, so the app feels like one place you move around in. Moves are **linear and
+short** (`MOTION` in theme.ts: slide 220 ms, out 200 ms, zoom 180 ms) — eased curves felt heavy:
 - **"See all"** slides in from the right; Back slides it out to the right. The home screen stays alive
   underneath (no rebuild, same scroll position); the grid fills in right after the slide (placeholders
   first), so the slide starts at once.
 - **A video** zooms in; swipe down drops it away. The feed stays alive under the player, so Back from a video
   is instant and lands where the kid was (even on a channel page).
 - **"Who's watching?"** slides down over the screen; picking a child shows a "Hi Simon!" card with their
-  avatar while their feed builds underneath, then the card slides up.
+  avatar until their feed has its videos (`FeedScreen` `onReady`; ≥ 450 ms, ≤ 4 s), then the card slides up.
+  The feed draws nothing until its first channels + videos arrive — no "Getting ready" flash.
+- Layers over the feed (player, Who's watching, the Hi card) have explicit `zIndex` + `elevation` — without
+  them Android drew the feed's chip bar on top.
 - Reduce Motion: no slides — screens just appear.
 
 Speed rules (the 6T in a debug build is the benchmark — release builds are several times faster): never

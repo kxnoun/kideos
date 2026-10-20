@@ -32,7 +32,6 @@ import React, { useEffect, useState, useCallback, useMemo, useRef, useImperative
 import {
   Animated,
   BackHandler,
-  Easing,
   FlatList,
   Image,
   ScrollView,
@@ -46,7 +45,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { subscribeToWhitelistedChannels, subscribeToApprovedVideos } from "../services/firebase";
-import { colors, fonts, modeForAge, radius, type as typo, useLayout, type Layout } from "../theme";
+import { colors, fonts, modeForAge, MOTION, radius, type as typo, useLayout, type Layout } from "../theme";
 import { useWatched } from "../watched";
 import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
@@ -64,6 +63,7 @@ interface Props {
   // pool = the videos "up next" can come from (same channel, same kind)
   onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[]) => void;
   onSwitchProfile?: () => void; // only on devices with 2+ children
+  onReady?: () => void; // the first channels + videos have arrived (App's "Hi Simon!" card waits for it)
 }
 
 interface Shelf {
@@ -77,9 +77,12 @@ interface Shelf {
   channelId?: string;
 }
 
-export default function FeedScreen({ session, profile, onVideoPress, onSwitchProfile }: Props) {
+export default function FeedScreen({ session, profile, onVideoPress, onSwitchProfile, onReady }: Props) {
   const [channels, setChannels] = useState<WhitelistedChannel[]>([]);
   const [videos, setVideos] = useState<ApprovedVideo[]>([]);
+  // Nothing is drawn until the first channels + videos arrive (no "Getting ready" flash)
+  const [channelsLoaded, setChannelsLoaded] = useState(false);
+  const [videosFor, setVideosFor] = useState<string | null>(null);
   const [openChannelId, setOpenChannelId] = useState<string | null>(null);
   const layout = useLayout();
   const mode = modeForAge(profile.age);
@@ -87,7 +90,10 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
   const { parentId, childId } = session;
 
   useEffect(() => {
-    return subscribeToWhitelistedChannels(parentId, childId, setChannels);
+    return subscribeToWhitelistedChannels(parentId, childId, (list) => {
+      setChannels(list);
+      setChannelsLoaded(true);
+    });
   }, [parentId, childId]);
 
   // Stable key — only changes when the actual channel IDs change
@@ -95,8 +101,16 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
 
   useEffect(() => {
     const channelIds = channelIdsKey ? channelIdsKey.split(",") : [];
-    return subscribeToApprovedVideos(parentId, childId, channelIds, setVideos);
-  }, [parentId, childId, channelIdsKey]);
+    if (!channelsLoaded) return;
+    return subscribeToApprovedVideos(parentId, childId, channelIds, (list) => {
+      setVideos(list);
+      setVideosFor(channelIdsKey);
+    });
+  }, [parentId, childId, channelIdsKey, channelsLoaded]);
+  const ready = channelsLoaded && videosFor === channelIdsKey;
+  useEffect(() => {
+    if (ready) onReady?.();
+  }, [ready, onReady]);
 
   // Video docs don't store channel names — fill them from the whitelist
   const channelById = useMemo(() => new Map(channels.map((c) => [c.channelId, c])), [channels]);
@@ -152,6 +166,8 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
   const closeChannel = useCallback(() => setOpenChannelId(null), []);
 
   const statusBar = <StatusBar barStyle="light-content" backgroundColor={colors.bg} />;
+
+  if (!ready) return <View style={styles.screen} />;
 
   if (named.length === 0) {
     return (
@@ -613,7 +629,7 @@ function ChannelPage({
   const closing = useRef(false);
   useEffect(() => {
     if (reduceMotion) return;
-    Animated.timing(x, { toValue: 0, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(
+    Animated.timing(x, { toValue: 0, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start(
       () => setReady(true)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -625,7 +641,7 @@ function ChannelPage({
       onBack();
       return;
     }
-    Animated.timing(x, { toValue: layout.width, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(
+    Animated.timing(x, { toValue: layout.width, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(
       () => onBack()
     );
   }, [onBack, reduceMotion, x, layout.width]);

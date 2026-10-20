@@ -72,7 +72,7 @@ import {
 } from "../services/firebase";
 import type { ApprovedVideo, ChildSession } from "../types";
 import { FINISHED_SHARE, WHOLE_VIDEO, formatLeft, saveUnfinished, type Unfinished } from "../viewing";
-import { colors, fonts, radius, useLayout } from "../theme";
+import { colors, fonts, MOTION, radius, useLayout } from "../theme";
 import { markWatched, useWatched } from "../watched";
 import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
@@ -227,7 +227,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const leavingRef = useRef(false);
 
   useEffect(() => {
-    Animated.timing(enter, { toValue: 1, duration: 260, useNativeDriver: true }).start();
+    Animated.timing(enter, { toValue: 1, duration: MOTION.zoom, easing: MOTION.easing, useNativeDriver: true }).start();
   }, [enter]);
 
   // Seconds still owed (0 = free to go)
@@ -291,16 +291,20 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
       onBack("done");
       return;
     }
-    Animated.timing(drop, { toValue: layout.height * 0.6, duration: 220, useNativeDriver: true }).start(() => onBack("done"));
+    Animated.timing(drop, { toValue: layout.height * 0.6, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(
+      () => onBack("done")
+    );
   };
 
   const openMore = () => {
     if (!upNext.length || ended) return;
     setShowMore(true);
-    Animated.spring(more, { toValue: 1, useNativeDriver: true, bounciness: 4 }).start();
+    Animated.timing(more, { toValue: 1, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start();
   };
   const closeMore = () => {
-    Animated.timing(more, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShowMore(false));
+    Animated.timing(more, { toValue: 0, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(() =>
+      setShowMore(false)
+    );
   };
 
   const tryPlay = (next: ApprovedVideo) => {

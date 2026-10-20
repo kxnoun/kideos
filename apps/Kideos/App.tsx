@@ -29,7 +29,6 @@ import {
   StatusBar,
   AppState,
   Animated,
-  Easing,
   InteractionManager,
 } from "react-native";
 import auth from "@react-native-firebase/auth";
@@ -47,7 +46,7 @@ import {
   subscribeToMigration,
 } from "./src/services/firebase";
 import { normalizeRules, getUnfinished, clearUnfinished, stillOwed, type Unfinished } from "./src/viewing";
-import { colors, fonts, modeForAge, radius, useLayout } from "./src/theme";
+import { colors, fonts, MOTION, modeForAge, radius, useLayout } from "./src/theme";
 import { setLandscapeOnly } from "./src/device";
 import { useWatched, setWatchedChild, adoptLegacyWatched } from "./src/watched";
 import { rememberChild, forgetChild, markLeft, stillChosen, setAskWhoMinutes } from "./src/gate";
@@ -96,6 +95,8 @@ function Root() {
   const [resume, setResume] = useState<Unfinished | null>(null); // where to pick an unfinished video up
   const [notice, setNotice] = useState<string | null>(null);
   const [curtain, setCurtain] = useState<DeviceChild | null>(null); // "Hi Simon!" after picking
+  const [feedReady, setFeedReady] = useState(false); // the picked child's videos have arrived
+  const markFeedReady = useCallback(() => setFeedReady(true), []);
   const watched = useWatched();
   const lastTap = useRef(0);
 
@@ -359,6 +360,7 @@ function Root() {
   const pick = (id: string) => {
     const k = kids.find((c) => c.id === id);
     if (!k) return;
+    setFeedReady(false);
     choose(k);
     setCurtain(k); // "Hi Simon!" — slides up once their feed is ready
   };
@@ -379,11 +381,12 @@ function Root() {
                 profile={active}
                 onVideoPress={handleVideoPress}
                 onSwitchProfile={shared ? switchProfile : undefined}
+                onReady={markFeedReady}
               />
               {notice ? <Notice text={notice} /> : null}
             </View>
             {currentVideo ? (
-              <View style={StyleSheet.absoluteFill}>
+              <View style={[StyleSheet.absoluteFill, styles.playerLayer]}>
                 <PlayerScreen
                   key={currentVideo.videoId}
                   video={currentVideo}
@@ -404,7 +407,7 @@ function Root() {
           <WhoScreen kids={kids} locked={locked} onChoose={pick} />
         </WhoLayer>
       ) : null}
-      {curtain ? <Curtain kid={curtain} onDone={() => setCurtain(null)} /> : null}
+      {curtain ? <Curtain kid={curtain} ready={feedReady || isLocked} onDone={() => setCurtain(null)} /> : null}
     </View>
   );
 }
@@ -420,47 +423,61 @@ function WhoLayer({ slideIn, onIn, children }: { slideIn: boolean; onIn: () => v
       onIn();
       return;
     }
-    Animated.timing(y, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(
+    Animated.timing(y, { toValue: 0, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start(
       () => onIn()
     );
     // only when it first appears
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateY: y }] }]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, styles.whoLayer, { transform: [{ translateY: y }] }]}>
+      {children}
+    </Animated.View>
+  );
 }
 
-// After picking a child: their avatar and "Hi Simon!" while their feed gets ready
-// underneath, then the card slides up out of the way
-function Curtain({ kid, onDone }: { kid: DeviceChild; onDone: () => void }) {
+// After picking a child: their avatar and "Hi Simon!" until their feed has its videos
+// (so it never slides away onto an empty screen that then pops in), then it slides up
+const CURTAIN_MIN_MS = 450;
+const CURTAIN_MAX_MS = 4000;
+
+function Curtain({ kid, ready, onDone }: { kid: DeviceChild; ready: boolean; onDone: () => void }) {
   const { height, phone } = useLayout();
   const reduceMotion = useReduceMotion();
   const y = useRef(new Animated.Value(0)).current;
+  const shownAt = useRef(Date.now());
+  const going = useRef(false);
+  const go = useRef(() => {});
+  go.current = () => {
+    if (going.current) return;
+    going.current = true;
+    if (reduceMotion) {
+      onDone();
+      return;
+    }
+    Animated.timing(y, { toValue: -height, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start(
+      () => onDone()
+    );
+  };
   useEffect(() => {
-    let cancelled = false;
-    const started = Date.now();
-    // Wait for the feed to finish building (and at least a beat to read the card)
+    const t = setTimeout(() => go.current(), CURTAIN_MAX_MS); // never stuck
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    // let the feed draw its first frame, and the card be seen for a moment
+    const wait = Math.max(0, CURTAIN_MIN_MS - (Date.now() - shownAt.current));
+    let t: ReturnType<typeof setTimeout> | null = null;
     const task = InteractionManager.runAfterInteractions(() => {
-      const wait = Math.max(0, 450 - (Date.now() - started));
-      setTimeout(() => {
-        if (cancelled) return;
-        if (reduceMotion) {
-          onDone();
-          return;
-        }
-        Animated.timing(y, { toValue: -height, duration: 340, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(
-          () => onDone()
-        );
-      }, wait);
+      t = setTimeout(() => go.current(), wait);
     });
     return () => {
-      cancelled = true;
       task.cancel();
+      if (t) clearTimeout(t);
     };
-    // once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready]);
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, styles.center, { transform: [{ translateY: y }] }]}>
+    <Animated.View style={[StyleSheet.absoluteFill, styles.center, styles.curtainLayer, { transform: [{ translateY: y }] }]}>
       <StatusBar hidden />
       <Text style={{ fontSize: phone ? 96 : 128 }}>{kid.avatar || "🙂"}</Text>
       <Text style={styles.curtainHi}>{kid.name ? `Hi ${kid.name}!` : "Hi!"}</Text>
@@ -543,6 +560,10 @@ function TimesUp({ name, onSwitch }: { name: string; onSwitch?: () => void }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  // Layers over the feed — explicit order, or Android lets the feed's chip bar show through
+  playerLayer: { backgroundColor: "#000", zIndex: 10, elevation: 10 },
+  whoLayer: { backgroundColor: colors.bg, zIndex: 20, elevation: 20 },
+  curtainLayer: { zIndex: 30, elevation: 30 },
   curtainHi: { color: colors.text, fontFamily: fonts.displayBold, fontSize: 40, marginTop: 12 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: "center", justifyContent: "center" },
   logo: { color: colors.text, fontFamily: fonts.displayBold, fontSize: 48, marginBottom: 24 },

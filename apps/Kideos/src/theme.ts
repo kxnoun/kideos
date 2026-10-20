@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useMemo } from "react";
-import { useWindowDimensions } from "react-native";
+import { Easing, useWindowDimensions } from "react-native";
 
 export const colors = {
   bg: "#1E1442", // Night Grape — white text 17:1
@@ -147,3 +147,6 @@ export const type = {
 } as const;
 
 export const radius = { tile: 20, card: 24, pill: 999 } as const;
+
+// Screen moves: linear and short (eased curves felt heavy — slow, fast, slow)
+export const MOTION = { easing: Easing.linear, slide: 220, slideOut: 200, zoom: 180 } as const;
