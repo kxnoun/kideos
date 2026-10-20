@@ -38,12 +38,14 @@ import {
   type ValueFilters,
 } from "./prefs";
 import type { ContentProfile, Framing } from "./types";
+import { LADDER_GUIDE } from "./aiAnalysis";
+import type { CatalogEntry } from "./channelCatalog";
 
-export const CHECK_VERSION = 3; // v3: full profile (everything a video profile has). Bump when the criteria change → re-checked on next add
+export const CHECK_VERSION = 4; // v4: same ladder definitions as videos + targeted searches. v3: full profile. Bump when the criteria change → re-checked on next add
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const THUMBNAILS = 50;
 
-type Basis = "thumbnails" | "reputation" | "both" | "";
+type Basis = "thumbnails" | "reputation" | "both" | "videos" | "";
 
 export interface ChannelProfile {
   purpose: ContentProfile["purpose"];
@@ -88,15 +90,19 @@ export interface CheckChannelResponse {
 // ── The prompt ─────────────────────────────────────────────────
 
 const ladders = DIMS.map((d) => `- ${d}: ${LEVEL_LABELS[d].map((l, i) => `${i} ${l}`).join(" · ")}`).join("\n");
+// (The definitions below say "video"/"transcript" — for a channel, read them as "the channel's videos".)
 
 const SYSTEM = `You build a content profile of a YouTube CHANNEL for a parental control app, before a parent adds it to their child's list.
 You get the channel's details and its latest video thumbnails with titles. You can also search Google.
 
-1. Search Google for the channel's reputation: news articles, Common Sense Media, parent discussions (Reddit etc.), lists of "Elsagate" / disturbing fake kids' channels, controversies. Use what you find; don't invent.
+1. Search Google for the channel's reputation: news articles, Common Sense Media, parent discussions (Reddit etc.), lists of "Elsagate" / disturbing fake kids' channels, controversies. Run several targeted searches, e.g. "<channel> swearing", "<channel> controversy", "<channel> inappropriate for kids", "<channel> parents review". Swearing, meanness, sexual jokes, scary content and dangerous stunts rarely show in thumbnails — rate them from what you find. Use what you find; don't invent.
 2. Look at EVERY thumbnail — they are part of what the child sees. Look for sexualized or suggestive images (including cartoons), revealing outfits, gore, creepy or disturbing imagery, horror, knock-off characters in weird situations (Elsagate), clickbait, dangerous stunts, and a style too intense for young kids.
 
 Rate the channel on EVERY ladder below: the highest level that shows up in the thumbnails/titles or that people report about the channel (not a one-off from years ago). 0 if there's no sign of it. null only if you truly can't tell.
 ${ladders}
+
+Use exactly these definitions and examples for each level — the app compares channels and videos on the same scale (for a channel, "the video" means its videos):
+${LADDER_GUIDE}
 
 Respond with ONLY a JSON object, no other text:
 {
@@ -282,9 +288,45 @@ LATEST VIDEOS (thumbnail follows each title):`,
   };
 }
 
+// ── Floors from videos we've already analyzed (free) ───────────
+// If any family has added the channel before, channelCatalog/{id} holds its analyzed
+// videos' ratings (from transcripts/images). A level reached by at least
+// FLOOR_MIN_VIDEOS of them raises the channel's rating — catches what thumbnails
+// and a shallow search miss (e.g. constant swearing). Never lowers anything.
+const FLOOR_MIN_VIDEOS = 2;
+
+export function applyVideoFloors(
+  report: Omit<ChannelReport, "createdAt">,
+  videos: CatalogEntry["videos"]
+): Omit<ChannelReport, "createdAt"> {
+  const ok = videos.filter((v) => v.p.status === "ok");
+  if (ok.length < 3) return report;
+  const dims = { ...report.profile.dims };
+  for (const dim of DIMS) {
+    const levels = ok.map((v) => v.p.dims[dim]?.level ?? 0).sort((a, b) => b - a);
+    const floor = levels[FLOOR_MIN_VIDEOS - 1] ?? 0; // reached by at least 2 videos
+    if (floor > (dims[dim].level ?? 0)) {
+      const n = levels.filter((l) => l >= floor).length;
+      dims[dim] = { level: floor, evidence: `${n} of its ${ok.length} checked videos`, basis: "videos" };
+    }
+  }
+  const flags = { ...report.profile.flags };
+  for (const f of VALUE_FLAGS) {
+    const n = ok.filter((v) => v.p.flags?.[f]).length;
+    if (n >= FLOOR_MIN_VIDEOS && !flags[f].present) flags[f] = { present: true, evidence: `${n} of its checked videos` };
+  }
+  return { ...report, profile: { ...report.profile, dims, flags } };
+}
+
 // ── Per child, in code (no AI) ─────────────────────────────────
 
-const BASIS_WORDS: Record<Basis, string> = { thumbnails: "thumbnails", reputation: "what people say", both: "thumbnails + what people say", "": "" };
+const BASIS_WORDS: Record<Basis, string> = {
+  thumbnails: "thumbnails",
+  reputation: "what people say",
+  both: "thumbnails + what people say",
+  videos: "its videos",
+  "": "",
+};
 
 // The channel profile as a ContentProfile, so the SAME filter code as videos applies
 function asContentProfile(r: Omit<ChannelReport, "createdAt">): ContentProfile {
@@ -381,6 +423,10 @@ export const checkChannel = onCall(
     }
 
     if (!report) return { channel, alreadyAdded, report: null, fit: null, conflicts: [], findings: [], ageNote: "" };
+
+    // Real ratings from videos already analyzed for any family raise the saved profile
+    const catalog = (await db.doc(`channelCatalog/${details.channelId}`).get()).data() as CatalogEntry | undefined;
+    if (catalog?.videos?.length) report = applyVideoFloors(report, catalog.videos);
 
     const prefs = await loadValueFiltersForChild(parentId, childId);
     const { fit, conflicts, findings } = fitForChild(report, prefs);

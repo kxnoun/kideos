@@ -225,7 +225,7 @@ export interface CheckChannelResult {
   } | null;
   fit: "good" | "caution" | "not_fit" | null; // for THIS child (worked out in code)
   conflicts: string[];
-  findings: { what: string; basis: "thumbnails" | "reputation" | "both" | "" }[];
+  findings: { what: string; basis: "thumbnails" | "reputation" | "both" | "videos" | "" }[];
   ageNote: string;
 }
 export async function checkChannel(parentId: string, childId: string, input: string): Promise<CheckChannelResult> {

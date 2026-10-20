@@ -50,7 +50,7 @@ type CompactProfile = Pick<
   "status" | "purpose" | "dims" | "violenceRealism" | "framing" | "religionTraditions" | "holidays" | "music" | "lgbtq" | "flags" | "madeForKids" | "isShort"
 >;
 
-interface CatalogVideo {
+export interface CatalogVideo {
   videoId: string;
   title: string;
   thumbnail: string;

@@ -12,11 +12,18 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, Linking, A
 import type { CheckChannelResult } from "../services/firebase";
 
 // The big badge is for THIS child (worked out from the saved channel profile + their settings)
+// Calm yellow for "things to know" (e.g. a sponsor); red only for "not a fit".
 const FIT = {
-  good: { label: (n: string) => `✅ Fits ${n}'s settings`, color: "#2E7D32", bg: "#E8F5E9" },
-  caution: { label: (n: string) => `⚠️ Some concerns for ${n}`, color: "#B26A00", bg: "#FFF4E0" },
-  not_fit: { label: (n: string) => `⛔ Not a fit for ${n}`, color: "#C62828", bg: "#FDECEA" },
-  unchecked: { label: () => "We couldn't check this channel", color: "#555", bg: "#F0F0F5" },
+  good: { label: (n: string, _c: number) => `✅ Fits ${n}'s settings`, color: "#2E7D32", bg: "#E8F5E9", boxBg: "#E8F5E9", boxText: "#1B5E20" },
+  caution: {
+    label: (n: string, c: number) => `⚠️ ${c} ${c === 1 ? "thing" : "things"} to know for ${n}`,
+    color: "#8A5A00",
+    bg: "#FFF6E0",
+    boxBg: "#FFF6E0",
+    boxText: "#6B4600",
+  },
+  not_fit: { label: (n: string, _c: number) => `⛔ Not a fit for ${n}`, color: "#C62828", bg: "#FDECEA", boxBg: "#FDECEA", boxText: "#7A1E1E" },
+  unchecked: { label: (_n: string, _c: number) => "We couldn't check this channel", color: "#555", bg: "#F0F0F5", boxBg: "#F0F0F5", boxText: "#444" },
 } as const;
 // The AI's general opinion, shown as one smaller line
 const OVERALL = {
@@ -37,7 +44,9 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
   const { channel, report, fit, conflicts, findings, ageNote } = result;
   const badge = FIT[fit ?? "unchecked"];
   const thumbFindings = findings.filter((f) => f.basis === "thumbnails" || f.basis === "both");
-  const warn = !report || fit !== "good";
+  const videoFindings = findings.filter((f) => f.basis === "videos");
+  const count = conflicts.length + (ageNote ? 1 : 0);
+  const strong = !report || fit === "not_fit"; // red "Add anyway" only here
 
   return (
     <View style={{ flex: 1 }}>
@@ -51,7 +60,7 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
         </View>
 
         <View style={[styles.verdict, { backgroundColor: badge.bg }]}>
-          <Text style={[styles.verdictText, { color: badge.color }]}>{badge.label(childName)}</Text>
+          <Text style={[styles.verdictText, { color: badge.color }]}>{badge.label(childName, count)}</Text>
           {report ? <Text style={styles.overall}>{OVERALL[report.verdict]}</Text> : null}
         </View>
 
@@ -64,11 +73,13 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
             {report.summary ? <Text style={styles.text}>{report.summary}</Text> : null}
 
             {conflicts.length || ageNote ? (
-              <View style={styles.conflictBox}>
-                <Text style={styles.conflictTitle}>Conflicts with {childName}'s settings</Text>
-                {ageNote ? <Text style={styles.conflict}>• {ageNote}</Text> : null}
+              <View style={[styles.conflictBox, { backgroundColor: badge.boxBg }]}>
+                <Text style={[styles.conflictTitle, { color: badge.color }]}>
+                  {fit === "not_fit" ? `Conflicts with ${childName}'s settings` : `Past ${childName}'s settings`}
+                </Text>
+                {ageNote ? <Text style={[styles.conflict, { color: badge.boxText }]}>• {ageNote}</Text> : null}
                 {conflicts.map((c, i) => (
-                  <Text key={i} style={styles.conflict}>
+                  <Text key={i} style={[styles.conflict, { color: badge.boxText }]}>
                     • {c}
                   </Text>
                 ))}
@@ -99,6 +110,17 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
               <Text style={styles.text}>Nothing concerning in the latest thumbnails.</Text>
             )}
 
+            {videoFindings.length ? (
+              <>
+                <Text style={styles.section}>From its videos we've already checked</Text>
+                {videoFindings.map((f, i) => (
+                  <Text key={i} style={styles.text}>
+                    • {f.what}
+                  </Text>
+                ))}
+              </>
+            ) : null}
+
             <Text style={styles.note}>
               {report.wellKnown ? "" : "We can't verify small channels fully yet. "}
               Every video is still checked one by one after you add it — anything past {childName}'s limits stays
@@ -110,18 +132,18 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
 
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.addBtn, warn && styles.addBtnWarn, confirming && { opacity: 0.6 }]}
+          style={[styles.addBtn, strong && styles.addBtnWarn, confirming && { opacity: 0.6 }]}
           onPress={onConfirm}
           disabled={confirming}
         >
           {confirming ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.addText}>{warn ? "Add anyway" : "Add channel"}</Text>
+            <Text style={styles.addText}>{strong ? "Add anyway" : "Add channel"}</Text>
           )}
         </TouchableOpacity>
         <TouchableOpacity style={styles.cancelBtn} onPress={onCancel} disabled={confirming}>
-          <Text style={styles.cancelText}>{warn ? "Don't add it" : "Cancel"}</Text>
+          <Text style={styles.cancelText}>{strong ? "Don't add it" : "Cancel"}</Text>
         </TouchableOpacity>
       </View>
     </View>

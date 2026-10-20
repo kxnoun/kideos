@@ -69,6 +69,12 @@ What's next, in rough priority order. Update this file as things land.
   (✅ fits / ⚠️ some concerns / ⛔ not a fit), with the AI's general opinion as one smaller line.
   Low media resolution measured 15.9k tokens per channel (vs 57.7k default). Free-text boxes (religion,
   "anything else?") capped at 300 characters (app + server).
+- ✅ Channel check v4 (Oct 19): uses the video check's exact ladder definitions/examples (`LADDER_GUIDE`
+  — MrBeast came out 4 and Vsauce 3 without them), targeted searches ("<channel> swearing / controversy /
+  inappropriate"), and **floors from videos already analyzed** for any family (`channelCatalog`: a level
+  reached by ≥2 checked videos raises the channel's rating — IShowSpeed's search said "mild swearing").
+  Review sheet: calm yellow "⚠️ N things to know for <child>" with a normal Add button; red + "Add anyway"
+  only for ⛔ Not a fit.
 - Backlog (Oct 19): **channel conflicts after filter changes** — a ⚠️ badge on the Channels screen next to
   channels whose saved check conflicts with the child's CURRENT settings (code only, from
   `channelChecks/{id}` concerns; no AI).

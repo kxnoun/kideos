@@ -93,6 +93,13 @@ Ladders (0 = none in every category):
 - framing: "glorified" = shown as cool, funny, rewarded or desirable; "condemned" = consequences shown or presented as wrong; otherwise "neutral".
 - purpose: "educational" only if teaching is the clear main purpose (documentary, explainer, history).`;
 
+// The ladder definitions with examples, shared with the channel check (channelCheck.ts)
+// so a "3" means the same thing for a channel as for a video.
+export const LADDER_GUIDE = PROFILE_SYSTEM_PROMPT.slice(
+  PROFILE_SYSTEM_PROMPT.indexOf("Ladders (0 = none"),
+  PROFILE_SYSTEM_PROMPT.indexOf("- framing:")
+);
+
 function profileUserPrompt(video: YouTubeVideoDetails, transcript: string, pace: PaceStats | undefined): string {
   const t = transcript.slice(0, 12000);
   const title = titleSignals(video.title);
