@@ -80,9 +80,17 @@ docs/                     everything else (below)
 | [development.md](docs/development.md) | Running, debugging (logs!), deploying, Firebase Console checklist, testing |
 | [kid-app-design.md](docs/kid-app-design.md) | The kid app's design: modes by age, colours, fonts, sizes, player gestures, motion, speed rules |
 | [questionnaire-research.md](docs/questionnaire-research.md) | Why the questionnaire and content profile look the way they do — research and sources |
+| [self-hosting.md](docs/self-hosting.md) | Run your own Kideos server: Firebase, API keys, deploy, release APKs, invite-only, costs |
 | [backlog.md](docs/backlog.md) | What's next: AI accuracy check (labeling), known bugs, missing features |
 | [android-setup.md](docs/android-setup.md) / [ios-setup.md](docs/ios-setup.md) | First-time machine setup |
 | [auth-setup.md](docs/auth-setup.md) | Google / Apple / email / anonymous auth configuration |
 | [CLAUDE.md](CLAUDE.md) | Short list of rules that have bitten us — read before changing code (written for AI assistants, useful for humans) |
 
 > ⚠️ Firebase config files (`GoogleService-Info.plist`, `google-services.json`) are not in this repo — see the setup guides.
+
+## License
+
+[GNU AGPL v3](LICENSE). You can use, change and share Kideos freely; if you share a changed version, or
+run one as a service for other people, you must make your source code available under the same licence.
+
+Built by adaM, with [Claude Code](https://claude.com/claude-code) as pair programmer.
