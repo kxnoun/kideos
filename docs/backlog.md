@@ -87,7 +87,6 @@ analyse 500 channels with a prompt we're about to change.
   notifications by design), but decide when fixing the digest.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
   that part, and add a TTL/cleanup for `triggerEvents`.
-- **Kid app type error:** `PlayerScreen.tsx(111)` implicit `any` (pre-existing).
 
 ## 3. Security
 
@@ -116,12 +115,12 @@ analyse 500 channels with a prompt we're about to change.
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).
-- Kid feed: orientation changes / tablet layout (`Dimensions.get` at module load).
 - *Backburner:* landscape-only kid app for younger kids (YouTube Kids was landscape-only on phones until
   it added portrait in Dec 2024). Also: Shorts get rotated to landscape in fullscreen — keep them upright.
 - *Backburner:* the player's settings (gear) menu — "Stats for nerds" fills the screen and kids tap
   everything. Hide or disable it (or just that item), or make it a parent setting.
-- UI polish on both apps.
+- Parent app UI redesign (kid app done Oct 20 — [kid-app-design.md](kid-app-design.md); its "later" list:
+  TV focus states, a mascot, sounds, Continue watching, iOS font linking).
 - *Looked into, parked (Oct 17–18):* **YouTube Premium (no ads) in the kid app** — the sister's top ask.
   What we found:
   - Premium only applies where the viewer's browser is signed in to a Premium Google account. Our player

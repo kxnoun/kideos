@@ -2,11 +2,20 @@
 // Kideos Kid App — FeedScreen
 //
 // The kid's entire world: only videos that passed this child's settings (or a
-// parent approved). Laid out like YouTube Kids:
-//   - "New" — the latest long videos from every channel
-//   - "Shorts" — only if the child has any (hidden entirely with "No Shorts")
-//   - one row per channel (newest first) — tap the channel → all its videos
-// Live: new videos appear and hidden ones disappear without a refresh.
+// parent approved). Live: new videos appear and hidden ones disappear by themselves.
+// Design notes: docs/kid-app-design.md. Two modes from the child's age (theme.ts):
+//
+//   LITTLE (≤7) — pre-readers. A band of big round bubbles on top (⭐ New, ⚡ Shorts,
+//   then each channel's picture); tapping one swaps the single sideways film strip
+//   below. No vertical scrolling, no greeting text, nothing in the bottom 48 pt
+//   (where wrists rest on a tablet).
+//
+//   BIG (8+) — shelves like YouTube Kids: New / Shorts / one row per channel, and a
+//   channel page with everything. The header collapses as they scroll: the
+//   "Hi Simon" line fades out and only a slim bar of jump-chips stays pinned.
+//
+// Sizes come from the window (useLayout), so phone / tablet / rotation / split screen
+// all lay out properly.
 //
 // Data flow:
 //   1. Subscribe to whitelisted channels
@@ -15,52 +24,60 @@
 //   3. Group in memory: New / Shorts / per channel
 // ─────────────────────────────────────────────────────────────
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
-  View,
-  Text,
-  FlatList,
-  ScrollView,
-  Image,
-  TouchableOpacity,
-  StyleSheet,
-  Dimensions,
-  SafeAreaView,
-  StatusBar,
-  RefreshControl,
+  Animated,
   BackHandler,
+  FlatList,
+  Image,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { subscribeToWhitelistedChannels, subscribeToApprovedVideos } from "../services/firebase";
-import type { ApprovedVideo, ChildSession, WhitelistedChannel } from "../types";
-
-const { width } = Dimensions.get("window");
-// Row tiles (sideways rows)
-const ROW_TILE = Math.round(width * 0.42);
-const ROW_THUMB_H = Math.round(ROW_TILE * 0.5625); // 16:9
-const SHORT_TILE = Math.round(width * 0.28);
-const SHORT_THUMB_H = Math.round(SHORT_TILE * 1.6); // tall, like a Short
-// Channel page grid
-const COLUMNS = 3;
-const GRID_TILE = (width - 48) / COLUMNS; // 16px padding each side + 8px gaps
-const GRID_THUMB_H = GRID_TILE * 0.5625;
+import { colors, fonts, modeForAge, radius, type as typo, useLayout, type Layout } from "../theme";
+import { useWatched } from "../watched";
+import Tap from "../components/Tap";
+import VideoTile from "../components/VideoTile";
+import type { ApprovedVideo, ChildSession, KidProfile, WhitelistedChannel } from "../types";
 
 const NEW_COUNT = 15;
+const LITTLE_NEW_COUNT = 30;
 const SHORTS_COUNT = 20;
 const PER_CHANNEL_ROW = 12;
 
 interface Props {
   session: ChildSession;
-  onVideoPress: (video: ApprovedVideo) => void;
-  onPaused: () => void;
+  profile: KidProfile;
+  // pool = the videos "up next" can come from (same channel, same kind)
+  onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[]) => void;
 }
 
-export default function FeedScreen({ session, onVideoPress }: Props) {
+interface Shelf {
+  key: string; // "new" | "shorts" | channelId
+  label: string;
+  emoji?: string;
+  color?: string;
+  thumb?: string;
+  videos: ApprovedVideo[];
+  tall?: boolean; // Shorts
+  channelId?: string;
+}
+
+export default function FeedScreen({ session, profile, onVideoPress }: Props) {
   const [channels, setChannels] = useState<WhitelistedChannel[]>([]);
   const [videos, setVideos] = useState<ApprovedVideo[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
   const [openChannelId, setOpenChannelId] = useState<string | null>(null);
+  const layout = useLayout();
+  const mode = modeForAge(profile.age);
 
-  const { parentId, childId, childName } = session;
+  const { parentId, childId } = session;
 
   useEffect(() => {
     return subscribeToWhitelistedChannels(parentId, childId, setChannels);
@@ -84,7 +101,7 @@ export default function FeedScreen({ session, onVideoPress }: Props) {
   // Already newest first (the query orders by publishedAt desc)
   const longVideos = useMemo(() => named.filter((v) => !v.isShort), [named]);
   const shorts = useMemo(() => named.filter((v) => v.isShort).slice(0, SHORTS_COUNT), [named]);
-  const channelRows = useMemo(() => {
+  const channelShelves = useMemo<Shelf[]>(() => {
     const byChannel = new Map<string, ApprovedVideo[]>();
     for (const v of longVideos) {
       const list = byChannel.get(v.channelId) ?? [];
@@ -92,8 +109,20 @@ export default function FeedScreen({ session, onVideoPress }: Props) {
       byChannel.set(v.channelId, list);
     }
     // Channels with the newest video first (insertion order follows newest-first videos)
-    return [...byChannel.entries()].map(([channelId, list]) => ({ channel: channelById.get(channelId), channelId, list }));
+    return [...byChannel.entries()].map(([channelId, list]) => {
+      const c = channelById.get(channelId);
+      return { key: channelId, channelId, label: c?.name ?? "", thumb: c?.thumbnail, videos: list };
+    });
   }, [longVideos, channelById]);
+
+  const play = useCallback(
+    (v: ApprovedVideo) =>
+      onVideoPress(
+        v,
+        named.filter((o) => o.channelId === v.channelId && Boolean(o.isShort) === Boolean(v.isShort))
+      ),
+    [named, onVideoPress]
+  );
 
   // Android back on a channel page → home (not out of the app)
   useEffect(() => {
@@ -105,208 +134,490 @@ export default function FeedScreen({ session, onVideoPress }: Props) {
     return () => sub.remove();
   }, [openChannelId]);
 
-  const onRefresh = useCallback(() => {
-    // Everything is live already — this is just the familiar gesture
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+  const statusBar = <StatusBar barStyle="light-content" backgroundColor={colors.bg} />;
 
-  // ── Channel page ──
-  if (openChannelId) {
-    const channel = channelById.get(openChannelId);
-    const list = named.filter((v) => v.channelId === openChannelId);
+  if (named.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F7F7FF" />
-        <View style={styles.channelHeader}>
-          <TouchableOpacity onPress={() => setOpenChannelId(null)} hitSlop={12}>
-            <Text style={styles.back}>‹ Back</Text>
-          </TouchableOpacity>
-          <View style={styles.channelTitleRow}>
-            {channel?.thumbnail ? <Image source={{ uri: channel.thumbnail }} style={styles.avatarBig} /> : null}
-            <Text style={styles.channelTitle} numberOfLines={1}>
-              {channel?.name ?? ""}
-            </Text>
-          </View>
-        </View>
-        <FlatList
-          data={list}
-          keyExtractor={(v) => v.videoId}
-          numColumns={COLUMNS}
-          contentContainerStyle={styles.grid}
-          columnWrapperStyle={styles.gridRow}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.gridTile} onPress={() => onVideoPress(item)} activeOpacity={0.85}>
-              <Image source={{ uri: item.thumbnail }} style={styles.gridThumb} resizeMode="cover" />
-              <Text style={styles.gridTitle} numberOfLines={2}>
-                {item.title}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
-      </SafeAreaView>
+      <View style={styles.screen}>
+        {statusBar}
+        <Empty waitingForChannels={channels.length === 0} layout={layout} />
+      </View>
     );
   }
 
-  // ── Home ──
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F7F7FF" />
-
-      <View style={styles.header}>
-        <Text style={styles.greeting}>Hi {childName} 👋</Text>
-        <Text style={styles.subtitle}>What do you want to watch?</Text>
+  if (openChannelId) {
+    const channel = channelById.get(openChannelId);
+    return (
+      <View style={styles.screen}>
+        {statusBar}
+        <ChannelPage
+          channel={channel}
+          videos={named.filter((v) => v.channelId === openChannelId)}
+          layout={layout}
+          showDuration={mode === "big"}
+          onBack={() => setOpenChannelId(null)}
+          onPlay={play}
+        />
       </View>
+    );
+  }
 
-      {named.length === 0 ? (
-        <View style={styles.emptyState}>
-          {channels.length === 0 ? (
-            <>
-              <Text style={styles.emptyEmoji}>📺</Text>
-              <Text style={styles.emptyTitle}>Getting your videos ready!</Text>
-              <Text style={styles.emptyText}>A parent is setting up your channel list. Check back soon!</Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.emptyEmoji}>⏳</Text>
-              <Text style={styles.emptyTitle}>Almost ready!</Text>
-              <Text style={styles.emptyText}>We're checking your videos. This only takes a moment.</Text>
-            </>
-          )}
-        </View>
+  const newShelf: Shelf = {
+    key: "new",
+    label: "New",
+    emoji: "⭐",
+    color: colors.brand,
+    videos: longVideos.slice(0, mode === "little" ? LITTLE_NEW_COUNT : NEW_COUNT),
+  };
+  const shortsShelf: Shelf = { key: "shorts", label: "Shorts", emoji: "⚡", color: colors.action, videos: shorts, tall: true };
+  const shelves = [newShelf, shortsShelf, ...channelShelves].filter((s) => s.videos.length > 0);
+
+  return (
+    <View style={styles.screen}>
+      {statusBar}
+      {mode === "little" ? (
+        <LittleHome shelves={shelves} profile={profile} layout={layout} channelById={channelById} onPlay={play} />
       ) : (
-        <ScrollView
-          contentContainerStyle={{ paddingBottom: 24 }}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6C63FF" />}
-        >
-          {longVideos.length ? (
-            <Row title="✨ New" videos={longVideos.slice(0, NEW_COUNT)} onVideoPress={onVideoPress} showChannel />
-          ) : null}
-
-          {shorts.length ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>⚡ Shorts</Text>
-              <FlatList
-                horizontal
-                data={shorts}
-                keyExtractor={(v) => v.videoId}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.rowContent}
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.shortTile} onPress={() => onVideoPress(item)} activeOpacity={0.85}>
-                    <Image source={{ uri: item.thumbnail }} style={styles.shortThumb} resizeMode="cover" />
-                    <Text style={styles.rowTitle} numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              />
-            </View>
-          ) : null}
-
-          {channelRows.map(({ channel, channelId, list }) => (
-            <View key={channelId} style={styles.section}>
-              <TouchableOpacity style={styles.channelRowHeader} onPress={() => setOpenChannelId(channelId)} activeOpacity={0.7}>
-                {channel?.thumbnail ? <Image source={{ uri: channel.thumbnail }} style={styles.avatar} /> : null}
-                <Text style={styles.sectionTitle} numberOfLines={1}>
-                  {channel?.name ?? ""}
-                </Text>
-                <Text style={styles.seeAll}>See all ›</Text>
-              </TouchableOpacity>
-              <Row videos={list.slice(0, PER_CHANNEL_ROW)} onVideoPress={onVideoPress} />
-            </View>
-          ))}
-        </ScrollView>
+        <BigHome
+          shelves={shelves}
+          profile={profile}
+          layout={layout}
+          channelById={channelById}
+          onPlay={play}
+          onOpenChannel={setOpenChannelId}
+        />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
-function Row({
-  title,
-  videos,
-  onVideoPress,
-  showChannel,
+// ── LITTLE: bubbles + one film strip ─────────────────────────
+
+function LittleHome({
+  shelves,
+  profile,
+  layout,
+  channelById,
+  onPlay,
 }: {
-  title?: string;
-  videos: ApprovedVideo[];
-  onVideoPress: (v: ApprovedVideo) => void;
-  showChannel?: boolean;
+  shelves: Shelf[];
+  profile: KidProfile;
+  layout: Layout;
+  channelById: Map<string, WhitelistedChannel>;
+  onPlay: (v: ApprovedVideo) => void;
 }) {
+  const insets = useSafeAreaInsets();
+  const watched = useWatched();
+  const [selected, setSelected] = useState(shelves[0]?.key ?? "new");
+  const shelf = shelves.find((s) => s.key === selected) ?? shelves[0];
+  const { bubble, margin, gap, stripTileW, stripTileH } = layout;
+
+  const tileW = shelf.tall ? Math.round(stripTileH * (9 / 16)) : stripTileW;
+  const tileH = stripTileH;
+  const showBadge = !shelf.channelId; // mixed shelves show whose video it is
+
   return (
-    <View style={title ? styles.section : undefined}>
-      {title ? <Text style={[styles.sectionTitle, styles.sectionTitlePad]}>{title}</Text> : null}
-      <FlatList
+    <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+      <ScrollView
         horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{ paddingHorizontal: margin, paddingTop: 16, paddingBottom: 8, gap }}
+      >
+        <View style={[styles.meBubble, { width: bubble, height: bubble, borderRadius: bubble / 2 }]}>
+          <Text style={{ fontSize: bubble * 0.5 }}>{profile.avatar || "🙂"}</Text>
+        </View>
+        {shelves.map((s) => (
+          <Bubble key={s.key} shelf={s} size={bubble} selected={s.key === shelf.key} onPress={() => setSelected(s.key)} />
+        ))}
+      </ScrollView>
+
+      <View style={{ flex: 1, justifyContent: "center", paddingBottom: 48 + insets.bottom }}>
+        <FlatList
+          key={shelf.key} // a new shelf starts at its beginning
+          horizontal
+          data={shelf.videos}
+          keyExtractor={(v) => v.videoId}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: margin, gap }}
+          snapToInterval={tileW + gap}
+          decelerationRate="fast"
+          renderItem={({ item }) => (
+            <VideoTile
+              video={item}
+              width={tileW}
+              height={tileH}
+              onPress={onPlay}
+              watched={watched.has(item.videoId)}
+              channelThumb={showBadge ? channelById.get(item.channelId)?.thumbnail : undefined}
+              titleSize={Math.round(19 * layout.scale)}
+            />
+          )}
+        />
+      </View>
+    </View>
+  );
+}
+
+function Bubble({ shelf, size, selected, onPress }: { shelf: Shelf; size: number; selected: boolean; onPress: () => void }) {
+  return (
+    <Tap onPress={onPress} style={{ width: size + 12, alignItems: "center" }} accessibilityLabel={shelf.label} accessibilityState={{ selected }}>
+      <View
+        style={[
+          styles.bubble,
+          { width: size, height: size, borderRadius: size / 2, backgroundColor: shelf.color ?? colors.surface },
+          selected && styles.bubbleSelected,
+        ]}
+      >
+        {shelf.thumb ? (
+          <Image source={{ uri: shelf.thumb }} style={{ width: "100%", height: "100%" }} />
+        ) : (
+          <Text style={{ fontSize: size * 0.45 }}>{shelf.emoji}</Text>
+        )}
+      </View>
+      <Text style={[styles.bubbleLabel, selected && { color: colors.focus }]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+        {shelf.label}
+      </Text>
+    </Tap>
+  );
+}
+
+// ── BIG: collapsing header + shelves ─────────────────────────
+
+const BAR_H = 64;
+
+function BigHome({
+  shelves,
+  profile,
+  layout,
+  channelById,
+  onPlay,
+  onOpenChannel,
+}: {
+  shelves: Shelf[];
+  profile: KidProfile;
+  layout: Layout;
+  channelById: Map<string, WhitelistedChannel>;
+  onPlay: (v: ApprovedVideo) => void;
+  onOpenChannel: (channelId: string) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const watched = useWatched();
+  const { margin, gap, rowTileW, rowTileH, shortTileW, shortTileH, scale } = layout;
+  const greetH = layout.phone ? 48 : 60;
+  const topPad = insets.top + greetH + BAR_H + 8;
+
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const sectionY = useRef<Record<string, number>>({});
+  const [active, setActive] = useState(shelves[0]?.key);
+  const activeRef = useRef(active);
+
+  // Where a section's top lands just under the pinned bar
+  const targetY = useCallback(
+    (key: string, index: number) => (index === 0 ? 0 : Math.max(0, (sectionY.current[key] ?? 0) - insets.top - BAR_H - 8)),
+    [insets.top]
+  );
+
+  // Highlight the chip for the shelf currently under the bar
+  const onScrollJS = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const value = e.nativeEvent.contentOffset.y;
+    let current = shelves[0]?.key;
+    shelves.forEach((s, i) => {
+      if (sectionY.current[s.key] !== undefined && targetY(s.key, i) <= value + 12) current = s.key;
+    });
+    if (current !== activeRef.current) {
+      activeRef.current = current;
+      setActive(current);
+    }
+  };
+
+  const headerY = scrollY.interpolate({ inputRange: [0, greetH], outputRange: [0, -greetH], extrapolate: "clamp" });
+  const greetOpacity = scrollY.interpolate({ inputRange: [0, greetH * 0.7], outputRange: [1, 0], extrapolate: "clamp" });
+  const lineOpacity = scrollY.interpolate({ inputRange: [greetH * 0.7, greetH], outputRange: [0, 1], extrapolate: "clamp" });
+
+  const jump = (key: string, index: number) => scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
+
+  return (
+    <View style={{ flex: 1, paddingLeft: insets.left, paddingRight: insets.right }}>
+      <Animated.ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingTop: topPad, paddingBottom: insets.bottom + 32 }}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          useNativeDriver: true,
+          listener: onScrollJS,
+        })}
+      >
+        {shelves.map((s) => (
+          <View
+            key={s.key}
+            style={styles.section}
+            onLayout={(e: LayoutChangeEvent) => {
+              sectionY.current[s.key] = e.nativeEvent.layout.y;
+            }}
+          >
+            <View style={[styles.sectionHeader, { paddingHorizontal: margin }]}>
+              {s.thumb ? (
+                <Image source={{ uri: s.thumb }} style={styles.sectionAvatar} />
+              ) : (
+                <Text style={styles.sectionEmoji}>{s.emoji}</Text>
+              )}
+              <Text style={[typo.rowTitle, styles.sectionTitle, { fontSize: typo.rowTitle.fontSize * scale }]} numberOfLines={1}>
+                {s.label}
+              </Text>
+              {s.channelId ? (
+                <Tap outerStyle={styles.seeAllOuter} style={styles.seeAll} onPress={() => onOpenChannel(s.channelId!)} accessibilityLabel={`See all ${s.label}`}>
+                  <Text style={styles.seeAllText}>See all ›</Text>
+                </Tap>
+              ) : null}
+            </View>
+            <FlatList
+              horizontal
+              data={s.channelId ? s.videos.slice(0, PER_CHANNEL_ROW) : s.videos}
+              keyExtractor={(v) => v.videoId}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: margin, gap }}
+              renderItem={({ item }) => (
+                <VideoTile
+                  video={item}
+                  width={s.tall ? shortTileW : rowTileW}
+                  height={s.tall ? shortTileH : rowTileH}
+                  onPress={onPlay}
+                  watched={watched.has(item.videoId)}
+                  channelThumb={s.channelId ? undefined : channelById.get(item.channelId)?.thumbnail}
+                  showDuration
+                  titleSize={Math.round(17 * scale)}
+                />
+              )}
+              ListFooterComponent={
+                s.channelId && s.videos.length > PER_CHANNEL_ROW ? (
+                  <Tap
+                    style={[styles.moreTile, { width: rowTileH, height: rowTileH }]}
+                    onPress={() => onOpenChannel(s.channelId!)}
+                    accessibilityLabel={`See all ${s.label}`}
+                  >
+                    {s.thumb ? <Image source={{ uri: s.thumb }} style={styles.moreAvatar} /> : null}
+                    <Text style={styles.moreText}>See all</Text>
+                  </Tap>
+                ) : null
+              }
+            />
+          </View>
+        ))}
+
+        <View style={styles.endCap}>
+          <Text style={styles.endEmoji}>🎉</Text>
+          <Text style={styles.endText}>You've seen all your channels!</Text>
+          <Tap style={styles.endBtn} onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}>
+            <Text style={styles.endBtnText}>Back to the top ↑</Text>
+          </Tap>
+        </View>
+      </Animated.ScrollView>
+
+      {/* Header: greeting (scrolls away) + chip bar (stays) */}
+      <Animated.View
+        style={[styles.header, { paddingTop: insets.top, height: insets.top + greetH + BAR_H, transform: [{ translateY: headerY }] }]}
+      >
+        <Animated.View style={[styles.greetRow, { height: greetH, paddingHorizontal: margin, opacity: greetOpacity }]}>
+          <View style={styles.greetAvatar}>
+            <Text style={{ fontSize: 22 }}>{profile.avatar || "🙂"}</Text>
+          </View>
+          <Text style={[typo.greeting, styles.greetText, { fontSize: layout.phone ? 26 : 32 }]} numberOfLines={1}>
+            {profile.name ? `Hi ${profile.name} 👋` : "Hi there 👋"}
+          </Text>
+        </Animated.View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ height: BAR_H, flexGrow: 0 }}
+          contentContainerStyle={{ paddingHorizontal: margin, gap: 10, alignItems: "center" }}
+        >
+          {shelves.map((s, i) => {
+            const on = s.key === active;
+            return (
+              <Tap
+                key={s.key}
+                style={[styles.chip, on && styles.chipOn]}
+                onPress={() => jump(s.key, i)}
+                accessibilityLabel={s.label}
+                accessibilityState={{ selected: on }}
+              >
+                {s.thumb ? <Image source={{ uri: s.thumb }} style={styles.chipAvatar} /> : <Text style={styles.chipEmoji}>{s.emoji}</Text>}
+                <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+                  {s.label}
+                </Text>
+              </Tap>
+            );
+          })}
+        </ScrollView>
+        <Animated.View style={[styles.headerLine, { opacity: lineOpacity }]} />
+      </Animated.View>
+    </View>
+  );
+}
+
+// ── Channel page (big mode "See all") ────────────────────────
+
+function ChannelPage({
+  channel,
+  videos,
+  layout,
+  showDuration,
+  onBack,
+  onPlay,
+}: {
+  channel: WhitelistedChannel | undefined;
+  videos: ApprovedVideo[];
+  layout: Layout;
+  showDuration: boolean;
+  onBack: () => void;
+  onPlay: (v: ApprovedVideo) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const watched = useWatched();
+  const { margin, gap, gridColumns, gridTileW, gridTileH, touch, scale } = layout;
+
+  return (
+    <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+      <View style={[styles.pageHeader, { paddingHorizontal: margin }]}>
+        <Tap
+          style={[styles.backBtn, { width: touch, height: touch, borderRadius: touch / 2 }]}
+          onPress={onBack}
+          accessibilityLabel="Back"
+        >
+          <Text style={[styles.backText, { fontSize: touch * 0.45 }]}>←</Text>
+        </Tap>
+        {channel?.thumbnail ? <Image source={{ uri: channel.thumbnail }} style={styles.pageAvatar} /> : null}
+        <Text style={[typo.greeting, styles.pageTitle, { fontSize: 30 * scale }]} numberOfLines={1}>
+          {channel?.name ?? ""}
+        </Text>
+      </View>
+      <FlatList
+        key={`grid-${gridColumns}`} // column count changes with rotation
         data={videos}
         keyExtractor={(v) => v.videoId}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.rowContent}
+        numColumns={gridColumns}
+        contentContainerStyle={{ paddingHorizontal: margin, paddingBottom: insets.bottom + 32, gap: gap + 4 }}
+        columnWrapperStyle={gridColumns > 1 ? { gap } : undefined}
+        showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.rowTile} onPress={() => onVideoPress(item)} activeOpacity={0.85}>
-            <Image source={{ uri: item.thumbnail }} style={styles.rowThumb} resizeMode="cover" />
-            <Text style={styles.rowTitle} numberOfLines={2}>
-              {item.title}
-            </Text>
-            {showChannel && item.channelName ? (
-              <Text style={styles.rowChannel} numberOfLines={1}>
-                {item.channelName}
-              </Text>
-            ) : null}
-          </TouchableOpacity>
+          <VideoTile
+            video={item}
+            width={gridTileW}
+            height={gridTileH}
+            onPress={onPlay}
+            watched={watched.has(item.videoId)}
+            showDuration={showDuration}
+            titleSize={Math.round(16 * scale)}
+          />
         )}
       />
     </View>
   );
 }
 
-const card = {
-  backgroundColor: "#fff",
-  borderRadius: 12,
-  overflow: "hidden" as const,
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.06,
-  shadowRadius: 6,
-  elevation: 3,
-};
+// ── Nothing to show yet ──────────────────────────────────────
+
+function Empty({ waitingForChannels, layout }: { waitingForChannels: boolean; layout: Layout }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.empty, { paddingTop: insets.top, paddingHorizontal: layout.margin * 2 }]}>
+      <Text style={styles.emptyEmoji}>{waitingForChannels ? "📺" : "⏳"}</Text>
+      <Text style={styles.emptyTitle}>{waitingForChannels ? "Getting your videos ready!" : "Almost ready!"}</Text>
+      <Text style={styles.emptyText}>
+        {waitingForChannels
+          ? "A grown-up is picking your channels. Check back soon!"
+          : "We're checking your videos. This only takes a moment."}
+      </Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F7F7FF" },
-  header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
-  greeting: { fontSize: 26, fontWeight: "800", color: "#1A1A2E" },
-  subtitle: { fontSize: 15, color: "#666", marginTop: 2 },
+  screen: { flex: 1, backgroundColor: colors.bg },
 
-  section: { marginTop: 18 },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: "#1A1A2E", flexShrink: 1 },
-  sectionTitlePad: { paddingHorizontal: 20, marginBottom: 10 },
-  channelRowHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, marginBottom: 10 },
-  avatar: { width: 30, height: 30, borderRadius: 15, marginRight: 10, backgroundColor: "#E0E0FF" },
-  seeAll: { marginLeft: "auto", paddingLeft: 12, fontSize: 14, fontWeight: "700", color: "#6C63FF" },
+  // little
+  meBubble: { backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" },
+  bubble: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 4,
+    borderColor: "transparent",
+  },
+  bubbleSelected: { borderColor: colors.focus, transform: [{ scale: 1.06 }] },
+  bubbleLabel: { color: colors.textSecondary, fontFamily: fonts.display, fontSize: 15, marginTop: 6, textAlign: "center" },
 
-  rowContent: { paddingHorizontal: 16, gap: 10 },
-  rowTile: { width: ROW_TILE, ...card },
-  rowThumb: { width: ROW_TILE, height: ROW_THUMB_H, backgroundColor: "#E0E0FF" },
-  rowTitle: { fontSize: 13, fontWeight: "600", color: "#333", paddingHorizontal: 8, paddingTop: 7, paddingBottom: 2, lineHeight: 17 },
-  rowChannel: { fontSize: 11, color: "#888", paddingHorizontal: 8, paddingBottom: 8 },
-  shortTile: { width: SHORT_TILE, ...card },
-  shortThumb: { width: SHORT_TILE, height: SHORT_THUMB_H, backgroundColor: "#E0E0FF" },
+  // big — header
+  header: { position: "absolute", top: 0, left: 0, right: 0, backgroundColor: colors.bg, zIndex: 2 },
+  greetRow: { flexDirection: "row", alignItems: "center" },
+  greetAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  greetText: { color: colors.text, flexShrink: 1 },
+  chip: {
+    height: 48,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 6,
+    paddingRight: 18,
+    maxWidth: 240,
+  },
+  chipOn: { backgroundColor: colors.focus },
+  chipAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 8, backgroundColor: colors.surfacePressed },
+  chipEmoji: { fontSize: 22, width: 36, textAlign: "center", marginRight: 4 },
+  chipText: { color: colors.text, fontFamily: fonts.display, fontSize: 17, flexShrink: 1 },
+  chipTextOn: { color: colors.ink },
+  headerLine: { position: "absolute", left: 0, right: 0, bottom: 0, height: 1, backgroundColor: colors.surfacePressed },
 
-  channelHeader: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12 },
-  back: { fontSize: 16, fontWeight: "600", color: "#6C63FF", marginBottom: 10 },
-  channelTitleRow: { flexDirection: "row", alignItems: "center" },
-  avatarBig: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: "#E0E0FF" },
-  channelTitle: { fontSize: 22, fontWeight: "800", color: "#1A1A2E", flexShrink: 1 },
-  grid: { paddingHorizontal: 16, paddingBottom: 24 },
-  gridRow: { gap: 8, marginBottom: 8 },
-  gridTile: { width: GRID_TILE, ...card },
-  gridThumb: { width: GRID_TILE, height: GRID_THUMB_H, backgroundColor: "#E0E0FF" },
-  gridTitle: { fontSize: 12, fontWeight: "600", color: "#333", padding: 8, lineHeight: 16 },
+  // big — shelves
+  section: { marginBottom: 28 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  sectionAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: colors.surface },
+  sectionEmoji: { fontSize: 26, marginRight: 8 },
+  sectionTitle: { color: colors.text, flexShrink: 1 },
+  seeAllOuter: { marginLeft: "auto", marginRight: -4, paddingLeft: 12 },
+  seeAll: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  seeAllText: { color: colors.brandOnDark, fontFamily: fonts.display, fontSize: 16 },
+  moreTile: {
+    borderRadius: radius.tile,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  moreAvatar: { width: 56, height: 56, borderRadius: 28, marginBottom: 8 },
+  moreText: { color: colors.text, fontFamily: fonts.display, fontSize: 18 },
+  endCap: { alignItems: "center", paddingVertical: 24 },
+  endEmoji: { fontSize: 48 },
+  endText: { color: colors.textSecondary, fontFamily: fonts.display, fontSize: 20, marginTop: 8, textAlign: "center" },
+  endBtn: { marginTop: 16, backgroundColor: colors.surface, borderRadius: radius.pill, paddingHorizontal: 22, paddingVertical: 14 },
+  endBtnText: { color: colors.text, fontFamily: fonts.display, fontSize: 17 },
 
-  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40 },
-  emptyEmoji: { fontSize: 64, marginBottom: 16 },
-  emptyTitle: { fontSize: 22, fontWeight: "700", color: "#1A1A2E", marginBottom: 8, textAlign: "center" },
-  emptyText: { fontSize: 16, color: "#666", textAlign: "center", lineHeight: 24 },
+  // channel page
+  pageHeader: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 16 },
+  backBtn: { backgroundColor: colors.action, alignItems: "center", justifyContent: "center", marginRight: 14 },
+  backText: { color: colors.ink, fontFamily: fonts.displayBold },
+  pageAvatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12, backgroundColor: colors.surface },
+  pageTitle: { color: colors.text, flexShrink: 1 },
+
+  // empty
+  empty: { flex: 1, alignItems: "center", justifyContent: "center" },
+  emptyEmoji: { fontSize: 72, marginBottom: 16 },
+  emptyTitle: { color: colors.text, fontFamily: fonts.display, fontSize: 28, textAlign: "center", marginBottom: 10 },
+  emptyText: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: 18, textAlign: "center", lineHeight: 26 },
 });

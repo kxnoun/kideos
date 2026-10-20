@@ -11,6 +11,13 @@ export interface ChildSession {
   paired: boolean;
 }
 
+// Live from the child doc (the parent can change it any time); age picks the layout
+export interface KidProfile {
+  name: string;
+  age: number;
+  avatar: string; // an emoji
+}
+
 export type SeedingStatus = "pending" | "ready" | "error";
 
 export interface WhitelistedChannel {

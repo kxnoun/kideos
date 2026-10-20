@@ -14,14 +14,10 @@
 // ─────────────────────────────────────────────────────────────
 
 import React, { useEffect, useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  SafeAreaView,
-} from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, StatusBar } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import firestore from "@react-native-firebase/firestore";
+import { colors, fonts, useLayout } from "../theme";
 import type { ChildSession } from "../types";
 
 interface Props {
@@ -86,102 +82,69 @@ export default function PairingScreen({ onPaired }: Props) {
     return () => { cleanup?.(); };
   }, [createPairingCode]);
 
+  const layout = useLayout();
+  const insets = useSafeAreaInsets();
+  const box = Math.min(72, Math.floor((layout.width - 2 * layout.margin - 5 * 10) / 6));
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingHorizontal: layout.margin }]}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <Text style={styles.logo}>Kideos</Text>
 
-      {status === "generating" && (
-        <ActivityIndicator size="large" color="#6C63FF" />
-      )}
+      {status === "generating" && <ActivityIndicator size="large" color={colors.brandOnDark} />}
 
       {status === "waiting" && (
         <>
           <Text style={styles.instruction}>
-            Ask a parent to open{"\n"}
-            <Text style={styles.appName}>Kideos for Parents</Text>
-            {"\n"}and enter this code:
+            Ask a grown-up to open <Text style={styles.appName}>Kideos for Parents</Text>
+            {"\n"}and type this code:
           </Text>
 
-          <View style={styles.codeBox}>
-            <Text style={styles.code}>{code}</Text>
+          <View style={styles.codeRow} accessible accessibilityLabel={`Pairing code ${code.split("").join(" ")}`}>
+            {code.split("").map((ch, i) => (
+              <View key={i} style={[styles.codeBox, { width: box, height: box * 1.25 }]}>
+                <Text style={[styles.code, { fontSize: box * 0.6 }]}>{ch}</Text>
+              </View>
+            ))}
           </View>
 
-          <Text style={styles.subtext}>Code expires in 15 minutes</Text>
-          <ActivityIndicator
-            size="small"
-            color="#6C63FF"
-            style={styles.spinner}
-          />
-          <Text style={styles.waiting}>Waiting for parent...</Text>
+          <Text style={styles.subtext}>The code works for 15 minutes</Text>
+          <View style={styles.waitingRow}>
+            <ActivityIndicator size="small" color={colors.brandOnDark} />
+            <Text style={styles.waiting}>Waiting for a grown-up…</Text>
+          </View>
         </>
       )}
 
-      {status === "paired" && (
-        <Text style={styles.paired}>✓ Connected!</Text>
-      )}
-    </SafeAreaView>
+      {status === "paired" && <Text style={styles.paired}>✓ Connected!</Text>}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F7F7FF",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-  },
-  logo: {
-    fontSize: 36,
-    fontWeight: "800",
-    color: "#6C63FF",
-    marginBottom: 48,
-    letterSpacing: -0.5,
-  },
+  container: { flex: 1, backgroundColor: colors.bg, alignItems: "center", justifyContent: "center" },
+  logo: { color: colors.text, fontFamily: fonts.displayBold, fontSize: 48, marginBottom: 40 },
   instruction: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
     fontSize: 20,
-    color: "#333",
     textAlign: "center",
     lineHeight: 30,
-    marginBottom: 32,
+    marginBottom: 28,
   },
-  appName: {
-    fontWeight: "700",
-    color: "#6C63FF",
-  },
+  appName: { color: colors.text, fontFamily: fonts.bodyHeavy },
+  codeRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
   codeBox: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    paddingHorizontal: 40,
-    paddingVertical: 24,
-    shadowColor: "#6C63FF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
-    marginBottom: 16,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: colors.brandOnDark,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  code: {
-    fontSize: 48,
-    fontWeight: "800",
-    letterSpacing: 8,
-    color: "#1A1A2E",
-  },
-  subtext: {
-    fontSize: 14,
-    color: "#999",
-    marginBottom: 32,
-  },
-  spinner: {
-    marginBottom: 12,
-  },
-  waiting: {
-    fontSize: 16,
-    color: "#666",
-  },
-  paired: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#4CAF50",
-  },
+  code: { color: colors.text, fontFamily: fonts.displayBold },
+  subtext: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: 15, marginBottom: 28 },
+  waitingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  waiting: { color: colors.text, fontFamily: fonts.display, fontSize: 18 },
+  paired: { color: colors.success, fontFamily: fonts.displayBold, fontSize: 32 },
 });
