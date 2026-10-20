@@ -84,19 +84,25 @@ Native: `MainActivity.kt` (`hideSystemBars`, re-applied on focus) and `KideosWin
 
 **Full screen from the first tap** (agreed Oct 20). Our own full screen — an app can't trigger YouTube's
 fullscreen button, and doesn't need to. Long videos lock to landscape while playing (everyone; App.tsx);
-Shorts fill the height. **Nothing is drawn on the playing video** (YouTube's terms): the orange ← sits in
-the black space beside it (wider-than-16:9 phones) or above it (4:3 / 16:10 tablets); on an exactly 16:9
-screen the video shrinks a little to make room.
+Shorts fill the height. YouTube's own fullscreen button is off — the official `fs=0` player setting
+(`preventFullScreen`), allowed by YouTube; its fullscreen would take over and stop the swipes. **Nothing is
+drawn on the playing video** (YouTube's terms): a quiet see-through round back button (drawn chevron —
+`components/BackButton`) sits centred in the black space beside it (wider-than-16:9 phones) or above it
+(4:3 / 16:10 tablets); on an exactly 16:9 screen the video shrinks a little to make room.
 
 - **Swipe down** on the video → it drops away and the feed comes back. While the minimum watch time is
   owed it bounces back with "Watch a little more!".
 - **Swipe up** → the video shrinks to the top and "More from <channel>" (3 videos) slides in underneath —
-  the video moves out of the way, nothing covers it. Swipe down, ↓ or Android back → full screen again.
+  the video moves out of the way, nothing covers it. Swipe down anywhere, the ⌄ button (top-left while
+  the row is open) or Android back → full screen again.
   No swipe-to-next-video (the endless-feed pattern).
-- Swipes start on the video (a swipe from the very top edge is Android's notification shade). They're seen
+- A swipe from the very top edge is Android's notification shade, not ours. Swipes on the video are seen
   by `SWIPE_IN_PLAYER`, a passive listener inside YouTube's iframe (never blocks a touch; ignores the seek
   bar, menus and ads), which reports through the library's `onPlaybackRateChange` as a `kideos:swipe:*`
   string — the library has no custom-message hook. Same YouTube-terms grey area as `HIDE_IN_PLAYER`.
+  Swipes anywhere else (black space, the row) by a PanResponder; the two are de-duplicated (600 ms).
+- If the phone doesn't turn sideways for a long video, the native module is missing (logcat:
+  `[device] KideosWindow native module missing`) → rebuild with Gradle.
 - Opening zooms the video in; Reduce Motion skips the animations.
 
 Banners ("Watch a little

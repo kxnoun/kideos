@@ -8,15 +8,19 @@
 // - The video fills the screen (our own full screen — YouTube's fullscreen button
 //   can't be triggered by an app, and isn't needed). Long videos are locked to
 //   landscape while playing (App.tsx); Shorts fill the height.
-// - Nothing is drawn on top of the playing video: the ← button sits in the black
-//   space beside it (or above it on 4:3 tablets); if the screen is exactly 16:9 the
-//   video shrinks a little to make room.
+// - YouTube's own fullscreen button is turned off (the official `fs=0` player setting
+//   — its fullscreen would take over the screen and the swipes stop working).
+// - Nothing is drawn on top of the playing video: a quiet round back button sits in
+//   the middle of the black space beside it (or above it on 4:3 tablets); if the
+//   screen is exactly 16:9 the video shrinks a little to make room.
 // - Swipe DOWN on the video → it drops away and the feed comes back (bounces back
 //   with "Watch a little more!" while the minimum time is owed).
 // - Swipe UP → the video shrinks up and "More from <channel>" slides in under it
-//   (it moves out of the way — no overlay). Swipe down / ← / Android back → full again.
-//   Swipes are seen by a small script inside YouTube's player (SWIPE_IN_PLAYER) that
-//   only listens — it never blocks a touch.
+//   (it moves out of the way — no overlay). Swipe down (anywhere) / the button /
+//   Android back → full again.
+//   Swipes on the video are seen by a small script inside YouTube's player
+//   (SWIPE_IN_PLAYER) that only listens — it never blocks a touch; swipes anywhere
+//   else on the screen by a PanResponder.
 // - When a video ends: an end card — Watch again / My videos / up to 3 more from the
 //   same channel. Nothing plays by itself (no autoplay).
 //
@@ -39,8 +43,20 @@
 //   closing the app reopens it. A parent's Hide / End Session always gets the kid out.
 // ─────────────────────────────────────────────────────────────
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Animated, AppState, BackHandler, FlatList, Linking, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  Animated,
+  AppState,
+  BackHandler,
+  FlatList,
+  Linking,
+  PanResponder,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import YoutubePlayer, { type YoutubeIframeRef } from "react-native-youtube-iframe";
 import type { ShouldStartLoadRequest, WebViewOpenWindowEvent } from "react-native-webview/lib/WebViewTypes";
@@ -59,6 +75,7 @@ import { colors, fonts, radius, useLayout } from "../theme";
 import { markWatched, useWatched } from "../watched";
 import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
+import BackButton from "../components/BackButton";
 import { hideSystemBars } from "../device";
 
 // done = watched or left normally; removed = a parent hid it; error = it won't play here
@@ -161,8 +178,8 @@ const SWIPE_IN_PLAYER = `(function () {
     on = false;
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
-    var need = Math.max(50, (window.innerHeight || 300) * 0.15);
-    if (Date.now() - st < 800 && Math.abs(dy) > need && Math.abs(dy) > 2 * Math.abs(dx)) send(dy > 0 ? 'down' : 'up');
+    // 40 px: well past a tap's wobble, and still reachable on the shrunk video
+    if (Date.now() - st < 800 && Math.abs(dy) > 40 && Math.abs(dy) > 2 * Math.abs(dx)) send(dy > 0 ? 'down' : 'up');
   }, { passive: true, capture: true });
 })(); true;`;
 
@@ -303,11 +320,28 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const handlers = useRef({ leave, openMore, closeMore, showMore });
   handlers.current = { leave, openMore, closeMore, showMore };
 
+  const lastSwipeAt = useRef(0);
   const onSwipe = useCallback((dir: string) => {
+    const now = Date.now();
+    if (now - lastSwipeAt.current < 600) return; // seen by both the web view and the PanResponder
+    lastSwipeAt.current = now;
     const h = handlers.current;
     if (dir === "up" && !h.showMore) h.openMore();
     if (dir === "down") (h.showMore ? h.closeMore : h.leave)();
   }, []);
+
+  // Swipes anywhere outside the video (the black space, the "More from" row)
+  const pan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 14 && Math.abs(g.dy) > 2 * Math.abs(g.dx),
+        onPanResponderRelease: (_e, g) => {
+          if (Math.abs(g.dy) > 40) onSwipe(g.dy > 0 ? "down" : "up");
+        },
+        onPanResponderTerminationRequest: () => true,
+      }),
+    [onSwipe]
+  );
 
   // Android back: closes "More from" first, then like ← (instead of closing the app)
   useEffect(() => {
@@ -387,6 +421,13 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   }
   playerW = Math.floor(playerW);
   playerH = Math.floor(playerH);
+  const sideSpace = (W - playerW) / 2;
+  const topSpace = (H - playerH) / 2;
+  const backPosition = showMore
+    ? { left: insets.left + 12, top: insets.top + 12 }
+    : buttonSide === "left"
+      ? { left: insets.left + Math.max(8, (sideSpace - touch) / 2), top: insets.top + (H - touch) / 2 }
+      : { left: insets.left + margin, top: insets.top + Math.max(8, (topSpace - touch) / 2) };
 
   // Swiped up: the video shrinks to the top, the row takes the space below
   const rowTileH = Math.min(layout.rowTileH, Math.round(H * 0.3));
@@ -410,7 +451,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   );
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} {...pan.panHandlers}>
       <StatusBar hidden />
 
       <View style={[styles.stage, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]}>
@@ -421,6 +462,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
             height={playerH}
             videoId={video.videoId}
             play={playing}
+            initialPlayerParams={{ preventFullScreen: true }}
             onPlaybackRateChange={(data: string) => {
               if (typeof data === "string" && data.startsWith(SWIPE_PREFIX)) onSwipe(data.slice(SWIPE_PREFIX.length));
             }}
@@ -481,20 +523,16 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
         </Animated.View>
       </View>
 
-      {/* ← in the black space beside / above the video — never on top of it */}
-      <Tap
-        outerStyle={[
-          styles.backWrap,
-          buttonSide === "left"
-            ? { left: insets.left + 12, top: insets.top + 12 }
-            : { left: insets.left + margin, top: insets.top + 12 },
-        ]}
-        style={[styles.backBtn, { width: touch, height: touch, borderRadius: touch / 2 }]}
+      {/* Back: centred in the black space beside / above the video — never on top of it.
+          With "More from" open, top-left (the row takes the bottom). */}
+      <BackButton
+        size={touch}
+        variant="quiet"
+        direction={showMore ? "down" : "left"}
         onPress={() => (showMore ? closeMore() : leave())}
-        accessibilityLabel={showMore ? "Back to the video" : "Back to my videos"}
-      >
-        <Text style={[styles.backText, { fontSize: touch * 0.45 }]}>{showMore ? "↓" : "←"}</Text>
-      </Tap>
+        label={showMore ? "Back to the video" : "Back to my videos"}
+        outerStyle={[styles.backWrap, backPosition]}
+      />
 
       {/* Swiped up: more from this channel, under the shrunk video */}
       {showMore ? (
@@ -593,8 +631,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000" },
   stage: { position: "absolute", alignItems: "center", justifyContent: "center" },
   backWrap: { position: "absolute", zIndex: 3 },
-  backBtn: { backgroundColor: colors.action, alignItems: "center", justifyContent: "center" },
-  backText: { color: colors.ink, fontFamily: fonts.displayBold },
   moreRow: { position: "absolute" },
   moreTitle: { color: colors.text, fontFamily: fonts.display, fontSize: 20, marginBottom: 10, textAlign: "center" },
   messageWrap: { position: "absolute", left: 0, right: 0, alignItems: "center", zIndex: 4 },

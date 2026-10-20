@@ -46,6 +46,7 @@ import { colors, fonts, modeForAge, radius, type as typo, useLayout, type Layout
 import { useWatched } from "../watched";
 import Tap from "../components/Tap";
 import VideoTile from "../components/VideoTile";
+import BackButton from "../components/BackButton";
 import type { ApprovedVideo, ChildSession, KidProfile, WhitelistedChannel } from "../types";
 
 const NEW_COUNT = 15;
@@ -496,13 +497,7 @@ function ChannelPage({
   return (
     <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View style={[styles.pageHeader, { paddingHorizontal: margin }]}>
-        <Tap
-          style={[styles.backBtn, { width: touch, height: touch, borderRadius: touch / 2 }]}
-          onPress={onBack}
-          accessibilityLabel="Back"
-        >
-          <Text style={[styles.backText, { fontSize: touch * 0.45 }]}>←</Text>
-        </Tap>
+        <BackButton size={touch} onPress={onBack} label="Back" outerStyle={{ marginRight: 14 }} />
         {channel?.thumbnail ? <Image source={{ uri: channel.thumbnail }} style={styles.pageAvatar} /> : null}
         <Text style={[typo.greeting, styles.pageTitle, { fontSize: 30 * scale }]} numberOfLines={1}>
           {channel?.name ?? ""}
@@ -626,8 +621,6 @@ const styles = StyleSheet.create({
 
   // channel page
   pageHeader: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 16 },
-  backBtn: { backgroundColor: colors.action, alignItems: "center", justifyContent: "center", marginRight: 14 },
-  backText: { color: colors.ink, fontFamily: fonts.displayBold },
   pageAvatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12, backgroundColor: colors.surface },
   pageTitle: { color: colors.text, flexShrink: 1 },
 
