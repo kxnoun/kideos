@@ -11,6 +11,13 @@ export interface ChildSession {
   paired: boolean;
 }
 
+// Live from the child doc (the parent can change it any time); age picks the layout
+export interface KidProfile {
+  name: string;
+  age: number;
+  avatar: string; // an emoji
+}
+
 export type SeedingStatus = "pending" | "ready" | "error";
 
 export interface WhitelistedChannel {
@@ -29,6 +36,7 @@ export interface ApprovedVideo {
   thumbnail: string;
   publishedAt: Timestamp;
   durationSeconds: number | null;
+  isShort?: boolean; // a YouTube Short (verdicts since profile v7)
 }
 
 // Parent's viewing rules (child doc → viewing): stay at least this long on a video

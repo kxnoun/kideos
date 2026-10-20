@@ -56,24 +56,25 @@ export function subscribeToApprovedVideos(
           thumbnail: data.thumbnail,
           publishedAt: data.publishedAt,
           durationSeconds: data.durationSeconds ?? null,
+          isShort: data.isShort === true,
         }));
       onUpdate(videos);
     }, (err) => console.warn("[videoVerdicts] listener error:", err));
 }
 
-// ── Parent's viewing rules (break between videos, must finish) ─
-// On the child doc, which a paired kid device may read.
+// ── The child doc: name / age / avatar + viewing rules ───────
+// A paired kid device may read it.
 
-export function subscribeToViewingRules(
+export function subscribeToChild(
   parentId: string,
   childId: string,
-  onUpdate: (rules: unknown) => void
+  onUpdate: (data: Record<string, unknown> | undefined) => void
 ): () => void {
   return firestore()
     .doc(`users/${parentId}/children/${childId}`)
     .onSnapshot(
-      (snap) => onUpdate(snap.data()?.viewing),
-      (err) => console.warn("[viewing] listener error:", err)
+      (snap) => onUpdate(snap.data()),
+      (err) => console.warn("[child] listener error:", err)
     );
 }
 

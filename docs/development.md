@@ -16,6 +16,9 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 - `adb` lives at `"$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"`. Re-run `adb reverse` after every
   reconnect, or the app shows "Unable to load script".
 - JS-only changes: Metro reloads, or press `r`. Only rebuild with Gradle after native/dependency changes.
+- Fonts (kid app: Fredoka + Nunito in `apps/Kideos/assets/fonts`) are native assets: Android reads them from
+  `android/app/src/main/assets/fonts` (rebuild with Gradle after adding one); iOS needs
+  `npx react-native-asset` once on a Mac. Name font files by their PostScript name.
 - The kid app patches two libraries (`apps/Kideos/patches/`, applied by `patch-package` on every
   `npm install`): `react-native-webview` (native — rebuild the kid app after it changes) and
   `react-native-youtube-iframe` (JS — restart Metro with `--reset-cache` after it changes).

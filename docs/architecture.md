@@ -212,8 +212,17 @@ summary, "No captions — rated from the title, description and a few still imag
 only allow those two fields and require `approved` to match.
 
 ### Watching + remote control
-Kid feed: `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first, filtered to
-currently whitelisted channels; channel names filled from the whitelist).
+Kid feed (`FeedScreen`): `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first,
+filtered to currently whitelisted channels; channel names filled from the whitelist), grouped into **⭐ New**
+(latest long videos across channels), **⚡ Shorts** (tall tiles; only if the child has any — none with "No
+Shorts"; uses the verdict's `isShort`) and **one shelf per channel** (channels with the newest video first).
+Two layouts by the child's age (live from the child doc; design: [kid-app-design.md](kid-app-design.md)):
+**little (≤ 4)** — landscape only, channel bubbles on top swap one sideways film strip, no vertical
+scrolling; **big (5+)** —
+shelves (New 15 / Shorts 20 / 12 per channel + "See all" → channel page grid) under a collapsing header
+whose chip bar stays pinned. Sizes come from the window (`theme.ts` → `useLayout`), so tablets, rotation
+and split screen work. Watched videos get a ✓ (`src/watched.ts`, on this device: ~90% played or ended).
+Everything is live — no refresh needed.
 
 Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe`):
 - Inside YouTube's iframe, `HIDE_IN_PLAYER` hides the share button, the YouTube logo / "Watch on YouTube"
@@ -225,12 +234,18 @@ Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe
   postMessage never reached the page on Android, so remote pause didn't work).
 - Writes `currentSession/nowPlaying` (+ `paused`, updated on play/pause) and a `watchHistory` session
   (`expiresAt` +90 days); closes the video if its verdict stops being approved ("Hide this video").
-- If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`), the player closes it with
-  "This video can't play here — pick another one!".
+- If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`), the player closes it and
+  the feed shows "That video can't play here. Pick another one!" (Hide → "A grown-up took that video away").
+- Full screen from the first tap (long videos lock to landscape); the ← sits in the black space beside or
+  above the video, never on it. Swipe down → back to the feed (bounces while time is owed); swipe up →
+  the video shrinks up with "More from <channel>" underneath (`SWIPE_IN_PLAYER`, a passive touch listener
+  in YouTube's iframe, reported via `onPlaybackRateChange`). When a video ends: an end card — Watch again / My videos / up to 3 more from the same channel (App.tsx
+  `pickNext`: older first, unwatched first). No autoplay.
 
 **Viewing rules** — parent app Settings → a child → **Viewing** → "Before switching videos, stay at
 least": Off / 30 s / 1 min / 2 min / Whole, saved on the child doc as `viewing.minWatchSeconds` (0 / 30 / 60 /
-120, −1 = whole video; the kid app may read the child doc — `subscribeToViewingRules`). In the kid app
+120, −1 = whole video; the kid app may read the child doc — `subscribeToChild`, which also gives it the
+child's name / avatar / age). In the kid app
 (`PlayerScreen`, `src/viewing.ts`): until the time is up, ← Back and Android's back button keep the kid on
 the video with a banner — "Watch a little more! 0:12 left" (timed) or "Finish this one first! 2:41 left"
 (whole video). No waiting screens.
@@ -380,10 +395,14 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 
 **Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Time's up;
 reopens a video still owed), `src/viewing.ts` (viewing rules, the owed video in AsyncStorage),
-`hooks/useSession.ts` (paired session in AsyncStorage), `screens/PairingScreen.tsx`,
-`screens/FeedScreen.tsx` (grid, channel names, remote stop), `screens/PlayerScreen.tsx`,
-`services/firebase.ts` (`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`,
-`subscribeToPlaySignal`, `writeNowPlaying`, watch sessions).
+`hooks/useSession.ts` (paired session in AsyncStorage), `theme.ts` (colours, fonts, `useLayout`, little/big
+mode), `watched.ts` (✓ stickers), `components/Tap.tsx` (press feedback) · `VideoTile.tsx`,
+`screens/PairingScreen.tsx`, `screens/FeedScreen.tsx` (little: bubbles + strip; big: shelves, collapsing
+header, channel pages), `screens/PlayerScreen.tsx` (end card), `services/firebase.ts`
+(`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`, `subscribeToChild`, `subscribeToPlaySignal`,
+`writeNowPlaying`, watch sessions), `device.ts` (landscape lock + hidden system bars, Android native module
+`KideosWindowModule.kt`; `MainActivity` hides the bars). Fonts (Fredoka, Nunito) in `assets/fonts` + Android
+`android/app/src/main/assets/fonts`. Design notes: [kid-app-design.md](kid-app-design.md).
 
 **Parent app (`apps/KideosParent`)** — `App.tsx` (routing), `hooks/useAuth.ts`, `store/useStore.ts`
 (Zustand; `useSelectedChild()` is a hook), `components/FiltersForm.tsx` (questionnaire), `prefs.ts` (copy),

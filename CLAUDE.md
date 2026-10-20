@@ -43,6 +43,9 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   `Not suggested: … —` log lines, not by guessing; a wrong rating is a prompt problem, not a rule problem.
 - Device binding (`kidDeviceUids`) was reverted — kid paths allow any signed-in device for now. Redo it
   carefully (backlog → Security); `tests/rules/` still describes the binding version.
+- **Kid app UI: use `src/theme.ts`** (colours, fonts, `useLayout` sizes, little/big mode) and
+  `components/Tap` / `VideoTile` — no hard-coded colours, `Dimensions.get` or `TouchableOpacity`. Never white
+  text on Sunset Orange (use Ink). Design rules: docs/kid-app-design.md.
 - **The kid app patches two libraries** (`apps/Kideos/patches/`, applied by `patch-package` on
   `npm install`): `react-native-webview` (scripts in YouTube's iframe on Android; fullscreen → landscape)
   and `react-native-youtube-iframe` (play/pause injected directly — remote pause). Upgrading either
@@ -59,7 +62,6 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
 
 ## Checks before handing back
 
-- `node node_modules/typescript/bin/tsc --noEmit -p .` in `functions/`, `apps/Kideos`, `apps/KideosParent`
-  (known pre-existing error: `apps/Kideos/src/screens/PlayerScreen.tsx(111)`).
+- `node node_modules/typescript/bin/tsc --noEmit -p .` in `functions/`, `apps/Kideos`, `apps/KideosParent`.
 - For backend logic changes, verify Supadata/OpenAI call counts with a mocked run (see development.md →
   Testing) — cost regressions are the most expensive bugs here.

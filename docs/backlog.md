@@ -7,25 +7,23 @@ What's next, in rough priority order. Update this file as things land.
 1. **Compilations switch** — waiting for the sister's examples of the compilations she means (Ms Rachel's
    "+ MORE Nursery Rhymes" ones are fine). Likely reupload channels stitching others' clips ("BEST Peppa Pig
    moments 3 HOURS"). Needs a profile field → one `PROFILE_VERSION` bump.
-2. **Kid screen layout** (agreed Oct 20): YouTube Kids style — a "New" row, one row per channel (tap the
-   name → all its videos), a separate Shorts row; still live-updating.
-3. **Several kids on one device** (agreed Oct 20): pairing links the device to the family (parent picks which
+2. **Several kids on one device** (agreed Oct 20): pairing links the device to the family (parent picks which
    children use it), a "Who's watching?" screen, optional 4-digit PIN per profile (so a younger sibling
    can't use an older one's looser settings), "Switch profile" in the kid app; remote control / history
    stay per child.
-4. **Kid player: standard YouTube player + a grown-up gate** (agreed Oct 18) instead of hiding YouTube's
+3. **Kid player: standard YouTube player + a grown-up gate** (agreed Oct 18) instead of hiding YouTube's
    buttons (`HIDE_IN_PLAYER`, against YouTube's terms — see Security → kid player): links (share, Watch on
    YouTube, More videos, title) work again but first ask a grown-up question / passcode, then open the
    YouTube app. Apple *requires* a parental gate before links leave a Kids-category app. Plus a short
    "lock your kid's phone to Kideos" guide in parent setup (Guided Access on iPhone, screen pinning on
    Android — free, built in).
-5. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
+4. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
    app already writes `watchHistory` sessions (kept 90 days); there's just no screen for them.
-6. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
+5. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
    channels, shown/hidden counts. Today it sends a child's watch history to OpenAI — avoid that (COPPA:
    children's data to a third party). In-app screen only, no push.
-7. **Redo device binding** (see Security).
-8. **Compliance pack before launch** — see section 7.
+6. **Redo device binding** (see Security).
+7. **Compliance pack before launch** — see section 7.
 
 Smaller follow-ups:
 - **Clean up a removed channel's results**: removing a channel keeps its `videoVerdicts` (hidden in the
@@ -89,7 +87,6 @@ analyse 500 channels with a prompt we're about to change.
   notifications by design), but decide when fixing the digest.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
   that part, and add a TTL/cleanup for `triggerEvents`.
-- **Kid app type error:** `PlayerScreen.tsx(111)` implicit `any` (pre-existing).
 
 ## 3. Security
 
@@ -108,7 +105,7 @@ analyse 500 channels with a prompt we're about to change.
   (controls, fullscreen, skip ad, title) is YouTube's as normal. **Changing the player is against YouTube's
   terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
   explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
-  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #4). Also: "Made for
+  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #3). Also: "Made for
   Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
   library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
   The title, channel name and channel picture are untappable; YouTube links never open (web view level
@@ -118,12 +115,12 @@ analyse 500 channels with a prompt we're about to change.
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).
-- Kid feed: orientation changes / tablet layout (`Dimensions.get` at module load).
 - *Backburner:* landscape-only kid app for younger kids (YouTube Kids was landscape-only on phones until
   it added portrait in Dec 2024). Also: Shorts get rotated to landscape in fullscreen — keep them upright.
 - *Backburner:* the player's settings (gear) menu — "Stats for nerds" fills the screen and kids tap
   everything. Hide or disable it (or just that item), or make it a parent setting.
-- UI polish on both apps.
+- Parent app UI redesign (kid app done Oct 20 — [kid-app-design.md](kid-app-design.md); its "later" list:
+  TV focus states, a mascot, sounds, Continue watching, iOS font linking).
 - *Looked into, parked (Oct 17–18):* **YouTube Premium (no ads) in the kid app** — the sister's top ask.
   What we found:
   - Premium only applies where the viewer's browser is signed in to a Premium Google account. Our player
@@ -202,7 +199,7 @@ COPPA's amended rule is in force since Apr 22, 2026:
 YouTube API Services policies (reviewed Oct 18 with Adam — he accepts the risk at 100–200 families, but
 these are the known gaps):
 - **Player changes** — hiding share / YouTube logo / More videos and blocking links breaks "don't modify or
-  block the standard player". Plan: Next up #4 (standard player + grown-up gate).
+  block the standard player". Plan: Next up #3 (standard player + grown-up gate).
 - **"Safe / suitable" claims and custom scores** — the policies forbid claiming a video/channel is safe or
   suitable, custom channel scores, and inferring content categories. Ratings are our own analysis of what's
   said and shown; word them as findings ("mentions gambling, shown once"), not verdicts ("safe"). Adam
@@ -214,6 +211,9 @@ these are the known gaps):
   exact rules), so prompt tricks can't reach other families.
 
 ## Done (Oct 2026)
+
+Oct 20 (branch `kid-feed-layout`): **kid feed laid out like YouTube Kids** — ✨ New row, ⚡ Shorts row (only if
+any), one row per channel, tap a channel → all its videos; live, no refresh.
 
 Oct 20 (same branch): **Load more limits** — 20 videos per tap, only while the child has < 20 shown from
 the channel and YouTube has more, once per channel per day, 10 per family per day. **Ages = who a channel
