@@ -40,7 +40,10 @@ export const APP_CONFIG = {
   SUPADATA_BASE_URL: "https://api.supadata.ai/v1",
 
   // Channel seeding: max videos to pull per channel via playlistItems.list
-  CHANNEL_SEED_MAX_VIDEOS: 50,
+  CHANNEL_SEED_MAX_VIDEOS: 50, // fallback (mixed uploads list) and nightly new-upload check
+  CHANNEL_SEED_LONG: 40, // a new channel: its 40 latest long videos…
+  CHANNEL_SEED_SHORTS: 10, // …and 10 latest Shorts
+  LOAD_MORE_VIDEOS: 50, // "Load more videos": the next 50 older long videos
   CHANNEL_SEED_MAX_PAGES: 5, // 5 pages × 1 unit = max 5 units per seed
 
   // Pre-analysis: number of feed videos to pre-analyze in background

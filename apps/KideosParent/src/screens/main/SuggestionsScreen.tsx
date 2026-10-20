@@ -261,8 +261,13 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
 
       <View style={[styles.fitBox, pct < 0.75 && styles.fitBoxWarn]}>
         <Text style={[styles.fitTitle, pct < 0.75 && styles.fitTitleWarn]}>
-          {s.fitting} of {s.analyzed} checked videos fit {childName}'s settings
+          {s.fitting} of {s.analyzed} checked {s.longOnly ? "long videos" : "videos"} fit {childName}'s settings
         </Text>
+        {s.shorts ? (
+          <Text style={styles.uncheckedText}>
+            Shorts: {s.shorts.fitting} of {s.shorts.analyzed} fit (counted separately)
+          </Text>
+        ) : null}
         {s.unchecked > 0 ? (
           <Text style={styles.uncheckedText}>{s.unchecked} more had no transcript, so we couldn't check them.</Text>
         ) : null}

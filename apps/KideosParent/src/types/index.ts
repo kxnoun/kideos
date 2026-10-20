@@ -126,6 +126,8 @@ export interface SuggestedChannel {
   samples: { videoId: string; title: string; thumbnail: string }[];
   // From the channel's saved channel check (if anyone checked it): "not a fit" ones aren't suggested
   check?: { fit: "good" | "caution"; thingsToKnow: string[]; overall: "good" | "caution" | "not_recommended" };
+  longOnly?: boolean; // fitting/analyzed count long videos only
+  shorts?: { fitting: number; analyzed: number }; // its Shorts, on their own (absent with "No Shorts")
 }
 
 export type MainTabParamList = {

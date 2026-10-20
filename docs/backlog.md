@@ -209,6 +209,13 @@ these are the known gaps):
 
 ## Done (Oct 2026)
 
+Oct 20 (same branch): **long videos first** — a channel is seeded with its 40 latest long videos + 10
+latest Shorts (YouTube's `UULF…` / `UUSH…` playlists) instead of its 50 newest uploads (~90% Shorts);
+suggestions are scored on long videos (Shorts on their own line, ignored with "No Shorts" — they were
+counting as "doesn't fit": Mark Rober was 12% for Simon); `Not suggested` logs list the hidden reasons;
+**"Load more videos"** per channel (next 50 older long videos); one-time nightly long-video top-up for
+channels added earlier.
+
 Oct 19 (branch `channel-check-everywhere`): every way of adding a channel shows the channel check review
 (suggested-channel cards and the older AI suggestions too); suggestions use saved channel checks ("not a
 fit" → not suggested, otherwise "things to know" on the card); the Channels screen shows "⚠️ N things to

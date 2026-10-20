@@ -36,7 +36,10 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   notifications (product decision: less work for parents). The parent's `parentDecision` ("Show anyway")
   always wins and must never be overwritten by the pipeline.
 - **A suggestion vouches for the channel** (`channelCatalog.ts`): ≥10 checked videos, ≥75% fit, ≤2 severe
-  (severe = absolute, not relative to the child), made for the child's age ±1. Tune with the
+  (severe = absolute, not relative to the child), made for the child's age ±1. **Long videos decide**;
+  Shorts are a separate line and never count against a channel when the child has "No Shorts".
+- **Channels are seeded with 40 long videos + 10 Shorts** from YouTube's undocumented `UULF…` / `UUSH…`
+  playlists (fallback: the mixed uploads list). If those ever stop working, seeding silently falls back. Tune with the
   `Not suggested: … —` log lines, not by guessing; a wrong rating is a prompt problem, not a rule problem.
 - Device binding (`kidDeviceUids`) was reverted — kid paths allow any signed-in device for now. Redo it
   carefully (backlog → Security); `tests/rules/` still describes the binding version.

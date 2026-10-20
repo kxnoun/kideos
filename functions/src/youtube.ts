@@ -341,3 +341,48 @@ export async function getChannelVideos(
   );
   return videos;
 }
+
+// ── One page of a playlist (playlistItems.list — 1 unit) ──────
+// Channels have undocumented sibling playlists of their uploads playlist ("UU…"):
+// "UULF…" = long videos only, "UUSH…" = Shorts only. ok = false if YouTube doesn't
+// know the playlist (caller falls back to the full uploads list).
+export function longVideosPlaylist(uploadsPlaylistId: string): string {
+  return `UULF${uploadsPlaylistId.slice(2)}`;
+}
+export function shortsPlaylist(uploadsPlaylistId: string): string {
+  return `UUSH${uploadsPlaylistId.slice(2)}`;
+}
+
+export async function getPlaylistPage(
+  playlistId: string,
+  apiKey: string,
+  maxResults: number,
+  pageToken?: string
+): Promise<{ ok: boolean; videos: YouTubePlaylistItem[]; nextPageToken: string | null }> {
+  const url = new URL(`${APP_CONFIG.YOUTUBE_BASE_URL}/playlistItems`);
+  url.searchParams.set("part", "snippet");
+  url.searchParams.set("playlistId", playlistId);
+  url.searchParams.set("maxResults", String(Math.min(50, maxResults)));
+  url.searchParams.set("key", apiKey);
+  if (pageToken) url.searchParams.set("pageToken", pageToken);
+  const res = await fetch(url.toString());
+  logger.info(`[YouTube] playlistItems.list ${playlistId} (1 unit) → ${res.status}`);
+  if (!res.ok) return { ok: false, videos: [], nextPageToken: null };
+  const data = (await res.json()) as {
+    items?: Array<{ snippet: { title: string; resourceId?: { videoId?: string }; thumbnails?: { high?: { url: string }; medium?: { url: string }; default?: { url: string } }; publishedAt: string } }>;
+    nextPageToken?: string;
+  };
+  const videos: YouTubePlaylistItem[] = [];
+  for (const item of data.items ?? []) {
+    const sn = item.snippet;
+    const videoId = sn?.resourceId?.videoId;
+    if (!videoId || sn.title === "Private video" || sn.title === "Deleted video") continue;
+    videos.push({
+      videoId,
+      title: sn.title,
+      thumbnail: sn.thumbnails?.high?.url ?? sn.thumbnails?.medium?.url ?? sn.thumbnails?.default?.url ?? "",
+      publishedAt: sn.publishedAt,
+    });
+  }
+  return { ok: true, videos: videos.slice(0, maxResults), nextPageToken: data.nextPageToken ?? null };
+}

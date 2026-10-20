@@ -158,8 +158,13 @@ added before checks existed have no saved check and show nothing.
 1. Parent confirms → callable **`resolveAndAddChannel`**: `channels.list` (1 unit), creates
    `whitelistedChannels/{channelId}` with `seedingStatus: "pending"` ("Analyzing…" in the app), returns.
 2. The create fires **`onChannelWhitelisted`** (own invocation, 9 min, full CPU; duplicate deliveries
-   deduped via `triggerEvents/{eventId}`): channel metadata → `channelLibraryCache/{channelId}`, 50 latest
-   videos as stubs → `channelLibraryCache/{channelId}/videos/{videoId}`, then `batchAnalyzeChannel`
+   deduped via `triggerEvents/{eventId}`): channel metadata → `channelLibraryCache/{channelId}`, then the
+   channel's **40 latest long videos + 10 latest Shorts** as stubs → `channelLibraryCache/{channelId}/videos/
+   {videoId}` (`kind: long | short`). They come from YouTube's undocumented per-type playlists — `UULF…`
+   (long videos) and `UUSH…` (Shorts) next to the uploads playlist `UU…` (`seedLongAndShorts`, 2 units);
+   if YouTube doesn't know them, the 50 latest uploads (mixed) are used. Why: most creators' newest 50
+   uploads are ~90% Shorts. The long-videos page token is saved (`longPageToken`, `longExhausted`) for
+   "Load more videos". Then `batchAnalyzeChannel`
    (5 videos at a time; Supadata requests start ≥1.1s apart in `supadata.ts` without waiting for each
    other, so a 50-video channel fits well inside the 9-minute limit) → `analyzeAndTagVideo` per video → `seedingStatus: "ready"`, `videoCount`.
 3. **`analyzeAndTagVideo`** (`analyzeVideo.ts`), per video per child:
@@ -252,8 +257,17 @@ with its evidence, and **🚩 Hide this video** → Cancel / **Too hyper** (hide
 (`parentDecision: "hidden"`). When watching is off: "Watching is off" + "Let them watch again".
 
 ### Nightly / weekly jobs
-- **`refreshChannelLibraries`** (03:00 UTC): new uploads per whitelisted channel → stubs → analyzed for each
-  child who has the channel (profiles shared). Channels run back to back (no stagger).
+- **`refreshChannelLibraries`** (03:00 UTC): new uploads per whitelisted channel (50 latest, mixed) → stubs →
+  analyzed for each child who has the channel (profiles shared). Channels run back to back (no stagger).
+  **One-time top-up** for channels seeded before Oct 20 (no `longSeededAt`): their 40 latest long videos are
+  added and analyzed too — at most 2 channels a night, only in the first 4 minutes; the flag is set after
+  analysis, so a run that times out redoes it next night (existing profiles are reused).
+- **"Load more videos"** (Channels screen, under each ready channel) → callable **`loadMoreVideos`** marks
+  the child's whitelist doc (`moreRequestedAt`, "Analyzing…") → trigger **`onMoreVideosRequested`**: the next
+  50 older long videos (continuing `longPageToken`; channels from before Oct 20 start at the newest long
+  videos, skipping ones already there) → analyzed for that child → `videoCount` updated. "That's
+  everything" when `longExhausted`. Paid per new video (Supadata + OpenAI), shared after; other children
+  with the channel don't get those older videos unless they load more too.
 - **`cleanupExpiredData`** (02:00 UTC): deletes `watchHistory` past `expiresAt` (COPPA 90 days) + legacy
   analysis-cache entries.
 - **`generateWeeklyDigest`** (Mon 08:00 UTC, Premium): GPT summary of the week. ⚠️ Path mismatch — see backlog.
@@ -276,6 +290,11 @@ Every channel any family adds gets a shared **channel profile** in `channelCatal
 (`buildCatalogEntry`, run after seeding and after the nightly refresh): the channel's 50 latest analyzed
 videos as compact profiles, top topics, and a 2–3 sentence overview (the only AI call, once per channel).
 No Supadata, no per-video AI — it reuses `videoProfiles`.
+**Which videos count:** the catalog holds a channel's latest 40 long videos + 10 Shorts. **Long videos
+decide** (fit share, severe count, hidden reasons); Shorts are shown on their own line ("Shorts: 7 of 10 fit")
+and not counted at all if the child has "No Shorts". Channels with fewer than 10 checked long videos are
+scored on everything (minus Shorts with "No Shorts"). The `Not suggested:` log line lists the top hidden
+reasons (`fit 29/40 long videos (72%) < 75% — hidden for: High energy (8), Product promotion (4)`).
 Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannelSuggestions`**: runs
 `evaluateProfile` on every catalog video against the child's answers (pure code), skips channels already
 in the child's list or dismissed. If someone has already made a **channel check** for a channel, it's used
@@ -314,7 +333,7 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `…/children/{c}/suggestions/{id}` | AI channel suggestions + `parentResponse` | functions | parent |
 | `…/children/{c}/digests/{week}` | weekly digest | functions | *(parent reads the wrong path — backlog)* |
 | `pairingCodes/{code}` | pairing handshake: `claimed`, `parentId`, `childId` | kid (create), parent (claim) | anyone |
-| `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata + video stubs (`approved` field is legacy) | functions | kid (metadata), functions |
+| `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata, `longSeededAt` / `longPageToken` / `longExhausted` (long-video seeding); video stubs with `kind` (long / short; absent = mixed list) (`approved` field is legacy) | functions | kid (metadata), functions |
 | `channelCatalog/{ch}` | shared channel profile for suggestions (compact video profiles, overview, topics) | functions | functions only |
 | `channelChecks/{ch}` | channel check made once before the first add (`CHECK_VERSION`): verdict, reputation + sources, audience age, full channel profile (every rating with evidence and source) | functions | functions only (returned via `checkChannel`) |
 | `videoProfiles/{v}` (+ `/valuesChecks/{hash}`) | content profiles (`version`, `status`, `dims` with evidence, framing, faith, holidays, music, LGBTQ+, flags, topics, summary, `madeForKids`, `basis`, `pace`, `visual` moderation scores, `isShort`, `tooHyperReports`), values-check cache | functions | profiles: signed-in users (public-video analysis only); valuesChecks: functions only |
@@ -334,7 +353,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 |---|---|
 | `index.ts` | Exports every deployed function |
 | `config.ts` | Secrets (`YOUTUBE_API_KEY`, `SUPADATA_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) + `APP_CONFIG` (model, region, 50 videos/channel) |
-| `seedChannelLibrary.ts` | `resolveAndAddChannel`, `onChannelWhitelisted`, `onFiltersChanged`, `refreshChannelLibraries`, `seedChannelLibrary` (legacy callable, unused by the app); internal `seedVideoMetadata`, `batchAnalyzeChannel`, `seedAndAnalyzeInBackground` |
+| `seedChannelLibrary.ts` | `resolveAndAddChannel`, `onChannelWhitelisted`, `onFiltersChanged`, `refreshChannelLibraries` (+ long-video top-up), `loadMoreVideos` + `onMoreVideosRequested`, `seedChannelLibrary` (legacy callable, unused by the app); internal `seedLongAndShorts`, `writeStubs`, `batchAnalyzeChannel`, `seedAndAnalyzeInBackground` |
 | `analyzeVideo.ts` | Per-video pipeline: `analyzeAndTagVideo`, `reapplyFiltersForChild`, `loadValueFiltersForChild`; internal `getOrCreateProfile`, `decideForChild`, `writeVerdict`, `summarizeRatings`, `getTranscriptCached` |
 | `aiAnalysis.ts` | `generateContentProfile` (profile prompt + validation; 4 stills; floors), `paceStats`, title signals, `stillImages`, `KNOWN_STIMULATION`, `swearFloor` and regexes (code-counted swearing, God's-name exclamations, `[Music]`), `LADDER_GUIDE` (the ladder definitions, shared with the channel check — sliced from the prompt between `Ladders (0 = none` and `- framing:`, keep those markers), `checkValuesRules`, `needsValuesCheck`, `hashValuesRules`, `PROFILE_VERSION`, `MIN_USABLE_PROFILE_VERSION` |
 | `visualCheck.ts` | `moderateImages` (OpenAI image moderation on the thumbnail + 3 frames, free) and `applyVisualFloors` (its scores raise sexual / nudity / violence / self-harm / junk; never lower) |
@@ -344,7 +363,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `prefs.ts` | Questionnaire: `DIMS`, `LEVEL_LABELS`, `HOLIDAYS`, `VALUE_FLAGS`, `AGE_TABLE`, `FREE_TEXT_MAX`, `defaultPrefs`, `normalizePrefs`, `describePrefs` |
 | `customRules.ts` | `parseCustomRules` callable (free text → whitelisted setting changes) |
 | `supadata.ts` | `fetchTranscript` — requests start ≥1.1s apart (not one-at-a-time), `text=true&lang=en`, no retries; marks "no transcript" as `definitive` |
-| `youtube.ts` | `parseChannelInput`, `getChannelDetails`, `getChannelVideos`, `getVideoDetails`, `checkIsShort`, `verifyChannelHandles` — never `search.list` |
+| `youtube.ts` | `parseChannelInput`, `getChannelDetails`, `getChannelVideos`, `getPlaylistPage` (+ `longVideosPlaylist` / `shortsPlaylist`: the `UULF…` / `UUSH…` siblings of the uploads playlist), `getVideoDetails`, `checkIsShort`, `verifyChannelHandles` — never `search.list` |
 | `channelCatalog.ts` | Suggested channels: `buildCatalogEntry` (shared channel profile from analyzed videos — also the source of the channel check's video floors), `scoreChannel`, `getChannelSuggestions` callable |
 | `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
 | `reprofile.ts` | `reprofileOutdated` (nightly 04:00 UTC, or Force run in Cloud Scheduler): old-version profiles → current, cached transcripts only |

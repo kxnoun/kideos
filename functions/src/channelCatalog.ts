@@ -27,7 +27,10 @@ import type { ContentProfile } from "./types";
 
 type Db = FirebaseFirestore.Firestore;
 
-const VIDEOS_PER_CHANNEL = 50;
+// The catalog's view of a channel: its latest long videos + a few Shorts (most creators'
+// newest 50 uploads are ~90% Shorts, which said little about the channel)
+const CATALOG_LONG = 40;
+const CATALOG_SHORTS = 10;
 const MAX_SUGGESTIONS = 25;
 const BACKFILL_PER_CALL = 10;
 // Bump to rewrite every overview (e.g. when the overview prompt changes)
@@ -89,17 +92,28 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
   const stubs = await db
     .collection(`channelLibraryCache/${channelId}/videos`)
     .orderBy("publishedAt", "desc")
-    .limit(VIDEOS_PER_CHANNEL)
+    .limit(300)
     .get();
   if (stubs.empty) return;
 
-  const profileSnaps = await db.getAll(...stubs.docs.map((d) => db.doc(`videoProfiles/${d.id}`)));
+  const allSnaps = await db.getAll(...stubs.docs.map((d) => db.doc(`videoProfiles/${d.id}`)));
+  // Newest first: up to CATALOG_LONG long videos and CATALOG_SHORTS Shorts
+  // (a Short = the profile's isShort, else the stub's kind from the Shorts playlist)
+  const picked: number[] = [];
+  let longs = 0;
+  let shorts = 0;
+  stubs.docs.forEach((stub, i) => {
+    const isShort = (allSnaps[i].data()?.isShort as boolean | undefined) ?? stub.data().kind === "short";
+    if (isShort ? shorts++ < CATALOG_SHORTS : longs++ < CATALOG_LONG) picked.push(i);
+  });
+  const pickedStubs = picked.map((i) => stubs.docs[i]);
+  const profileSnaps = picked.map((i) => allSnaps[i]);
   const videos: CatalogVideo[] = [];
   const topicCounts = new Map<string, number>();
   const summaries: string[] = [];
   let educationalCount = 0;
 
-  stubs.docs.forEach((stub, i) => {
+  pickedStubs.forEach((stub, i) => {
     const snap = profileSnaps[i];
     if (!snap.exists) return;
     const prof = snap.data() as ContentProfile;
@@ -263,6 +277,8 @@ export interface ChannelSuggestion {
   ratings: { dim: Dim; maxLevel: number; count: number }[]; // what's in the videos that WOULD show
   // From the channel's saved channel check, if anyone has checked it (thumbnails + what people say)
   check?: { fit: "good" | "caution"; thingsToKnow: string[]; overall: ChannelReport["verdict"] };
+  longOnly: boolean; // true = fitting/analyzed count long videos only (Shorts below)
+  shorts?: { fitting: number; analyzed: number }; // the channel's Shorts, on their own (absent if "No Shorts")
   samples: { videoId: string; title: string; thumbnail: string }[];
 }
 
@@ -306,7 +322,11 @@ export function isSuggestable(s: ChannelSuggestion): boolean {
 export function whyNot(s: ChannelSuggestion): string {
   if (s.analyzed < MIN_ANALYZED) return `only ${s.analyzed} checked videos`;
   if (s.severe > MAX_SEVERE) return `${s.severe} severe video(s): ${(s.severeExamples ?? []).join(" | ")}`;
-  return `fit ${s.fitting}/${s.analyzed} (${Math.round((100 * s.fitting) / s.analyzed)}%) < ${MIN_FIT * 100}%`;
+  const why = s.hiddenReasons.map((r) => `${r.label} (${r.count})`).join(", ");
+  return (
+    `fit ${s.fitting}/${s.analyzed}${s.longOnly ? " long videos" : ""} (${Math.round((100 * s.fitting) / s.analyzed)}%) < ${MIN_FIT * 100}%` +
+    (why ? ` — hidden for: ${why}` : "")
+  );
 }
 
 // The worst of the worst, whatever the child's settings: the top of a ladder the
@@ -322,18 +342,24 @@ function severeDims(p: CompactProfile, prefs: Parameters<typeof evaluateProfile>
 }
 
 export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evaluateProfile>[1]): ChannelSuggestion {
+  // Long videos decide whether a channel is suggested; Shorts are counted on their own line
+  // (and not at all if the child has "No Shorts" — a format, not a reason the channel doesn't fit).
+  // Channels with too few checked long videos are scored on everything instead.
+  const ok = entry.videos.filter((v) => v.p.status === "ok");
+  const longs = ok.filter((v) => !v.p.isShort);
+  const shortsOk = ok.filter((v) => v.p.isShort);
+  const mainSet = longs.length >= MIN_ANALYZED || prefs.hideShorts ? longs : ok;
+  const shortsSet = mainSet === longs && !prefs.hideShorts ? shortsOk : [];
+
   let fitting = 0;
   let severe = 0;
-  let checked = 0;
   const severeExamples: string[] = [];
   const severeCounts = new Map<string, number>();
   const reasonCounts = new Map<string, number>();
   const ratings = new Map<Dim, { maxLevel: number; count: number }>();
   const samples: ChannelSuggestion["samples"] = [];
 
-  for (const v of entry.videos) {
-    if (v.p.status !== "ok") continue; // no transcript — unknown, not counted either way
-    checked++;
+  for (const v of mainSet) {
     const decision = evaluateProfile(v.p as ContentProfile, prefs);
     if (decision.status === "approved") {
       fitting++;
@@ -362,6 +388,7 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
       }
     }
   }
+  const shortsFitting = shortsSet.filter((v) => evaluateProfile(v.p as ContentProfile, prefs).status === "approved").length;
 
   return {
     channelId: entry.channelId,
@@ -372,8 +399,8 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     audienceMinAge: entry.audienceMinAge ?? null,
     audienceMaxAge: entry.audienceMaxAge ?? null,
     topics: entry.topics,
-    analyzed: checked,
-    unchecked: entry.videos.length - checked,
+    analyzed: mainSet.length,
+    unchecked: entry.videos.length - ok.length,
     fitting,
     severe,
     severeExamples,
@@ -382,6 +409,8 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     hiddenReasons: [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([label, count]) => ({ label, count })),
     ratings: [...ratings.entries()].sort((a, b) => b[1].count - a[1].count).map(([dim, r]) => ({ dim, ...r })),
     samples,
+    longOnly: mainSet === longs,
+    ...(shortsSet.length ? { shorts: { fitting: shortsFitting, analyzed: shortsSet.length } } : {}),
   };
 }
 

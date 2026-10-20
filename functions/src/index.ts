@@ -10,14 +10,17 @@ initializeApp();
 //
 // ── Channels & analysis ────────────────────────────────────────
 // resolveAndAddChannel: parent adds channel by URL/handle → channels.list (1 unit) → whitelist doc
-// onChannelWhitelisted: trigger on that doc → seed 50 videos → profile + verdict per video
+// onChannelWhitelisted: trigger on that doc → seed 40 long videos + 10 Shorts → profile + verdict per video
 // onFiltersChanged: trigger on questionnaire save → re-apply answers to all the child's videos
+// loadMoreVideos + onMoreVideosRequested: "Load more videos" → the next 50 older long videos for one child
 // seedChannelLibrary: legacy callable, unused by the app
-// refreshChannelLibraries: nightly — new uploads only (pacing bug: see docs/backlog.md)
+// refreshChannelLibraries: nightly — new uploads (+ one-time long-video top-up for older channels)
 export {
   resolveAndAddChannel,
   onChannelWhitelisted,
   onFiltersChanged,
+  loadMoreVideos,
+  onMoreVideosRequested,
   seedChannelLibrary,
   refreshChannelLibraries,
 } from "./seedChannelLibrary";

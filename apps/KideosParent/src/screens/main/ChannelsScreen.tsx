@@ -32,6 +32,7 @@ import {
   addChannel,
   checkChannel,
   getChannelFits,
+  loadMoreVideos,
   type CheckChannelResult,
   type ChannelFit,
   removeChannel,
@@ -79,6 +80,29 @@ export default function ChannelsScreen() {
   }, [parentId, selectedChildId]);
   useFocusEffect(loadFits);
   useEffect(loadFits, [loadFits, channelIdsKey]);
+
+  const moreVideos = (channel: WhitelistedChannel) => {
+    if (!parentId || !selectedChildId) return;
+    Alert.alert(
+      "Load more videos?",
+      `We'll check ${channel.name}'s next 50 older videos. Ones that fit ${selectedChild?.profile.name ?? "your child"}'s settings show up in a few minutes.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Load more",
+          onPress: async () => {
+            try {
+              const r = await loadMoreVideos(parentId, selectedChildId, channel.channelId);
+              if (r.reason === "no_more") Alert.alert("That's everything", `We've already checked all of ${channel.name}'s videos.`);
+              else if (r.reason === "busy") Alert.alert("Still working", `${channel.name} is still being analyzed — try again in a few minutes.`);
+            } catch {
+              Alert.alert("Couldn't do that", "Check your connection and try again.");
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const showFit = (name: string, f: ChannelFit) =>
     Alert.alert(
@@ -233,6 +257,11 @@ export default function ChannelsScreen() {
               <Text style={styles.videoCount}> · {item.videoCount} videos</Text>
             )}
           </View>
+          {item.seedingStatus === "ready" ? (
+            <TouchableOpacity onPress={() => moreVideos(item)} hitSlop={6}>
+              <Text style={styles.moreLink}>＋ Load more videos</Text>
+            </TouchableOpacity>
+          ) : null}
           {fits[item.channelId] && fits[item.channelId].fit !== "good" ? (
             <TouchableOpacity onPress={() => showFit(item.name, fits[item.channelId])} hitSlop={6}>
               <Text style={[styles.fitBadge, fits[item.channelId].fit === "not_fit" && styles.fitBadgeBad]}>
@@ -512,6 +541,7 @@ const styles = StyleSheet.create({
   channelName: { fontSize: 15, fontWeight: "700", color: "#1A1A2E", marginBottom: 4 },
   channelMeta: { flexDirection: "row", alignItems: "center" },
   fitBadge: { fontSize: 12, fontWeight: "700", color: "#8A5A00", marginTop: 4 },
+  moreLink: { fontSize: 12, fontWeight: "700", color: "#6C63FF", marginTop: 4 },
   fitBadgeBad: { color: "#C62828" },
   statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
   statusLabel: { fontSize: 12, fontWeight: "600" },
