@@ -10,9 +10,10 @@
 //   landscape while playing (App.tsx); Shorts fill the height.
 // - YouTube's own fullscreen button is turned off (the official `fs=0` player setting
 //   — its fullscreen would take over the screen and the swipes stop working).
-// - Nothing is drawn on top of the playing video: a quiet round back button sits in
-//   the middle of the black space beside it (or above it on 4:3 tablets); if the
-//   screen is exactly 16:9 the video shrinks a little to make room.
+// - The video always fills the screen as far as its shape allows (full height on a
+//   phone in landscape). Nothing is drawn on top of it: a quiet round back button sits
+//   in the middle of the black space beside it (or above it on 4:3 tablets) — only if
+//   there's room; otherwise swipe down / Android back.
 // - Swipe DOWN on the video → it drops away and the feed comes back (bounces back
 //   with "Watch a little more!" while the minimum time is owed).
 // - Swipe UP → the video shrinks up and "More from <channel>" slides in under it
@@ -404,30 +405,28 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const W = width - insets.left - insets.right;
   const H = height - insets.top - insets.bottom;
   const aspect = video.isShort ? 9 / 16 : 16 / 9;
-  const need = touch + 24; // the button + breathing room
-  let playerW = Math.min(W, H * aspect);
-  let playerH = playerW / aspect;
-  let buttonSide: "left" | "top";
-  if ((W - playerW) / 2 >= need) buttonSide = "left";
-  else if ((H - playerH) / 2 >= need) buttonSide = "top";
-  else if (W / H >= aspect) {
-    buttonSide = "left"; // wide screen, exactly filled → shrink a little
-    playerW = Math.min(W - 2 * need, H * aspect);
-    playerH = playerW / aspect;
-  } else {
-    buttonSide = "top";
-    playerH = Math.min(H - 2 * need, W / aspect);
-    playerW = playerH * aspect;
-  }
-  playerW = Math.floor(playerW);
-  playerH = Math.floor(playerH);
+  // The video always fills the screen as far as its shape allows — never shrunk for the button
+  const playerW = Math.floor(Math.min(W, H * aspect));
+  const playerH = Math.floor(playerW / aspect);
   const sideSpace = (W - playerW) / 2;
   const topSpace = (H - playerH) / 2;
+  // The button only goes where there's black space for it; otherwise: swipe down / Android back
+  const backSize = Math.min(touch, 56);
+  const backFits = sideSpace >= backSize + 8 || topSpace >= backSize + 8;
   const backPosition = showMore
     ? { left: insets.left + 12, top: insets.top + 12 }
-    : buttonSide === "left"
-      ? { left: insets.left + Math.max(8, (sideSpace - touch) / 2), top: insets.top + (H - touch) / 2 }
-      : { left: insets.left + margin, top: insets.top + Math.max(8, (topSpace - touch) / 2) };
+    : sideSpace >= backSize + 8
+      ? { left: insets.left + (sideSpace - backSize) / 2, top: insets.top + (H - backSize) / 2 }
+      : { left: insets.left + margin, top: insets.top + (topSpace - backSize) / 2 };
+
+  useEffect(() => {
+    if (__DEV__) {
+      console.log(
+        `[player] window ${Math.round(width)}x${Math.round(height)} insets t${insets.top} b${insets.bottom} ` +
+          `l${insets.left} r${insets.right} → player ${playerW}x${playerH}`
+      );
+    }
+  }, [width, height, insets.top, insets.bottom, insets.left, insets.right, playerW, playerH]);
 
   // Swiped up: the video shrinks to the top, the row takes the space below
   const rowTileH = Math.min(layout.rowTileH, Math.round(H * 0.3));
@@ -525,14 +524,16 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
 
       {/* Back: centred in the black space beside / above the video — never on top of it.
           With "More from" open, top-left (the row takes the bottom). */}
-      <BackButton
-        size={touch}
-        variant="quiet"
-        direction={showMore ? "down" : "left"}
-        onPress={() => (showMore ? closeMore() : leave())}
-        label={showMore ? "Back to the video" : "Back to my videos"}
-        outerStyle={[styles.backWrap, backPosition]}
-      />
+      {backFits || showMore ? (
+        <BackButton
+          size={backSize}
+          variant="quiet"
+          direction={showMore ? "down" : "left"}
+          onPress={() => (showMore ? closeMore() : leave())}
+          label={showMore ? "Back to the video" : "Back to my videos"}
+          outerStyle={[styles.backWrap, backPosition]}
+        />
+      ) : null}
 
       {/* Swiped up: more from this channel, under the shrunk video */}
       {showMore ? (

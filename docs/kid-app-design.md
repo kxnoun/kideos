@@ -86,9 +86,10 @@ Native: `MainActivity.kt` (`hideSystemBars`, re-applied on focus) and `KideosWin
 fullscreen button, and doesn't need to. Long videos lock to landscape while playing (everyone; App.tsx);
 Shorts fill the height. YouTube's own fullscreen button is off — the official `fs=0` player setting
 (`preventFullScreen`), allowed by YouTube; its fullscreen would take over and stop the swipes. **Nothing is
-drawn on the playing video** (YouTube's terms): a quiet see-through round back button (drawn chevron —
-`components/BackButton`) sits centred in the black space beside it (wider-than-16:9 phones) or above it
-(4:3 / 16:10 tablets); on an exactly 16:9 screen the video shrinks a little to make room.
+drawn on the playing video** (YouTube's terms). The video always fills the screen as far as its shape
+allows — full height on a phone in landscape, never shrunk for a button. A quiet see-through round back
+button (drawn chevron — `components/BackButton`) sits centred in the black space beside it (wider-than-16:9
+phones) or above it (4:3 / 16:10 tablets) — only if there's room; otherwise swipe down / Android back.
 
 - **Swipe down** on the video → it drops away and the feed comes back. While the minimum watch time is
   owed it bounces back with "Watch a little more!".
