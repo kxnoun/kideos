@@ -227,7 +227,12 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
 
   // ── Animations (native driver) ──
   const open = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current; // 0 → 1: zooming out of the tile
-  const drag = useRef(new Animated.Value(0)).current; // px the finger pulled the video down
+  // Dragging the video away (any downward direction): where it is, and how far gone (0–1)
+  const dragX = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const away = useRef(new Animated.Value(0)).current; // shrinks / fades / shows the feed
+  // Geometry the gesture handler needs (set during render)
+  const geo = useRef({ playerY: 0, playerH: 0, playerX: 0, playerW: 0, moreY: -1 });
   const thumb = useRef(new Animated.Value(1)).current; // the thumbnail over the player until it plays
   const drop = useRef(new Animated.Value(0)).current; // px down: "not yet" bounce
   const more = useRef(new Animated.Value(0)).current; // 0 full, 1 shrunk up with the row below
@@ -297,12 +302,14 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
     ]).start();
   };
 
-  const springBack = () =>
-    Animated.timing(drag, { toValue: 0, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start();
+  const toward = (v: Animated.Value, to: number, ms: number = MOTION.slideOut) =>
+    Animated.timing(v, { toValue: to, duration: ms, easing: MOTION.easing, useNativeDriver: true });
+  const springBack = () => Animated.parallel([toward(dragX, 0), toward(dragY, 0), toward(away, 0)]).start();
 
-  // Back to the feed: the video carries on down from wherever the finger left it,
-  // shrinking, while the feed shows through (only once the minimum time is up)
-  const leave = () => {
+  // Back to the feed: the video carries on the way the finger was going (straight down
+  // for ← / Android back), shrinking and fading while the feed shows through — only
+  // once the minimum time is up
+  const leave = (ux = 0, uy = 1) => {
     if (leavingRef.current) return;
     if (blocked()) {
       flash(stillHereMessage());
@@ -316,25 +323,23 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
       onBack("done");
       return;
     }
-    Animated.timing(drag, { toValue: layout.height * 0.8, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(
-      () => onBack("done")
-    );
+    const D = Math.max(layout.width, layout.height) * 0.9;
+    Animated.parallel([toward(dragX, ux * D), toward(dragY, uy * D), toward(away, 1)]).start(() => onBack("done"));
   };
 
-  // Finger let go after dragging: far / fast enough down → leave; up → "More from"; else back
-  const release = (dy: number, vy: number) => {
+  // Finger let go
+  const release = (dx: number, dy: number, vx: number, vy: number, mode: "down" | "up" | "more") => {
     lastSwipeAt.current = Date.now(); // the web view's report of this same swipe is ignored
-    if (showMore) {
-      if (dy > 40) closeMore();
+    if (mode !== "down") {
+      // Dragging the video up into "More from" (or back down out of it): finish whichever way it was heading
+      const opening = mode === "up" ? dy < -40 || vy < -0.5 : !(dy > 40 || vy > 0.5);
+      (opening ? openMore : closeMore)();
       return;
     }
-    if (dy < -40) {
-      springBack();
-      openMore();
-      return;
-    }
-    if (dy > Math.max(80, layout.height * 0.18) || (vy > 0.8 && dy > 30)) {
-      leave();
+    const dist = Math.hypot(dx, dy);
+    const speed = Math.hypot(vx, vy);
+    if (dy > 0 && (dist > Math.max(80, layout.height * 0.18) || (speed > 0.8 && dist > 30))) {
+      leave(dist ? dx / dist : 0, dist ? dy / dist : 1);
       return;
     }
     springBack();
@@ -343,7 +348,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const openMore = () => {
     if (!upNext.length || ended) return;
     setShowMore(true);
-    Animated.timing(more, { toValue: 1, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start();
+    toward(more, 1, MOTION.slide).start(); // from wherever the finger left it
   };
   const closeMore = () => {
     Animated.timing(more, { toValue: 0, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(() =>
@@ -366,8 +371,8 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   };
 
   // Latest handlers for things called from outside React's render (web view, back button)
-  const handlers = useRef({ leave, openMore, closeMore, showMore, release, blocked, ended });
-  handlers.current = { leave, openMore, closeMore, showMore, release, blocked, ended };
+  const handlers = useRef({ leave, openMore, closeMore, showMore, release, blocked, ended, upNext });
+  handlers.current = { leave, openMore, closeMore, showMore, release, blocked, ended, upNext };
 
   const onSwipe = useCallback((dir: string) => {
     const now = Date.now();
@@ -378,24 +383,54 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
     if (dir === "down") (h.showMore ? h.closeMore : h.leave)();
   }, []);
 
-  // Drags anywhere — on the video too (the finger's touch is taken from the web view
-  // once it's clearly an up/down drag; taps and the seek bar still reach YouTube)
+  // Drags anywhere — on the video too (the finger's touch is taken from the web view once
+  // it's clearly a drag; taps still reach YouTube). Down in ANY downward direction (even
+  // mostly sideways) → the video follows the finger and flies off that way; up → it rises
+  // (slower than the finger) into "More from". Drags starting on YouTube's control bar
+  // (bottom of the video — the seek bar) only count when they're straight up/down.
+  const mode = useRef<"down" | "up" | "more">("down");
   const pan = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) =>
-          !handlers.current.ended && Math.abs(g.dy) > 10 && Math.abs(g.dy) > 2 * Math.abs(g.dx),
+        onMoveShouldSetPanResponder: (_e, g) => {
+          const h = handlers.current;
+          if (h.ended || leavingRef.current) return false;
+          const vertical = Math.abs(g.dy) > 10 && Math.abs(g.dy) > 2 * Math.abs(g.dx);
+          if (h.showMore) return vertical; // the row scrolls sideways
+          const { playerX, playerY, playerW, playerH } = geo.current;
+          const onControls =
+            g.y0 > playerY + playerH * 0.78 && g.y0 < playerY + playerH && g.x0 > playerX && g.x0 < playerX + playerW;
+          if (onControls) return vertical;
+          const down = g.dy > 8 && g.dy >= 0.2 * Math.abs(g.dx);
+          const up = h.upNext.length > 0 && -g.dy > 10 && -g.dy > Math.abs(g.dx);
+          return down || up;
+        },
+        onPanResponderGrant: (_e, g) => {
+          const h = handlers.current;
+          mode.current = h.showMore ? "more" : g.dy < 0 ? "up" : "down";
+          if (mode.current === "up") setShowMore(true); // the row comes in with the video
+        },
         onPanResponderMove: (_e, g) => {
           const h = handlers.current;
-          if (h.showMore || leavingRef.current) return;
-          if (g.dy > 0) drag.setValue(h.blocked() ? g.dy * 0.25 : g.dy); // owed: only stretches
-          else drag.setValue(Math.max(g.dy * 0.15, -24));
+          if (leavingRef.current) return;
+          const reach = Math.abs(geo.current.moreY) || 1;
+          if (mode.current === "up") {
+            more.setValue(Math.min(1, Math.max(0, (-g.dy * 0.6) / reach)));
+          } else if (mode.current === "more") {
+            more.setValue(Math.min(1, Math.max(0, 1 - (g.dy * 0.6) / reach)));
+          } else {
+            const k = h.blocked() ? 0.25 : 1; // owed: only stretches
+            dragX.setValue(g.dx * k);
+            dragY.setValue(g.dy * k);
+            away.setValue(Math.min(1, (Math.hypot(g.dx, Math.max(g.dy, 0)) * k) / (layout.height || 1)));
+          }
         },
-        onPanResponderRelease: (_e, g) => handlers.current.release(g.dy, g.vy),
-        onPanResponderTerminate: () => handlers.current.release(0, 0),
+        onPanResponderRelease: (_e, g) => handlers.current.release(g.dx, g.dy, g.vx, g.vy, mode.current),
+        onPanResponderTerminate: () => handlers.current.release(0, 0, 0, 0, mode.current),
         onPanResponderTerminationRequest: () => false,
       }),
-    [drag]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dragX, dragY, away, more]
   );
 
   // Android back: closes "More from" first, then like ← (instead of closing the app)
@@ -489,25 +524,26 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const moreScale = Math.min(0.62, Math.max(0.3, (H - rowBlock - 24) / playerH));
   const moreY = 12 + (playerH * moreScale) / 2 - H / 2; // centre → near the top
 
-  // Dragged down: smaller, lower, fading out near the bottom; the black behind fades so
-  // the feed shows through
-  const dragDown = drag.interpolate({ inputRange: [0, H], outputRange: [0, 1], extrapolate: "clamp" });
+  // Dragged away: follows the finger, smaller and fading the further it goes; the black
+  // behind fades so the feed shows through
   const playerTransform = [
-    { translateY: Animated.add(Animated.add(drop, drag), more.interpolate({ inputRange: [0, 1], outputRange: [0, moreY] })) },
+    { translateX: dragX },
+    { translateY: Animated.add(Animated.add(drop, dragY), more.interpolate({ inputRange: [0, 1], outputRange: [0, moreY] })) },
     {
       scale: Animated.multiply(
         more.interpolate({ inputRange: [0, 1], outputRange: [1, moreScale] }),
-        dragDown.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] })
+        away.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] })
       ),
     },
   ];
-  const playerOpacity = dragDown.interpolate({ inputRange: [0, 0.45, 0.8], outputRange: [1, 1, 0], extrapolate: "clamp" });
-  const backdrop = Animated.multiply(open, dragDown.interpolate({ inputRange: [0, 0.7], outputRange: [1, 0], extrapolate: "clamp" }));
-  const chrome = dragDown.interpolate({ inputRange: [0, 0.15], outputRange: [1, 0], extrapolate: "clamp" });
+  const playerOpacity = away.interpolate({ inputRange: [0, 0.45, 0.8], outputRange: [1, 1, 0], extrapolate: "clamp" });
+  const backdrop = Animated.multiply(open, away.interpolate({ inputRange: [0, 0.7], outputRange: [1, 0], extrapolate: "clamp" }));
+  const chrome = away.interpolate({ inputRange: [0, 0.15], outputRange: [1, 0], extrapolate: "clamp" });
 
   // Opening: the thumbnail starts on its tile and grows into the player's place
   const playerX = insets.left + (W - playerW) / 2;
   const playerY = insets.top + (H - playerH) / 2;
+  geo.current = { playerX, playerY, playerW, playerH, moreY };
   const zoom = from
     ? {
         dx: from.x + from.w / 2 - (playerX + playerW / 2),
