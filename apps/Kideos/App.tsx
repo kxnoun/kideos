@@ -499,7 +499,7 @@ function Message({ emoji, title, text }: { emoji: string; title: string; text: s
 function Loading() {
   return (
     <View style={styles.center}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+      <StatusBar hidden />
       <Text style={styles.logo}>Kideos</Text>
       <ActivityIndicator size="large" color={colors.brandOnDark} />
     </View>
@@ -537,7 +537,7 @@ function TimesUp({ name, onSwitch }: { name: string; onSwitch?: () => void }) {
 
   return (
     <View style={[styles.center, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingHorizontal: layout.margin }]}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+      <StatusBar hidden />
       <Text style={styles.moon}>🌙</Text>
       <Text style={styles.timeUpTitle}>{name ? `Great watching, ${name}!` : "Great watching!"}</Text>
       <Text style={styles.timeUpText}>Time for a break. What will you do next?</Text>

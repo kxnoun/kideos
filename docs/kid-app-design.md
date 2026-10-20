@@ -128,6 +128,9 @@ short** (`MOTION` in theme.ts: slide 220 ms, out 200 ms, zoom 180 ms) — eased 
   The feed draws nothing until its first channels + videos arrive — no "Getting ready" flash.
 - Layers over the feed (player, Who's watching, the Hi card) have explicit `zIndex` + `elevation` — without
   them Android drew the feed's chip bar on top.
+- **Every screen uses `<StatusBar hidden />`** (the app is full screen). One screen asking for a visible
+  status bar made the safe-area margins change on every switch (the 6T's notch is at the side in landscape),
+  so the layout jumped sideways and "refreshed" after Who's watching, the Hi card and closing a video.
 - Reduce Motion: no slides — screens just appear.
 
 Speed rules (the 6T in a debug build is the benchmark — release builds are several times faster): never

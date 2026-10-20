@@ -165,7 +165,7 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
   );
   const closeChannel = useCallback(() => setOpenChannelId(null), []);
 
-  const statusBar = <StatusBar barStyle="light-content" backgroundColor={colors.bg} />;
+  const statusBar = <StatusBar hidden />;
 
   if (!ready) return <View style={styles.screen} />;
 

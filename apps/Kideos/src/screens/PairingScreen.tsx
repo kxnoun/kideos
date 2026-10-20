@@ -95,7 +95,7 @@ export default function PairingScreen({ onPaired }: Props) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingHorizontal: layout.margin }]}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+      <StatusBar hidden />
       <Text style={styles.logo}>Kideos</Text>
 
       {status === "generating" && <ActivityIndicator size="large" color={colors.brandOnDark} />}

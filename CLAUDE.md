@@ -44,6 +44,7 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
 - **Kid devices are bound** (`users/{p}/kidDevices/{uid}.childIds`, `isKid()` in the rules) — anything the kid
   app reads or writes under a child must be allowed by `isKid`. Run `tests/rules/` after rule changes.
 - **`apps/Kideos/src/pin.ts` is copied to `apps/KideosParent/src/pin.ts`** — change both (identical).
+- **Kid app: every screen `<StatusBar hidden />`** — mixing hidden/visible makes the layout jump sideways.
 - **Kid app UI: use `src/theme.ts`** (colours, fonts, `useLayout` sizes, little/big mode) and
   `components/Tap` / `VideoTile` — no hard-coded colours, `Dimensions.get` or `TouchableOpacity`. Never white
   text on Sunset Orange (use Ink). Design rules: docs/kid-app-design.md.
