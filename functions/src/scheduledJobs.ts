@@ -25,6 +25,7 @@ import { OPENAI_API_KEY } from "./config";
 import { APP_CONFIG } from "./config";
 import type { WatchSession, DeleteChildDataRequest } from "./types";
 import { removeChildFromDevices } from "./kidDevices";
+import { assertMember } from "./access";
 
 // ── 1. cleanupExpiredData ──────────────────────────────────────
 // Runs nightly at 2am UTC.
@@ -327,6 +328,8 @@ export const deleteChildData = onCall(
     if (!parentId || !childId) {
       throw new HttpsError("invalid-argument", "parentId and childId are required");
     }
+
+    await assertMember(request.auth);
 
     if (request.auth?.uid !== parentId) {
       throw new HttpsError("permission-denied", "Not authorized");

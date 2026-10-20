@@ -69,6 +69,10 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   chips, "Fits / Not a fit"). Kept from the YouTube-policy pass: `refreshYouTubeData` (drops deleted /
   private videos; a new place that stores titles / thumbnails / channel names must be added to it) and our
   own player page. Never put AI ratings of YouTube videos in the repo itself.
+- **Nothing project-specific in code**: the apps read the project ID and Google sign-in client from their
+  own `google-services.json` (`getApp().options.projectId`); keys are secrets. Who may use a server:
+  `functions/src/access.ts` (`assertMember` in every callable) + `isMember()` in the rules (inside
+  `isParent`) — `instance/access {inviteOnly}` + `members/{email}`. Setup guide: docs/self-hosting.md.
 - **The kid player page is ours** (`hosting/player/index.html`, Firebase Hosting, `baseUrlOverride`) — keep
   its `?data=` contract and events identical to react-native-youtube-iframe's page; deploy hosting first.
 - The kid player hides parts of YouTube's player — against YouTube's terms; decided Oct 18 to move to the

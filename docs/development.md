@@ -77,7 +77,8 @@ firebase deploy --only functions:kideos-backend:getChannelSuggestions   # one fu
 firebase deploy --only "firestore:rules,firestore:indexes"   # when rules/indexes change
 firebase deploy --only hosting            # the kid player page (hosting/player/index.html)
 ```
-The kid app loads its player page from `https://kideos-io.web.app/player/` — deploy hosting before a kid
+The kid app loads its player page from `https://<project-id>.web.app/player/` (the project in its
+`google-services.json`) — deploy hosting before a kid
 app build that uses it (otherwise videos show a blank player). First time only: if the deploy says the
 Hosting site doesn't exist, open Firebase console → Hosting → **Get started** once (or `firebase init
 hosting`, keeping `hosting/` as the public folder and **not** overwriting `hosting/player/index.html`).

@@ -48,6 +48,7 @@ import type {
   ChannelMetadata,
   CachedVideo,
 } from "./types";
+import { assertMember } from "./access";
 
 // ── Seed video metadata into channelLibraryCache ───────────────
 // Does NOT run analysis — that's done by batchAnalyzeChannel.
@@ -209,6 +210,8 @@ export const seedChannelLibrary = onCall(
       throw new HttpsError("invalid-argument", "channelId, parentId, childId are required");
     }
 
+    await assertMember(request.auth);
+
     if (request.auth?.uid !== parentId) {
       throw new HttpsError("permission-denied", "Not authorized");
     }
@@ -299,6 +302,8 @@ export const resolveAndAddChannel = onCall(
     if (!input || !parentId || !childId) {
       throw new HttpsError("invalid-argument", "input, parentId, childId are required");
     }
+
+    await assertMember(request.auth);
 
     if (request.auth?.uid !== parentId) {
       throw new HttpsError("permission-denied", "Not authorized");
@@ -491,6 +496,7 @@ export const loadMoreVideos = onCall(
   async (request): Promise<{ queued: boolean; reason?: LoadMoreRefusal }> => {
     const { parentId, childId, channelId } = request.data as { parentId?: string; childId?: string; channelId?: string };
     if (!parentId || !childId || !channelId) throw new HttpsError("invalid-argument", "parentId, childId, channelId are required");
+    await assertMember(request.auth);
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
     const db = getFirestore();
     const childPath = `users/${parentId}/children/${childId}`;

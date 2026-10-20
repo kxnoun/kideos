@@ -25,7 +25,6 @@ import {
   signUp,
   signInWithGoogle,
   signInWithApple,
-  createUserProfile,
 } from "../../services/firebase";
 
 type EmailMode = "signin" | "signup";
@@ -106,8 +105,7 @@ export default function AuthScreen() {
     setLoading("email");
     try {
       if (mode === "signup") {
-        const cred = await signUp(email.trim(), password);
-        await createUserProfile(cred.user.uid, email.trim());
+        await signUp(email.trim(), password); // also creates the profile
       } else {
         await signIn(email.trim(), password);
       }

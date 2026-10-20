@@ -27,6 +27,7 @@ import type {
   ChannelSuggestion,
   SuggestChannelsRequest,
 } from "./types";
+import { assertMember } from "./access";
 
 // ── GPT-4o-mini: generate channel handle recommendations ───────
 // Returns @handles like ["@HoffmanAcademy", "@PianoTV"]
@@ -188,6 +189,8 @@ export const suggestChannels = onCall(
     if (!parentId || !childId) {
       throw new HttpsError("invalid-argument", "parentId and childId are required");
     }
+
+    await assertMember(request.auth);
 
     if (request.auth?.uid !== parentId) {
       throw new HttpsError("permission-denied", "Not authorized");

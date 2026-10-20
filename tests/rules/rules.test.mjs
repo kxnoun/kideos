@@ -149,6 +149,41 @@ await t("can't read others' reports", () => assertFails(getDoc(doc(as(OTHER_PARE
 await t("parent can't write the profile itself", () =>
   assertFails(setDoc(doc(as(P), "videoProfiles/v1"), { tooHyperReports: 99 })));
 
+// ── Invite-only servers (instance/access + members/{email}) ──
+const asEmail = (uid, email) => env.authenticatedContext(uid, { email }).firestore();
+const inviteOnly = (members) =>
+  env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "instance/access"), { inviteOnly: true });
+    for (const m of members) await setDoc(doc(db, `members/${m}`), {});
+  });
+await t("open server (no instance/access): any signed-in parent uses their account", () =>
+  assertSucceeds(getDoc(doc(asEmail(P, "a@x.com"), `users/${P}`))));
+await t("invite-only: a member parent reads their child", async () => {
+  await inviteOnly(["a@x.com"]);
+  await assertSucceeds(getDoc(doc(asEmail(P, "a@x.com"), base)));
+});
+await t("invite-only: member check ignores email case", async () => {
+  await inviteOnly(["a@x.com"]);
+  await assertSucceeds(getDoc(doc(asEmail(P, "A@X.com"), `users/${P}`)));
+});
+await t("invite-only: a non-member can't create their profile", async () => {
+  await inviteOnly(["a@x.com"]);
+  await assertFails(setDoc(doc(asEmail("newParent", "z@x.com"), "users/newParent"), { email: "z@x.com" }));
+});
+await t("invite-only: a non-member can't add channels", async () => {
+  await inviteOnly(["a@x.com"]);
+  await assertFails(setDoc(doc(asEmail(P, "z@x.com"), `${base}/whitelistedChannels/CH2`), { name: "x" }));
+});
+await t("invite-only: a member's paired kid device still reads its feed", async () => {
+  await inviteOnly(["a@x.com"]);
+  await assertSucceeds(getDocs(query(collection(as(KID), `${base}/videoVerdicts`), where("approved", "==", true))));
+});
+await t("nobody reads the members list", async () => {
+  await inviteOnly(["a@x.com"]);
+  await assertFails(getDoc(doc(asEmail(P, "a@x.com"), "members/a@x.com")));
+});
+
 await env.cleanup();
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 process.exit(fails ? 1 : 0);

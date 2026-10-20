@@ -10,7 +10,19 @@ service cloud.firestore {
     }
 
     function isParent(parentId) {
-      return isSignedIn() && request.auth.uid == parentId;
+      return isSignedIn() && request.auth.uid == parentId && isMember();
+    }
+
+    // Self-hosted servers are open to anyone who can sign in, unless the owner creates
+    // instance/access { inviteOnly: true } — then only people with a members/{email} doc
+    // (sign-in email, lowercase) get in. Same check in functions/src/access.ts. Kid
+    // devices are let in through their parent (isKid → kidDevices, written by a member).
+    function isMember() {
+      let access = /databases/$(database)/documents/instance/access;
+      return !exists(access)
+        || get(access).data.get("inviteOnly", false) != true
+        || (request.auth.token.email != null
+          && exists(/databases/$(database)/documents/members/$(request.auth.token.email.lower())));
     }
 
     // A kid device paired to this child: users/{parentId}/kidDevices/{the device's

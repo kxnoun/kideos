@@ -9,6 +9,8 @@ import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import appleAuth from "@invertase/react-native-apple-authentication";
+import { getApp } from "@react-native-firebase/app";
+import googleServices from "../../android/app/google-services.json";
 import type {
   ValueFilters,
   ChildProfile,
@@ -21,24 +23,54 @@ import type {
   SuggestedChannel,
 } from "../types";
 
-// TODO: paste your Web Client ID from Firebase Console →
-//       Project Settings → Your apps → Web app → OAuth 2.0 client_id
-const GOOGLE_WEB_CLIENT_ID = "530175410554-ma7s33gove3f3esp8l1o2ckdtuu9snrv.apps.googleusercontent.com";
+// Everything project-specific comes from this build's own Firebase files, so a self-hoster
+// only drops in their google-services.json (docs/self-hosting.md). The Google sign-in Web
+// Client ID is the "client_type 3" OAuth client in it — present once Google sign-in is
+// enabled in the Firebase console before downloading the file. Without it, use email sign-in.
+const GOOGLE_WEB_CLIENT_ID =
+  googleServices.client
+    .flatMap((c: { oauth_client?: { client_id: string; client_type: number }[] }) => c.oauth_client ?? [])
+    .find((o) => o.client_type === 3)?.client_id ?? "";
 
 // Configure once at module load — must happen before any GoogleSignin call
 GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
 
-const REGION = "us-central1";
-const PROJECT_ID = "kideos-io";
+const REGION = "us-central1"; // keep in sync with functions/src/config.ts FUNCTIONS_REGION
+const PROJECT_ID = getApp().options.projectId;
 const CF_BASE = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
 
 // ─── Auth ────────────────────────────────────────────────────
 
-export const signIn = (email: string, password: string) =>
-  auth().signInWithEmailAndPassword(email, password);
+export async function signIn(email: string, password: string) {
+  const cred = await auth().signInWithEmailAndPassword(email, password);
+  await checkAccess(cred.user);
+  return cred;
+}
 
-export const signUp = (email: string, password: string) =>
-  auth().createUserWithEmailAndPassword(email, password);
+export async function signUp(email: string, password: string) {
+  const cred = await auth().createUserWithEmailAndPassword(email, password);
+  await checkAccess(cred.user);
+  return cred;
+}
+
+// Invite-only servers (Firestore doc instance/access with inviteOnly: true — see
+// docs/self-hosting.md): the rules refuse anyone without a members/{email} doc. Check right
+// after signing in and explain, instead of showing an app where every read fails. Also
+// creates the profile doc the first time.
+async function checkAccess(user: { uid: string; email: string | null }) {
+  try {
+    const snap = await firestore().doc(`users/${user.uid}`).get();
+    if (!snap.exists()) await createUserProfile(user.uid, user.email ?? "");
+  } catch (e) {
+    if ((e as { code?: string })?.code === "firestore/permission-denied") {
+      await signOut();
+      throw new Error(
+        `This Kideos server is invite-only. Ask the person who runs it to add ${user.email ?? "your email"}.`
+      );
+    }
+    throw e;
+  }
+}
 
 export async function signOut() {
   await auth().signOut();
@@ -48,7 +80,7 @@ export async function signOut() {
 
 export const onAuthStateChanged = auth().onAuthStateChanged.bind(auth());
 
-export async function createUserProfile(uid: string, email: string): Promise<void> {
+async function createUserProfile(uid: string, email: string): Promise<void> {
   await firestore().doc(`users/${uid}`).set(
     { email, createdAt: firestore.FieldValue.serverTimestamp() },
     { merge: true }
@@ -65,9 +97,7 @@ export async function signInWithGoogle() {
   if (!idToken) throw new Error("Google Sign-In failed — no ID token returned.");
   const credential = auth.GoogleAuthProvider.credential(idToken);
   const userCred = await auth().signInWithCredential(credential);
-  if (userCred.additionalUserInfo?.isNewUser) {
-    await createUserProfile(userCred.user.uid, userCred.user.email ?? "");
-  }
+  await checkAccess(userCred.user);
   return userCred;
 }
 
@@ -84,9 +114,7 @@ export async function signInWithApple() {
     response.nonce
   );
   const userCred = await auth().signInWithCredential(credential);
-  if (userCred.additionalUserInfo?.isNewUser) {
-    await createUserProfile(userCred.user.uid, userCred.user.email ?? "");
-  }
+  await checkAccess(userCred.user);
   return userCred;
 }
 

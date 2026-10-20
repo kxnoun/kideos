@@ -24,6 +24,7 @@ import { loadValueFiltersForChild } from "./analyzeVideo";
 import { CHECK_VERSION, applyVideoFloors, fitForChild, type ChannelReport } from "./channelCheck";
 import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
 import type { ContentProfile } from "./types";
+import { assertMember } from "./access";
 
 type Db = FirebaseFirestore.Firestore;
 
@@ -441,6 +442,7 @@ export const getChannelSuggestions = onCall(
   async (request): Promise<{ suggestions: ChannelSuggestion[] }> => {
     const { parentId, childId } = request.data as { parentId?: string; childId?: string };
     if (!parentId || !childId) throw new HttpsError("invalid-argument", "parentId and childId are required");
+    await assertMember(request.auth);
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
 
     const db = getFirestore();

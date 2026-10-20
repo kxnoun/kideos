@@ -64,6 +64,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import YoutubePlayer, { type YoutubeIframeRef } from "react-native-youtube-iframe";
+import { getApp } from "@react-native-firebase/app";
 import type { ShouldStartLoadRequest, WebViewOpenWindowEvent } from "react-native-webview/lib/WebViewTypes";
 import {
   subscribeToPlaySignal,
@@ -140,7 +141,9 @@ const HIDE_IN_PLAYER = `(function () {
 // Our own player page (hosting/player/index.html, Firebase Hosting) instead of the library's
 // on its author's GitHub Pages: YouTube's iframe fills the whole box (Shorts used to be a tiny
 // strip at the top), privacy-enhanced embed (youtube-nocookie.com), no third-party code.
-const PLAYER_PAGE = "https://kideos-io.web.app/player/";
+// Served by whichever Firebase project this build uses (google-services.json) — self-hosters
+// deploy it with `firebase deploy --only hosting`.
+const PLAYER_PAGE = `https://${getApp().options.projectId}.web.app/player/`;
 const YOUTUBE_PAGE = /^https?:\/\/((www|m)\.)?(youtube\.com|youtu\.be)\/(?!embed\/)/i;
 
 function allowLoad(req: ShouldStartLoadRequest): boolean {

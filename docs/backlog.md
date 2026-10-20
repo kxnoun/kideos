@@ -4,6 +4,20 @@ What's next, in rough priority order. Update this file as things land.
 
 ## 0. Next up (agreed Oct 17–20 — rough order, reorder freely)
 
+**Oct 20 — open source, self-hosted (backlog → 2b).** Branch `self-hosted`: wording rollback ✅, config from
+`google-services.json` + invite-only servers + docs/self-hosting.md ✅ (run the rules tests on Windows —
+the emulator can't download in Claude's sandbox). Then, in order:
+- **Suggestions, self-hosted:** the new dimensions (language learning, autism support, instrument learning,
+  faith education, speech delay, interests); **channel packs** — lists of channel IDs + a human note in the
+  repo (like ad-blocker filter lists, added by pull request), each server rates a pack's channels itself on
+  ~10 sample videos (~$15–25 per 500 channels) and suggests the ones that fit. Never AI ratings in the repo.
+- **Android TV / Google TV** for the kid app (Fire TV too): D-pad focus navigation instead of touch, a
+  10-foot layout, TV build of React Native. Android phones/tablets + TV are the main platforms; iOS stays
+  "build it yourself" (Xcode free 7-day installs, or a $99/yr developer account).
+- **Before the repo goes public:** scan the whole git history for secrets (rotate anything real — the old
+  GitHub token, any keys), pick a licence (MIT or AGPL), README for strangers (screen recording, setup,
+  the YouTube-terms note), "Built with Claude Code" credit.
+
 0. **Parent app UI redesign** (agreed Oct 20 — next). Same care as the kid app (research → tokens → build →
    test on the phone). Already known to fix on the way:
    - **Edit a child** (name, age, avatar) — today the age is only set at creation (changing it means editing

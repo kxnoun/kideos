@@ -2,7 +2,8 @@
 
 Checks `firestore.rules` against the real Firestore emulator: paired vs unpaired kid devices, parents,
 "Show anyway", pairing codes, kid devices (`kidDevices` — which children a device may use) and moving
-over devices paired before Oct 20, 2026 (`deviceMigrations`).
+over devices paired before Oct 20, 2026 (`deviceMigrations`), and invite-only servers
+(`instance/access` + `members/{email}`).
 
 ```powershell
 cd tests\rules

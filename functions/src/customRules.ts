@@ -13,6 +13,7 @@ import { logger } from "firebase-functions/v2";
 import OpenAI from "openai";
 import { APP_CONFIG, OPENAI_API_KEY } from "./config";
 import { DIMS, HOLIDAYS, VALUE_FLAGS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS, FREE_TEXT_MAX } from "./prefs";
+import { assertMember } from "./access";
 
 export interface RuleChange {
   key: string; // e.g. "holidays.halloween", "rules.language.max", "flags.pork", "music"
@@ -50,6 +51,7 @@ export const parseCustomRules = onCall(
   { region: APP_CONFIG.FUNCTIONS_REGION, secrets: [OPENAI_API_KEY], timeoutSeconds: 30, memory: "256MiB" },
   async (request): Promise<{ changes: RuleChange[]; remaining: string }> => {
     const { parentId, text } = request.data as { parentId: string; text: string };
+    await assertMember(request.auth);
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not your account");
     const input = String(text ?? "").trim().slice(0, FREE_TEXT_MAX);
     if (!input) return { changes: [], remaining: "" };

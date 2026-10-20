@@ -32,3 +32,6 @@ Thumbs.db
 
 # Rules tests
 tests/rules/node_modules/
+
+# Firebase project alias — each self-hoster runs `firebase use --add`
+.firebaserc

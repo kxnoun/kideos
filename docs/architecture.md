@@ -277,7 +277,7 @@ alive underneath (Back is instant, same scroll position):
   on YouTube's control bar only count when straight up/down (seek bar).
 - **End card** when a video ends: Watch again / My videos / up to 3 more from the same channel (`pickNext`:
   older first, unwatched first). No autoplay.
-- **Player page:** our own, `hosting/player/index.html` on Firebase Hosting (`https://kideos-io.web.app/player/`,
+- **Player page:** our own, `hosting/player/index.html` on Firebase Hosting (`https://<project-id>.web.app/player/`, project from `google-services.json`,
   `baseUrlOverride` in `PlayerScreen`), a drop-in for the library's page (same `?data=` contract, global
   `player`, same events). YouTube's iframe fills the whole web view (the library's page forced 16:9 of the
   width — Shorts were a thin strip) and uses the privacy-enhanced `youtube-nocookie.com` host; no analytics or

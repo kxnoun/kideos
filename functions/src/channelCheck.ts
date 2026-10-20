@@ -40,6 +40,7 @@ import {
 import type { ContentProfile, Framing } from "./types";
 import { LADDER_GUIDE } from "./aiAnalysis";
 import type { CatalogEntry } from "./channelCatalog";
+import { assertMember } from "./access";
 
 export const CHECK_VERSION = 5; // v5: ages = who it suits, not "made for". v4: same ladder definitions as videos + targeted searches. v3: full profile. Bump when the criteria change → re-checked on next add
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -388,6 +389,7 @@ export const getChannelFits = onCall(
   async (request): Promise<{ fits: Record<string, { fit: "good" | "caution" | "not_fit"; conflicts: string[] }> }> => {
     const { parentId, childId } = request.data as { parentId?: string; childId?: string };
     if (!parentId || !childId) throw new HttpsError("invalid-argument", "parentId and childId are required");
+    await assertMember(request.auth);
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
 
     const db = getFirestore();
@@ -419,6 +421,7 @@ export const checkChannel = onCall(
   async (request): Promise<CheckChannelResponse> => {
     const { input, parentId, childId } = request.data as { input?: string; parentId?: string; childId?: string };
     if (!input || !parentId || !childId) throw new HttpsError("invalid-argument", "input, parentId, childId are required");
+    await assertMember(request.auth);
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
 
     const db = getFirestore();

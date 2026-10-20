@@ -34,7 +34,7 @@ After installing, run `pod install` in `apps/KideosParent/ios/`.
 
 ## Firebase Console setup (do once)
 
-1. Open [Firebase Console](https://console.firebase.google.com) → **kideos-io** project
+1. Open [Firebase Console](https://console.firebase.google.com) → your project
 2. Go to **Authentication → Sign-in method**
 3. Enable **Google** — set the project support email
 4. Enable **Apple** — you'll need your Apple Services ID and the OAuth redirect URL (see Apple setup below)

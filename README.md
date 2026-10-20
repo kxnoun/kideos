@@ -1,5 +1,10 @@
 # Kideos
 
+> **Open source, self-hosted.** You run Kideos on your own Firebase project with your own API keys, for
+> your family (or friends and family on one invite-only server) — setup: **[docs/self-hosting.md](docs/self-hosting.md)**.
+> It analyses YouTube videos in ways YouTube's API policies don't allow (backlog → 2b); running it is your
+> own risk.
+
 A YouTube parental-control system: parents pick the channels, answer a per-child questionnaire about
 what's OK, and the kid's app only ever shows videos that passed. Every video is analyzed once by AI from
 its transcript and a few still images; each child's answers are applied to that analysis in code, so
@@ -10,7 +15,7 @@ check (thumbnails + what people say) tailored to their child.
 |---|---|---|---|
 | **Kideos** | `apps/Kideos` | `com.kideos.app` | Kid-facing app, designed for kids like YouTube Kids: only approved videos, two layouts by age (bubbles + one strip for ≤ 4, shelves for 5+), full-screen player with drag gestures, minimum watch time, Time's up. No sign-in (anonymous auth); paired to the **family** by a 6-character code — one device can be shared by several kids ("Who's watching?", optional PIN per child). |
 | **Kideos for Parents** | `apps/KideosParent` | `com.kideos.parent` | Parent app: children, channels (with a "Before you add it" channel check), the questionnaire, the Videos screen (what's shown / hidden and why, watch any video, Hide / Too hyper), suggested channels, live "now watching" + remote pause/stop, viewing rules + profile PINs, kid devices (who uses each, unpair), weekly digests. |
-| **Backend** | `functions/` | Firebase project `kideos-io` | Cloud Functions (us-central1): channel checks, channel seeding, AI content profiles with image checks, filtering, re-apply on filter change, suggested channels, profile upgrades, "Too hyper" reports, digests, COPPA deletion. |
+| **Backend** | `functions/` | your Firebase project | Cloud Functions (us-central1): channel checks, channel seeding, AI content profiles with image checks, filtering, re-apply on filter change, suggested channels, profile upgrades, "Too hyper" reports, digests, COPPA deletion. |
 
 ## How it works (one paragraph)
 
@@ -61,7 +66,7 @@ apps/
     src/prefs.ts          questionnaire definitions — COPY of functions/src/prefs.ts, keep in sync
     src/components/FiltersForm.tsx   the questionnaire UI
 functions/src/            Cloud Functions (see docs/architecture.md → Backend)
-hosting/player/           the kid app's YouTube player page (Firebase Hosting — kideos-io.web.app/player/)
+hosting/player/           the kid app's YouTube player page (Firebase Hosting — <project-id>.web.app/player/)
 firestore.rules           security rules        firestore.indexes.json   composite indexes
 tests/rules/              Firestore emulator tests for the rules (device binding, pairing, Show anyway…)
 docs/                     everything else (below)
