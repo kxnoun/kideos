@@ -208,6 +208,30 @@ export async function addChannel(
   );
 }
 
+// Before adding: checks the channel (thumbnails + reputation, shared per channel)
+// and returns what conflicts with this child's settings. Nothing is added.
+export interface CheckChannelResult {
+  channel: { channelId: string; name: string; handle: string; thumbnail: string; subscriberCount: number };
+  alreadyAdded: boolean;
+  report: {
+    verdict: "good" | "caution" | "not_recommended"; // the AI's general opinion for kids
+    summary: string;
+    reputation: string;
+    wellKnown: boolean;
+    audienceMinAge: number | null;
+    audienceMaxAge: number | null;
+    sources: { title: string; uri: string }[];
+    thumbnailsChecked: number;
+  } | null;
+  fit: "good" | "caution" | "not_fit" | null; // for THIS child (worked out in code)
+  conflicts: string[];
+  findings: { what: string; basis: "thumbnails" | "reputation" | "both" | "videos" | "" }[];
+  ageNote: string;
+}
+export async function checkChannel(parentId: string, childId: string, input: string): Promise<CheckChannelResult> {
+  return callFunction<CheckChannelResult>("checkChannel", { parentId, childId, input });
+}
+
 // ─── Suggested channels ──────────────────────────────────────
 
 export async function getChannelSuggestions(parentId: string, childId: string): Promise<SuggestedChannel[]> {
@@ -341,6 +365,15 @@ export async function hideVideo(parentId: string, childId: string, videoId: stri
   await firestore()
     .doc(`users/${parentId}/children/${childId}/videoVerdicts/${videoId}`)
     .update({ parentDecision: "hidden", approved: false });
+}
+
+// "Too hyper": hide it for this child, and report it — once enough families report a
+// video it counts as overstimulating for everyone (functions: onPaceReport)
+export async function reportTooHyper(parentId: string, childId: string, videoId: string): Promise<void> {
+  await hideVideo(parentId, childId, videoId);
+  await firestore()
+    .doc(`videoProfiles/${videoId}/paceReports/${parentId}`)
+    .set({ childId, reportedAt: firestore.FieldValue.serverTimestamp() });
 }
 
 // Hide several at once (Videos screen → Select)

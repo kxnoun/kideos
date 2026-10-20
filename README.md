@@ -2,22 +2,26 @@
 
 A YouTube parental-control system: parents pick the channels, answer a per-child questionnaire about
 what's OK, and the kid's app only ever shows videos that passed. Every video is analyzed once by AI from
-its transcript; each child's answers are applied to that analysis in code, so changing answers updates
-the feed instantly.
+its transcript and a few still images; each child's answers are applied to that analysis in code, so
+changing answers updates the feed instantly. Before a channel is added, parents see a one-time channel
+check (thumbnails + what people say) tailored to their child.
 
 | App | Path | Bundle ID | What it is |
 |---|---|---|---|
 | **Kideos** | `apps/Kideos` | `com.kideos.app` | Kid-facing player. Shows only approved videos. No sign-in (anonymous auth), paired to a parent by a 6-character code. |
-| **Kideos for Parents** | `apps/KideosParent` | `com.kideos.parent` | Parent app: children, channels, the questionnaire, the Videos screen (what's shown / hidden and why), suggested channels, live "now watching" + remote pause/stop, weekly digests. |
-| **Backend** | `functions/` | Firebase project `kideos-io` | Cloud Functions (us-central1): channel seeding, AI content profiles, filtering, re-apply on filter change, suggested channels, profile upgrades, digests, COPPA deletion. |
+| **Kideos for Parents** | `apps/KideosParent` | `com.kideos.parent` | Parent app: children, channels (with a "Before you add it" channel check), the questionnaire, the Videos screen (what's shown / hidden and why, watch any video, Hide / Too hyper), suggested channels, live "now watching" + remote pause/stop, weekly digests. |
+| **Backend** | `functions/` | Firebase project `kideos-io` | Cloud Functions (us-central1): channel checks, channel seeding, AI content profiles with image checks, filtering, re-apply on filter change, suggested channels, profile upgrades, "Too hyper" reports, digests, COPPA deletion. |
 
 ## How it works (one paragraph)
 
-A parent adds a channel → the backend pulls the channel's 50 latest videos → for each video it fetches the
-transcript (Supadata) and asks GPT-4o-mini for a **content profile**: violence, language, scary, romance,
-sexual references, substances, dangerous stunts, self-harm, meanness, selling, politics, religion, gambling
-(+ optional dimensions), each on a 0–4 ladder, plus holidays, food, music, etc. Profiles are shared by every
-family. The child's **questionnaire answers** are then applied in code → a per-child **verdict**:
+A parent types a channel → a one-time **channel check** (Gemini: its 50 latest thumbnails + a Google
+search for its reputation, saved and shared by every family) shows whether it fits *their* child before
+they confirm → the backend pulls the channel's 50 latest videos → for each video it fetches the transcript
+(Supadata) and asks GPT-4o-mini, with the thumbnail and 3 frames, for a **content profile**: violence,
+language, scary, romance, sexual references, substances, dangerous stunts, self-harm, meanness, selling,
+politics, religion, gambling, pace & stimulation, junk / Elsagate (+ optional dimensions), each on a 0–4
+ladder, plus holidays, food, music, etc. Free image moderation, code-counted swearing and parents' "Too
+hyper" reports set floors the AI can't go under. Profiles are shared by every family. The child's **questionnaire answers** are then applied in code → a per-child **verdict**:
 *approved* (in the feed) or *hidden*, with the reason in plain words. Parents never have to approve
 anything: they can look at what's shown and hidden (and why) whenever they like, and "Show anyway" one
 video behind a confirmation. Changing answers re-applies them to all of that child's videos within
@@ -38,7 +42,8 @@ Details: **[docs/architecture.md](docs/architecture.md)**.
   unused — no push notifications by design.)
 - **Backend:** Cloud Functions v2 (`firebase-functions` 7, Node 22), `firebase-admin` 13, OpenAI SDK
 - **External APIs:** YouTube Data API v3 (never `search.list`), Supadata (transcripts, Pro plan),
-  OpenAI GPT-4o-mini. Keys live in Firebase Secret Manager.
+  OpenAI GPT-4o-mini (profiles) + moderation (images, free), Google Gemini Flash-Lite (channel checks,
+  with Google Search). Keys live in Firebase Secret Manager.
 
 ## Repo structure
 

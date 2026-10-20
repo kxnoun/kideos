@@ -17,6 +17,7 @@ import {
   type Dim,
   type ValueFilters,
   type Tradition,
+  FREE_TEXT_MAX,
 } from "../prefs";
 import { parseCustomRules, type RuleChange } from "../services/firebase";
 import { useStore } from "../store/useStore";
@@ -176,6 +177,29 @@ const QUESTIONS: Question[] = [
       { level: 2, label: "Discussed", example: "How odds work, the history of casinos" },
       { level: 3, label: "Shown", example: "Casino games, betting, opening loot boxes" },
       { level: 4, label: "Promoted", example: "Gambling sponsors, \"go bet on…\"" },
+    ],
+  },
+  {
+    dim: "stimulation",
+    title: "Pace and stimulation",
+    hint: "How hyper a video is — fast talking, nonstop songs and sound effects, flashy colors. Judged from the captions and a few still images, so it's a good guess, not perfect.",
+    options: [
+      { level: 0, label: "Calm only", example: "Slow, gentle narration" },
+      { level: 1, label: "Gentle", example: "Ms Rachel, Bob Ross" },
+      { level: 2, label: "Lively", example: "Bluey, SciShow Kids" },
+      { level: 3, label: "High energy", example: "CoComelon, MrBeast" },
+      { level: 4, label: "Anything", example: "Including “brainrot” like Skibidi Toilet" },
+    ],
+  },
+  {
+    dim: "junk",
+    title: "Junk and knock-off videos",
+    hint: "Spam, knock-off characters and creepy fake kids' videos (“Elsagate”). Often has no speech, so we judge it from the title and images.",
+    options: [
+      { level: 0, label: "Real shows and creators only", example: "" },
+      { level: 1, label: "Low effort is OK", example: "Simple toy videos, slideshows, reuploads" },
+      { level: 2, label: "Clickbait is OK", example: "“Spiderman Elsa Hulk Learn Colors”, knock-off characters" },
+      { level: 3, label: "Spam is OK", example: "The same clip looped with “effects”" },
     ],
   },
 ];
@@ -430,7 +454,27 @@ export default function FiltersForm({
             trackColor={{ true: "#6C63FF" }}
           />
         </View>
-        <Text style={styles.label}>When we can't check a video (e.g. it has no transcript):</Text>
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>
+            Only videos marked “made for kids” by their creator (YouTube's own label)
+          </Text>
+          <Switch
+            value={Boolean(value.madeForKidsOnly)}
+            onValueChange={(madeForKidsOnly) => onChange({ ...value, madeForKidsOnly })}
+            trackColor={{ true: "#6C63FF" }}
+          />
+        </View>
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>No Shorts (short vertical videos)</Text>
+          <Switch
+            value={Boolean(value.hideShorts)}
+            onValueChange={(hideShorts) => onChange({ ...value, hideShorts })}
+            trackColor={{ true: "#6C63FF" }}
+          />
+        </View>
+        <Text style={styles.label}>
+          When we can't tell a rating (rare — e.g. a video without captions whose images don't show enough):
+        </Text>
         <Segment
           options={[
             { value: "allow", label: "Allow it" },
@@ -570,7 +614,11 @@ export default function FiltersForm({
           placeholderTextColor="#aaa"
           multiline
           numberOfLines={3}
+          maxLength={FREE_TEXT_MAX}
         />
+        <Text style={styles.counter}>
+          {value.customRules.length}/{FREE_TEXT_MAX}
+        </Text>
         {value.customRules.trim() ? (
           <TouchableOpacity style={styles.parseBtn} onPress={turnIntoSettings} disabled={parsing}>
             {parsing ? <ActivityIndicator color="#6C63FF" /> : <Text style={styles.parseText}>Turn this into settings</Text>}
@@ -618,6 +666,7 @@ export default function FiltersForm({
             onChangeText={(religion) => onChange({ ...value, religion })}
             placeholder="e.g. Christian, Jewish, Muslim..."
             placeholderTextColor="#aaa"
+            maxLength={FREE_TEXT_MAX}
           />
         )}
       </View>
@@ -626,6 +675,7 @@ export default function FiltersForm({
 }
 
 const styles = StyleSheet.create({
+  counter: { fontSize: 12, color: "#999", textAlign: "right", marginTop: 4 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,

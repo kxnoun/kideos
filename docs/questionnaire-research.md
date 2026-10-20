@@ -2,14 +2,22 @@
 
 How Kideos decides what a child sees, and why it's built this way. Code: `functions/src/prefs.ts`
 (questions, age defaults — copied to `apps/KideosParent/src/prefs.ts`),
-`functions/src/aiAnalysis.ts` (content profile prompt), `functions/src/contentFilter.ts` (matching).
+`functions/src/aiAnalysis.ts` (content profile prompt), `functions/src/visualCheck.ts` (image floors),
+`functions/src/contentFilter.ts` (matching), `functions/src/channelCheck.ts` (channel check before adding).
 
 ## Design
 
-- **One content profile per video**, generated once by AI from the transcript, rating each dimension
-  on a shared 0–4 ladder (modelled on the Australian Classification "impact" hierarchy). Evidence is
-  written before each level; `null` = can't tell from the transcript. Profanity and God's-name
-  exclamations are also counted in code (a floor the AI can't go under).
+- **One content profile per video**, generated once by AI from the transcript, the metadata and 4 still
+  images (thumbnail + 3 frames), rating each dimension on a shared 0–4 ladder (modelled on the Australian
+  Classification "impact" hierarchy). Evidence is written before each level; `null` = can't tell.
+  **Floors the AI can't go under:** profanity and God's-name exclamations counted in code; image
+  moderation scores (sexual, violent, graphic, self-harm); a known-channel pace floor; parents' "Too hyper"
+  reports. **Images only ever raise a rating** — added after a cartoon sex scene with innocent-sounding
+  dialogue ("wanna do it again?") passed on the words alone. Videos without captions are rated from the
+  metadata + images instead of being skipped.
+- **One channel profile per channel**, made once when a parent first adds it: the 50 latest thumbnails +
+  a reputation search, on the same ladders and definitions, applied to each child in the same code — a
+  warning before adding, not a replacement for the per-video checks.
 - **Per-child answers are applied in code** — changing them re-checks every video instantly, free.
 - **Question format: "allow up to this level" ladders with concrete examples** at every rung, not
   yes/no or 1–5 importance scales. Construct-specific items are more reliable than agree/disagree or
@@ -28,8 +36,24 @@ How Kideos decides what a child sees, and why it's built this way. Code: `functi
 ## Dimensions and why
 
 Core: violence, scary, language, romance, sexual, substances, dangerous stunts, self-harm, meanness/pranks,
-consumerism, politics, religion, gambling. Advanced: crude humor, mature themes, misinformation, nudity
-(best effort), LGBTQ+ (neutral options — families differ), mature games.
+consumerism, politics, religion, gambling, pace & stimulation, junk & knock-offs. Advanced: crude humor,
+mature themes, misinformation, nudity (best effort), LGBTQ+ (neutral options — families differ), mature
+games. Switches: made-for-kids only (YouTube's own label), no Shorts.
+
+**Pace & stimulation** (added Oct 19 at the sister's request — "CoComelon and brainrot"): calm → gentle →
+lively → high energy → overstimulating, with anchor examples (Ms Rachel 1, Bluey 2, CoComelon / MrBeast 3,
+Skibidi Toilet 4). Lillard & Peterson (2011): 4-year-olds did worse on executive-function tasks right after
+9 minutes of a fast-paced cartoon than after an educational one or drawing. We can't measure cut speed (it
+needs the video itself), so the rating combines code-counted pace stats (words per minute, `[Music]`-style
+tags per minute, repeated phrases), title style, the 4 stills and the channel's known style. Defaults
+2/3/3/4/4 by age; a quiet video with frantic cuts can still slip — parents' "Too hyper" button covers that.
+
+**Junk & knock-offs** (added Oct 19): low effort → clickbait / knock-off characters → looped "effects"
+spam → disturbing content dressed as kids' content ("Elsagate"). Clickbait in general was left out (coders
+couldn't agree on it — see Known limits), but its extreme forms are easy to recognise and are what parents
+actually find: keyword-stuffed titles ("Spiderman Elsa Hulk Learn Colors"), famous characters mashed
+together by channels that don't own them, the same clip looped with effects. Usually no speech, so it's
+judged from the title, tags and images.
 
 Gambling started as present/absent; real data showed passing mentions (a psychology study using a bet,
 a joke about betting on golf) landing at the worst level. Since profile v4 it's a ladder like the others:
@@ -80,17 +104,36 @@ child's age (±1 year). Example from testing: EpicMealTime had 17/50 fitting Sho
 suggested; SciShow isn't sunk by one predator video, but isn't suggested to a 6-year-old either (made for
 12+).
 
+## Channel check — a warning before adding
+
+Parents asked to know *before* adding a channel whether it's "known for weird stuff", and thumbnails are
+part of what the child sees in the feed. Checking every frame of every video was too expensive (~$1 per
+channel), so instead each channel gets one check, shared by every family: its latest 50 thumbnails + a
+Google search for what parents and press say, saved as a full channel profile on the same ladders. Each
+child's fit is worked out in code from that saved profile, so a 6-year-old and a 16-year-old get different
+answers from one check, and changing settings never costs another AI call. The review is a warning with
+a confirm button — the per-video checks still decide what the child actually sees. Tone matters: a
+channel whose only issue is sponsors shows a calm "1 thing to know", not the red "Not a fit".
+
 ## Known limits
 
 - LLM accuracy evidence is from adjacent tasks (toxicity r≈0.61 vs humans; GPT-4 κ 0.54–0.62 on violent
   speech; script-based MPAA prediction 78% F1), not GPT-4o-mini on YouTube transcripts.
-- Transcripts can't show visuals: nudity, gore, music, who is singing are best effort.
+- Visuals are sampled, not watched: a video's thumbnail + 3 frames (start / middle / end) and a channel's
+  50 thumbnails. A scene between frames can slip. Music and who is singing are still best effort.
+- Image-moderation thresholds are a first guess, and the moderation model is mostly trained on photos —
+  cartoons may score lower. Tune from real logs.
+- The channel check's reputation search (Gemini Flash-Lite) can be shallow — e.g. IShowSpeed's swearing
+  came back "mild" until floors from his analyzed videos were added. Small channels have little online,
+  so they're judged from thumbnails only (and labelled that way).
 - Clickbait was left out: even trained human coders couldn't agree on it (Common Sense/Michigan study).
 - **Before launch:** label 300–500 videos with 2–3 raters; only use dimensions with weighted κ ≥ 0.7 as
   hard filters; fix the prompt for the rest (or make their defaults more conservative). Plan: [backlog.md](backlog.md) → *Check the AI against people*.
 
 ## Sources
 
+- Lillard & Peterson 2011, fast-paced TV and executive function (Pediatrics): https://uva.theopenscholar.com/early-development-lab/publications/immediate-impact-different-types-television-young-childrens
+- Elsagate overview: https://en.wikipedia.org/wiki/Elsagate
 - Common Sense Media ratings: https://www.commonsensemedia.org/about-us/our-mission/about-our-ratings
 - Common Sense young kids & YouTube (2020): https://www.commonsensemedia.org/sites/default/files/research/report/2020_youngkidsyoutube-report_final-release_forweb_1.pdf
 - Australian Classification: https://www.classification.gov.au/classification-ratings/how-rating-decided

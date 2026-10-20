@@ -14,6 +14,9 @@ import { defineSecret } from "firebase-functions/params";
 export const YOUTUBE_API_KEY = defineSecret("YOUTUBE_API_KEY");
 export const SUPADATA_API_KEY = defineSecret("SUPADATA_API_KEY");
 export const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
+// Gemini — channel check at add time (channelCheck.ts)
+//   firebase functions:secrets:set GEMINI_API_KEY   (key from aistudio.google.com)
+export const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
 // App constants
 export const APP_CONFIG = {

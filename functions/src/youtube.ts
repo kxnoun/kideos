@@ -30,6 +30,7 @@ interface YouTubeVideoContentDetails {
 interface YouTubeVideoStatus {
   madeForKids: boolean;
   privacyStatus: "public" | "private" | "unlisted";
+  embeddable?: boolean; // false = the owner blocks playback in other apps/sites (common for label music videos)
 }
 
 export interface YouTubeVideoDetails {
@@ -145,8 +146,9 @@ export async function getVideoDetails(
   const contentDetails: YouTubeVideoContentDetails = item.contentDetails;
   const status: YouTubeVideoStatus = item.status;
 
-  // Auto-block private/unlisted/age-restricted
-  const isPrivateOrRestricted = status.privacyStatus !== "public";
+  // Auto-block private/unlisted/age-restricted, and videos whose owner disabled
+  // embedding (they'd only show "Video unavailable" in the kid player)
+  const isPrivateOrRestricted = status.privacyStatus !== "public" || status.embeddable === false;
 
   return {
     videoId,
@@ -166,6 +168,27 @@ export async function getVideoDetails(
     madeForKids: status.madeForKids ?? false,
     isPrivateOrRestricted,
   };
+}
+
+// ── Is it a Short? ─────────────────────────────────────────────
+// The Data API doesn't say. youtube.com/shorts/{id} answers 200 for a Short and
+// redirects to the normal watch page otherwise. Only videos ≤ 3 min can be Shorts.
+// If YouTube doesn't answer clearly: ≤ 60s or "#shorts" in the title/description.
+export async function checkIsShort(video: YouTubeVideoDetails): Promise<boolean> {
+  if (video.durationSeconds > 180) return false;
+  const guess = video.durationSeconds <= 60 || /#shorts?\b/i.test(`${video.title} ${video.description}`);
+  try {
+    const res = await fetch(`https://www.youtube.com/shorts/${video.videoId}`, {
+      method: "HEAD",
+      redirect: "manual",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.status === 200) return true;
+    if (res.status >= 300 && res.status < 400) return false;
+    return guess;
+  } catch {
+    return guess;
+  }
 }
 
 // ── channels.list — 1 unit per call ───────────────────────────

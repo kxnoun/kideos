@@ -24,9 +24,18 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList, VideoVerdict, Dim } from "../../types";
-import { subscribeToVerdicts, setShowAnyway, hideVideo, hideVideos, getVideoSummary } from "../../services/firebase";
+import {
+  subscribeToVerdicts,
+  subscribeToWhitelistedChannels,
+  setShowAnyway,
+  hideVideo,
+  hideVideos,
+  reportTooHyper,
+  getVideoSummary,
+} from "../../services/firebase";
 import { LEVEL_LABELS } from "../../prefs";
 import { useStore } from "../../store/useStore";
+import VideoPreview from "../../components/VideoPreview";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Videos">;
 
@@ -44,6 +53,8 @@ export const DIM_TITLES: Record<Dim, string> = {
   politics: "Politics",
   religion: "Religion",
   gambling: "Gambling",
+  stimulation: "Pace",
+  junk: "Junk",
   crudeHumor: "Crude humor",
   matureThemes: "Mature themes",
   misinformation: "Misinformation",
@@ -71,7 +82,8 @@ function RatingChips({ v }: { v: VideoVerdict }) {
 export default function VideosScreen({ route, navigation }: Props) {
   const { childId, childName } = route.params;
   const user = useStore((s) => s.user);
-  const [verdicts, setVerdicts] = useState<VideoVerdict[]>([]);
+  const [allVerdicts, setVerdicts] = useState<VideoVerdict[]>([]);
+  const [channelIds, setChannelIds] = useState<Set<string> | null>(null);
   const [tab, setTab] = useState<"shown" | "hidden">("shown");
   const [confirming, setConfirming] = useState<VideoVerdict | null>(null);
   const [details, setDetails] = useState<VideoVerdict | null>(null); // "learn more" sheet
@@ -81,9 +93,21 @@ export default function VideosScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (!user) return;
-    return subscribeToVerdicts(user.uid, childId, setVerdicts);
+    const unsubV = subscribeToVerdicts(user.uid, childId, setVerdicts);
+    const unsubC = subscribeToWhitelistedChannels(user.uid, childId, (chs) =>
+      setChannelIds(new Set(chs.map((c) => c.channelId)))
+    );
+    return () => {
+      unsubV();
+      unsubC();
+    };
   }, [user, childId]);
 
+  // Only channels still on the list (a removed channel's results stay in the database, unseen)
+  const verdicts = useMemo(
+    () => (channelIds ? allVerdicts.filter((v) => channelIds.has(v.channelId)) : []),
+    [allVerdicts, channelIds]
+  );
   const shown = useMemo(() => verdicts.filter((v) => v.approved), [verdicts]);
   const hidden = useMemo(() => verdicts.filter((v) => !v.approved), [verdicts]);
   const list = tab === "shown" ? shown : hidden;
@@ -99,6 +123,15 @@ export default function VideosScreen({ route, navigation }: Props) {
     if (!user) return;
     try {
       await hideVideo(user.uid, childId, v.videoId);
+    } catch {
+      Alert.alert("Couldn't hide it. Check your connection.");
+    }
+  };
+
+  const tooHyper = async (v: VideoVerdict) => {
+    if (!user) return;
+    try {
+      await reportTooHyper(user.uid, childId, v.videoId);
     } catch {
       Alert.alert("Couldn't hide it. Check your connection.");
     }
@@ -276,11 +309,26 @@ export default function VideosScreen({ route, navigation }: Props) {
                 <Text style={styles.linkText}>Done</Text>
               </TouchableOpacity>
               {detailsLive.thumbnail ? (
-                <Image source={{ uri: detailsLive.thumbnail }} style={styles.detailsThumb} />
+                <VideoPreview
+                  key={detailsLive.videoId}
+                  videoId={detailsLive.videoId}
+                  thumbnail={detailsLive.thumbnail}
+                  style={styles.detailsThumb}
+                />
               ) : null}
               <Text style={styles.modalHeading}>{detailsLive.title}</Text>
-              {detailsLive.channelName ? <Text style={styles.channel}>{detailsLive.channelName}</Text> : null}
+              {detailsLive.channelName ? (
+                <Text style={styles.channel}>
+                  {detailsLive.channelName}
+                  {detailsLive.madeForKids ? " · Made for kids" : ""}
+                </Text>
+              ) : null}
               {detailsSummary ? <Text style={styles.detailsSummary}>{detailsSummary}</Text> : null}
+              {detailsLive.basis === "metadata" ? (
+                <Text style={styles.detailsRating}>
+                  No captions — rated from the title, description and a few still images, so less sure than usual.
+                </Text>
+              ) : null}
 
               <Text style={[styles.detailsStatus, !detailsLive.approved && styles.detailsStatusHidden]}>
                 {detailsLive.parentDecision === "approved"
@@ -326,9 +374,14 @@ export default function VideosScreen({ route, navigation }: Props) {
                     </Text>
                   </TouchableOpacity>
                 ) : detailsLive.approved ? (
-                  <TouchableOpacity style={styles.confirmBtn} onPress={() => hideOne(detailsLive)}>
-                    <Text style={styles.confirmText}>Hide this video</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity style={styles.confirmBtn} onPress={() => hideOne(detailsLive)}>
+                      <Text style={styles.confirmText}>Hide this video</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.hyperBtn} onPress={() => tooHyper(detailsLive)} hitSlop={8}>
+                      <Text style={styles.hyperText}>Too hyper? Hide it and tell us</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
                   <TouchableOpacity
                     style={styles.confirmBtn}
@@ -418,7 +471,7 @@ const styles = StyleSheet.create({
   selectBar: { padding: 16, borderTopWidth: 1, borderTopColor: "#E8E8F0", backgroundColor: "#fff" },
   selectBarBtn: { backgroundColor: "#D9534F", borderRadius: 14, paddingVertical: 15, alignItems: "center" },
   selectBarText: { color: "#fff", fontSize: 16, fontWeight: "800" },
-  detailsThumb: { width: "100%", aspectRatio: 16 / 9, borderRadius: 12, backgroundColor: "#E8E8F0", marginTop: 12 },
+  detailsThumb: { borderRadius: 12, marginTop: 12 },
   detailsSummary: { fontSize: 15, color: "#333", lineHeight: 22, marginTop: 12 },
   detailsStatus: { fontSize: 14, fontWeight: "800", color: "#1E7A44", marginTop: 16, marginBottom: 6 },
   detailsStatusHidden: { color: "#B23B3B" },
@@ -448,4 +501,6 @@ const styles = StyleSheet.create({
   cancelText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   confirmBtn: { borderRadius: 14, paddingVertical: 14, alignItems: "center", borderWidth: 1, borderColor: "#D9534F" },
   confirmText: { color: "#D9534F", fontSize: 15, fontWeight: "700" },
+  hyperBtn: { alignItems: "center", paddingVertical: 12 },
+  hyperText: { color: "#6C63FF", fontSize: 14, fontWeight: "600" },
 });

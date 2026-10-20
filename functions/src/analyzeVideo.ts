@@ -28,7 +28,7 @@ import {
   hashValuesRules,
   checkValuesRules,
 } from "./aiAnalysis";
-import { evaluateProfile, type FilterDecision } from "./contentFilter";
+import { evaluateProfile, effectiveDims, type FilterDecision } from "./contentFilter";
 import { DIMS, VALUE_FLAGS, normalizePrefs } from "./prefs";
 import type { ValueFilters, ContentProfile, VideoVerdict } from "./types";
 
@@ -100,21 +100,20 @@ export async function getOrCreateProfile(
   if (!video || video.isPrivateOrRestricted) {
     if (!video) logger.warn(`[analyzeAndTagVideo] Video ${videoId} not found`);
     // Not cached: a missing video may be a transient API error, and a private one may go public
-    return placeholderProfile("unavailable", video?.title ?? "", video?.channelTitle ?? "");
+    return placeholderProfile("unavailable", video?.title ?? "", video?.channelTitle ?? "", video?.madeForKids);
   }
 
   if (opts.cachedTranscriptsOnly && !(await db.doc(`transcriptCache/${videoId}`).get()).exists) return null;
   const transcript = await getTranscriptCached(db, videoId, keys.supadataApiKey);
-  if (!transcript.available || !transcript.transcript) {
-    if (!transcript.definitive) return null; // transient — retry later
-    const p = placeholderProfile("no_transcript", video.title, video.channelTitle);
-    await ref.set(p);
-    return p;
-  }
+  if ((!transcript.available || !transcript.transcript) && !transcript.definitive) return null; // transient — retry later
 
-  const generated = await generateContentProfile(video, transcript.transcript, keys.openAiApiKey);
+  // No captions (definitive): rated from title, description, tags and images instead
+  const generated = await generateContentProfile(video, transcript.transcript ?? "", keys.openAiApiKey);
   if (!generated) return null;
   const profile: ContentProfile = { ...generated, createdAt: Timestamp.now() };
+  // Parents' "Too hyper" reports survive re-profiling (counted by onPaceReport)
+  const reports = snap.exists ? snap.data()!.tooHyperReports : undefined;
+  if (reports) profile.tooHyperReports = reports;
   await ref.set(profile);
   return profile;
 }
@@ -122,7 +121,8 @@ export async function getOrCreateProfile(
 function placeholderProfile(
   status: "no_transcript" | "unavailable",
   title: string,
-  channelName: string
+  channelName: string,
+  madeForKids?: boolean
 ): ContentProfile {
   const dims = {} as ContentProfile["dims"];
   for (const dim of DIMS) dims[dim] = { level: 0, evidence: "" };
@@ -143,6 +143,7 @@ function placeholderProfile(
     flags: Object.fromEntries(VALUE_FLAGS.map((f) => [f, false])) as ContentProfile["flags"],
     topics: [],
     summary: "",
+    ...(madeForKids === undefined ? {} : { madeForKids }),
     createdAt: Timestamp.now(),
   };
 }
@@ -204,6 +205,9 @@ function writeVerdict(
     // why without reading server-only profiles
     ratings: profile && profile.status === "ok" ? summarizeRatings(profile) : {},
     summary: profile && profile.status === "ok" ? (profile.summary ?? "").slice(0, 300) : "",
+    ...(profile?.madeForKids === undefined ? {} : { madeForKids: profile.madeForKids }),
+    ...(profile?.basis ? { basis: profile.basis } : {}),
+    ...(profile?.isShort === undefined ? {} : { isShort: profile.isShort }),
     channelName: profile?.channelName ?? "",
     title: stub.title ?? "",
     thumbnail: stub.thumbnail ?? "",
@@ -217,8 +221,9 @@ function writeVerdict(
 
 function summarizeRatings(profile: ContentProfile): VideoVerdict["ratings"] {
   const out: VideoVerdict["ratings"] = {};
+  const dims = effectiveDims(profile);
   for (const dim of DIMS) {
-    const { level, evidence } = profile.dims[dim];
+    const { level, evidence } = dims[dim];
     if (level === null || level > 0) out[dim] = { level, evidence };
   }
   return out;

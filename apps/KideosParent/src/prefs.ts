@@ -13,6 +13,8 @@
 // KEEP IN SYNC with functions/src/prefs.ts (copied — the apps and backend share no package)
 // ─────────────────────────────────────────────────────────────
 
+export const FREE_TEXT_MAX = 300; // religion + "anything else?" boxes
+
 export const DIMS = [
   "violence",
   "scary",
@@ -27,6 +29,8 @@ export const DIMS = [
   "politics",
   "religion",
   "gambling",
+  "stimulation", // pace & stimulation: calm → overstimulating ("brainrot")
+  "junk", // low-effort / spam / Elsagate-style content
   // Advanced (optional section)
   "crudeHumor",
   "matureThemes",
@@ -115,6 +119,8 @@ export interface ValueFilters {
   religiousSensitivity: boolean; // + religion: free-text values check (AI on summary)
   religion: string;
   customRules: string; // free-text rules (AI on summary)
+  madeForKidsOnly?: boolean; // only videos the creator marked "made for kids" (YouTube's own label)
+  hideShorts?: boolean; // no YouTube Shorts
   gamblingLadder?: boolean; // true once gambling uses the 0–4 ladder (older answers were 0 / 4 only)
 }
 
@@ -133,6 +139,8 @@ export const LEVEL_LABELS: Record<Dim, string[]> = {
   politics: ["No politics", "Educational civics/history", "News", "Political opinion", "Extreme political content"],
   religion: ["No religion", "Educational religious content", "Worship/devotional content", "Trying to convert viewers", "Mocking religion"],
   gambling: ["No gambling", "Gambling mentioned", "Gambling discussed", "Gambling shown", "Gambling promoted"],
+  stimulation: ["Calm", "Gentle", "Lively", "High energy", "Overstimulating"],
+  junk: ["Not junk", "Low effort", "Clickbait / knock-off characters", "Spam / nonsense", "Disturbing fake kids' content"],
   crudeHumor: ["No crude humor", "Silly gross-out", "Toilet humor", "Frequent gross-out humor", "Extreme gross-out"],
   matureThemes: ["No mature themes", "Brief mention of death/illness", "Gently handled mature theme", "Heavy themes in depth", "Disturbing mature themes"],
   misinformation: ["No misinformation", "Unverified claims", "Pseudoscience/conspiracy as fact", "Harmful health/safety misinformation", "Extremist conspiracy"],
@@ -154,6 +162,8 @@ const AGE_TABLE: Record<Dim, number[]> = {
   politics: [0, 0, 1, 1, 2],
   religion: [3, 3, 3, 3, 3], // all religious content except mocking
   gambling: [1, 1, 2, 2, 2], // passing mentions OK; shown/promoted never by default
+  stimulation: [2, 3, 3, 4, 4], // little kids: no CoComelon-style overload; nobody: brainrot until 13
+  junk: [1, 1, 1, 2, 2], // spam and Elsagate never by default
   crudeHumor: [1, 2, 2, 3, 3],
   matureThemes: [1, 1, 2, 3, 3],
   misinformation: [1, 1, 1, 1, 1],
@@ -191,6 +201,8 @@ export function defaultPrefs(ageGroup: number, sensitivity: ValueFilters["sensit
     religiousSensitivity: false,
     religion: "",
     customRules: "",
+    madeForKidsOnly: false,
+    hideShorts: false,
     gamblingLadder: true,
   };
 }
@@ -231,6 +243,11 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
       // earlier music options (all / background / vocals_only / none / review) → ok / hide
       music: raw2.music === undefined ? "ok" : okOrHide(raw2.music),
       lgbtq: lg === "allow" || lg === undefined ? "allow" : lg === "review" || lg === "hide_all" ? "hide_all" : "hide_discussion",
+      madeForKidsOnly: Boolean(raw2.madeForKidsOnly),
+      // Free text goes to an AI — capped (cost, and keeps prompt tricks short)
+      religion: String(r.religion ?? "").slice(0, FREE_TEXT_MAX),
+      customRules: String(r.customRules ?? "").slice(0, FREE_TEXT_MAX),
+      hideShorts: Boolean(raw2.hideShorts),
       gamblingLadder: true,
     };
   }
@@ -246,8 +263,8 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
   set("sexual", map(raw.sexualContent, { none: 0, innuendo: 1 }));
   set("politics", map(raw.political, { block_all: 0, allow_educational: 1, allow_all: 3 }));
   p.religiousSensitivity = Boolean(raw.religiousSensitivity);
-  p.religion = typeof raw.religion === "string" ? raw.religion : "";
-  p.customRules = typeof raw.customRules === "string" ? raw.customRules : "";
+  p.religion = typeof raw.religion === "string" ? raw.religion.slice(0, FREE_TEXT_MAX) : "";
+  p.customRules = typeof raw.customRules === "string" ? raw.customRules.slice(0, FREE_TEXT_MAX) : "";
   return p;
 }
 

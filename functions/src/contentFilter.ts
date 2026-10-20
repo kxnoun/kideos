@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAGS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
-import type { ContentProfile, Severity, ValueFilters } from "./types";
+import type { ContentProfile, DimRating, Severity, ValueFilters } from "./types";
 
 export type VerdictStatus = "approved" | "hidden";
 
@@ -48,6 +48,23 @@ function isOwnFaithOnly(profile: ContentProfile, prefs: ValueFilters): boolean {
   return Boolean(t && t !== "other" && profile.religionTraditions.length > 0 && profile.religionTraditions.every((x) => x === t));
 }
 
+// Parents' "Too hyper" reports: from this many different families a video counts as overstimulating
+export const TOO_HYPER_REPORTS = 2;
+
+// The profile's ratings, with dimensions an older profile doesn't have yet as 0
+// (until reprofileOutdated upgrades it) and parent "Too hyper" reports applied.
+export function effectiveDims(profile: ContentProfile): Record<Dim, DimRating> {
+  const out = {} as Record<Dim, DimRating>;
+  for (const dim of DIMS) out[dim] = profile.dims?.[dim] ?? { level: 0, evidence: "" };
+  const reports = profile.tooHyperReports ?? 0;
+  if (reports >= TOO_HYPER_REPORTS && (out.stimulation.level ?? 0) < 4) {
+    out.stimulation = { level: 4, evidence: `${reports} parents reported it as too hyper` };
+  }
+  return out;
+}
+
+const NOT_MADE_FOR_KIDS = "Not marked “made for kids” by its creator — you chose made-for-kids videos only";
+
 export function evaluateProfile(
   profile: ContentProfile,
   prefs: ValueFilters,
@@ -56,12 +73,15 @@ export function evaluateProfile(
   if (profile.status === "unavailable") {
     return {
       status: "hidden",
-      reason: "This video is private, age-restricted or no longer available.",
+      reason: "This video is private, no longer available, or its owner doesn't allow it to play in other apps.",
       flags: ["unavailable"],
       severity: "low",
     };
   }
+  // YouTube's own label; older profiles without it are left alone until upgraded
+  const notForKids = Boolean(prefs.madeForKidsOnly) && profile.madeForKids === false;
   if (profile.status === "no_transcript") {
+    if (notForKids) return { status: "hidden", reason: NOT_MADE_FOR_KIDS, flags: ["not_made_for_kids"], severity: "low" };
     if (prefs.unknown === "allow") return { status: "approved", reason: "", flags: [], severity: null };
     return {
       status: "hidden",
@@ -80,8 +100,12 @@ export function evaluateProfile(
     if (!worst || RANK[sev] > RANK[worst]) worst = sev;
   };
 
+  if (notForKids) note(NOT_MADE_FOR_KIDS, "not_made_for_kids", "low");
+  if (prefs.hideShorts && profile.isShort) note("A YouTube Short — you chose no Shorts", "short", "low");
+
+  const dims = effectiveDims(profile);
   for (const dim of DIMS) {
-    const { level, evidence } = profile.dims[dim];
+    const { level, evidence } = dims[dim];
 
     if (level === null) {
       if (prefs.unknown === "hide") note(`Couldn't tell the ${dim} level from the transcript`, `${dim}:unknown`, "low");

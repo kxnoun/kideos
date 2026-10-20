@@ -17,11 +17,13 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Modal,
 } from "react-native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../../types";
-import { addChannel } from "../../services/firebase";
+import { addChannel, checkChannel, type CheckChannelResult } from "../../services/firebase";
+import ChannelReview from "../../components/ChannelReview";
 import { useStore } from "../../store/useStore";
 
 interface Props {
@@ -40,7 +42,9 @@ export default function AddChannelsScreen({ navigation, route }: Props) {
   const completeOnboarding = useStore((s) => s.completeOnboarding);
   const inOnboarding = useStore((s) => s.inOnboarding);
   const [input, setInput] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(false); // checking the channel
+  const [review, setReview] = useState<CheckChannelResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [added, setAdded] = useState<AddedChannel[]>([]);
 
   const handleAdd = useCallback(async () => {
@@ -49,9 +53,10 @@ export default function AddChannelsScreen({ navigation, route }: Props) {
 
     setAdding(true);
     try {
-      const result = await addChannel(user.uid, childId, trimmed);
-      setAdded((prev) => [result, ...prev]);
-      setInput("");
+      // Check first — the parent confirms on the review sheet before anything is added
+      const result = await checkChannel(user.uid, childId, trimmed);
+      if (result.alreadyAdded) Alert.alert("Already added", `${result.channel.name} is already on the list.`);
+      else setReview(result);
     } catch (e: unknown) {
       const msg =
         e instanceof Error ? e.message : "Could not find that channel.";
@@ -60,6 +65,21 @@ export default function AddChannelsScreen({ navigation, route }: Props) {
       setAdding(false);
     }
   }, [input, user, childId]);
+
+  const confirmAdd = useCallback(async () => {
+    if (!review || !user) return;
+    setConfirming(true);
+    try {
+      const result = await addChannel(user.uid, childId, review.channel.channelId);
+      setAdded((prev) => [result, ...prev]);
+      setInput("");
+      setReview(null);
+    } catch (e: unknown) {
+      Alert.alert("Couldn't add it", e instanceof Error ? e.message : "Check your connection.");
+    } finally {
+      setConfirming(false);
+    }
+  }, [review, user, childId]);
 
   const handleDone = useCallback(() => {
     if (inOnboarding) {
@@ -136,6 +156,23 @@ export default function AddChannelsScreen({ navigation, route }: Props) {
           </View>
         )}
       </View>
+
+      <Modal visible={!!review} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setReview(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+          <View style={{ flex: 1, padding: 24 }}>
+            <Text style={styles.heading}>Before you add it</Text>
+            {review ? (
+              <ChannelReview
+                result={review}
+                childName="your child"
+                confirming={confirming}
+                onConfirm={confirmAdd}
+                onCancel={() => setReview(null)}
+              />
+            ) : null}
+          </View>
+        </SafeAreaView>
+      </Modal>
 
       {/* Fixed bottom buttons */}
       <View style={styles.footer}>

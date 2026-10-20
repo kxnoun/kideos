@@ -29,10 +29,13 @@ import {
   subscribeToWhitelistedChannels,
   subscribeToChannelSuggestions,
   addChannel,
+  checkChannel,
+  type CheckChannelResult,
   removeChannel,
   respondToSuggestion,
 } from "../../services/firebase";
 import { useStore, useSelectedChild } from "../../store/useStore";
+import ChannelReview from "../../components/ChannelReview";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   pending: { label: "Analyzing…", color: "#FF9800" },
@@ -49,9 +52,15 @@ export default function ChannelsScreen() {
   const [suggestions, setSuggestions] = useState<ChannelSuggestion[]>([]);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [input, setInput] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(false); // checking the channel
+  const [review, setReview] = useState<CheckChannelResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const parentId = user?.uid;
+  const closeAdd = () => {
+    setAddModalVisible(false);
+    setReview(null);
+  };
 
   useEffect(() => {
     if (!parentId || !selectedChildId) return;
@@ -71,14 +80,15 @@ export default function ChannelsScreen() {
     };
   }, [parentId, selectedChildId]);
 
+  // Step 1: check the channel and show the review (nothing is added yet)
   const handleAdd = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || !parentId || !selectedChildId) return;
     setAdding(true);
     try {
-      await addChannel(parentId, selectedChildId, trimmed);
-      setInput("");
-      setAddModalVisible(false);
+      const result = await checkChannel(parentId, selectedChildId, trimmed);
+      if (result.alreadyAdded) Alert.alert("Already added", `${result.channel.name} is already on the list.`);
+      else setReview(result);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Could not find that channel.";
       Alert.alert("Not Found", msg);
@@ -86,6 +96,21 @@ export default function ChannelsScreen() {
       setAdding(false);
     }
   }, [input, parentId, selectedChildId]);
+
+  // Step 2: the parent confirmed
+  const confirmAdd = useCallback(async () => {
+    if (!review || !parentId || !selectedChildId) return;
+    setConfirming(true);
+    try {
+      await addChannel(parentId, selectedChildId, review.channel.channelId);
+      setInput("");
+      closeAdd();
+    } catch (e: unknown) {
+      Alert.alert("Couldn't add it", e instanceof Error ? e.message : "Check your connection.");
+    } finally {
+      setConfirming(false);
+    }
+  }, [review, parentId, selectedChildId]);
 
   const handleRemove = useCallback(
     (channel: WhitelistedChannel) => {
@@ -262,15 +287,26 @@ export default function ChannelsScreen() {
         visible={addModalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setAddModalVisible(false)}
+        onRequestClose={closeAdd}
       >
         <SafeAreaView style={styles.modal}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Add Channel</Text>
-            <TouchableOpacity onPress={() => setAddModalVisible(false)}>
+            <Text style={styles.modalTitle}>{review ? "Before you add it" : "Add Channel"}</Text>
+            <TouchableOpacity onPress={closeAdd}>
               <Text style={styles.modalClose}>Cancel</Text>
             </TouchableOpacity>
           </View>
+          {review ? (
+            <View style={[styles.modalContent, { flex: 1 }]}>
+              <ChannelReview
+                result={review}
+                childName={selectedChild?.profile.name ?? "your child"}
+                confirming={confirming}
+                onConfirm={confirmAdd}
+                onCancel={() => setReview(null)}
+              />
+            </View>
+          ) : (
           <View style={styles.modalContent}>
             <Text style={styles.modalSub}>
               Paste a YouTube channel URL, @handle, or channel name. Our AI
@@ -304,12 +340,16 @@ export default function ChannelsScreen() {
               disabled={adding}
             >
               {adding ? (
-                <ActivityIndicator color="#fff" />
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <ActivityIndicator color="#fff" />
+                  <Text style={[styles.confirmBtnText, { marginLeft: 10 }]}>Checking the channel…</Text>
+                </View>
               ) : (
-                <Text style={styles.confirmBtnText}>Add Channel</Text>
+                <Text style={styles.confirmBtnText}>Check & Add</Text>
               )}
             </TouchableOpacity>
           </View>
+          )}
         </SafeAreaView>
       </Modal>
     </SafeAreaView>

@@ -189,6 +189,13 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
           height={PLAYER_HEIGHT}
           videoId={video.videoId}
           play={playing}
+          // Safety net: some videos (often record-label music) refuse to play outside YouTube
+          onError={(err: string) => {
+            if (err === "embed_not_allowed" || err === "video_not_found") {
+              onBack();
+              Alert.alert("This video can't play here", "Pick another one!");
+            }
+          }}
           onChangeState={(state: string) => {
             if (state === "ended") onBack();
             // keep `playing` matching the real player, so a parent's pause is always a change

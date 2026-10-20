@@ -7,15 +7,16 @@
 import { logger } from "firebase-functions/v2";
 import { APP_CONFIG } from "./config";
 
-// Supadata rate-limits bursts, so run transcript requests one at a time with a
-// short gap between them (module-level queue, shared by the whole batch).
+// Supadata rate-limits bursts, so requests START at least 1.1s apart (module-level,
+// shared by the whole batch). They don't wait for each other to finish: a response
+// takes 5–25s, and one-at-a-time made a 50-video channel outlast the 9-minute limit.
 const SUPADATA_GAP_MS = 1100;
-let supadataQueue: Promise<unknown> = Promise.resolve();
+let nextStart = 0;
 function queued<T>(fn: () => Promise<T>): Promise<T> {
-  const run = supadataQueue.then(fn, fn);
-  const gap = () => new Promise((r) => setTimeout(r, SUPADATA_GAP_MS));
-  supadataQueue = run.then(gap, gap);
-  return run;
+  const now = Date.now();
+  const start = Math.max(now, nextStart);
+  nextStart = start + SUPADATA_GAP_MS;
+  return new Promise((r) => setTimeout(r, start - now)).then(fn);
 }
 
 export interface TranscriptResult {
