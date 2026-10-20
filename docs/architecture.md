@@ -207,7 +207,9 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `pairingCodes/{code}` | pairing handshake: `claimed`, `parentId`, `childId` | kid (create), parent (claim) | anyone |
 | `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata + video stubs (`approved` field is legacy) | functions | kid (metadata), functions |
 | `channelCatalog/{ch}` | shared channel profile for suggestions (compact video profiles, overview, topics) | functions | functions only |
+| `channelChecks/{ch}` | channel check made once before the first add (`CHECK_VERSION`): verdict, reputation + sources, audience age, full channel profile (every rating with evidence and source) | functions | functions only (returned via `checkChannel`) |
 | `videoProfiles/{v}` (+ `/valuesChecks/{hash}`) | content profiles, values-check cache | functions | profiles: signed-in users (public-video analysis only); valuesChecks: functions only |
+| `videoProfiles/{v}/paceReports/{p}` | a parent's "Too hyper" report (counted into the profile's `tooHyperReports` by `onPaceReport`) | parent (own id only) | functions only |
 | `transcriptCache/{v}` | transcript text, or `{available: false}` when confirmed none | functions | functions only |
 | `triggerEvents/{eventId}` | dedupe markers for at-least-once triggers | functions | functions only |
 | `videoAnalysisCache/…` | **legacy** (pre-profile verdict cache), unused — safe to delete | — | — |
@@ -222,15 +224,18 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | File | What's in it |
 |---|---|
 | `index.ts` | Exports every deployed function |
-| `config.ts` | Secrets (`YOUTUBE_API_KEY`, `SUPADATA_API_KEY`, `OPENAI_API_KEY`) + `APP_CONFIG` (model, region, 50 videos/channel) |
+| `config.ts` | Secrets (`YOUTUBE_API_KEY`, `SUPADATA_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) + `APP_CONFIG` (model, region, 50 videos/channel) |
 | `seedChannelLibrary.ts` | `resolveAndAddChannel`, `onChannelWhitelisted`, `onFiltersChanged`, `refreshChannelLibraries`, `seedChannelLibrary` (legacy callable, unused by the app); internal `seedVideoMetadata`, `batchAnalyzeChannel`, `seedAndAnalyzeInBackground` |
 | `analyzeVideo.ts` | Per-video pipeline: `analyzeAndTagVideo`, `reapplyFiltersForChild`, `loadValueFiltersForChild`; internal `getOrCreateProfile`, `decideForChild`, `writeVerdict`, `summarizeRatings`, `getTranscriptCached` |
 | `aiAnalysis.ts` | `generateContentProfile` (profile prompt + validation), `swearFloor` and regexes (code-counted swearing, God's-name exclamations, `[Music]`), `checkValuesRules`, `needsValuesCheck`, `hashValuesRules`, `PROFILE_VERSION` |
+| `visualCheck.ts` | `moderateImages` (OpenAI image moderation on the thumbnail + 3 frames, free) and `applyVisualFloors` (its scores raise sexual / nudity / violence / self-harm / junk; never lower) |
+| `channelCheck.ts` | `checkChannel` callable: shared channel check before adding (Gemini Flash-Lite: 50 thumbnails at low resolution + Google Search), floors from already-analyzed videos, per-child fit via `evaluateProfile` |
+| `paceReports.ts` | `onPaceReport`: counts parents' "Too hyper" reports into `videoProfiles/{v}.tooHyperReports` (2+ families → overstimulating) |
 | `contentFilter.ts` | `evaluateProfile(profile, answers, valuesViolation?)` → approved/hidden + plain-words reason (with the parent's limit), flags, severity — the whole matching logic, pure code |
 | `prefs.ts` | Questionnaire: `DIMS`, `LEVEL_LABELS`, `HOLIDAYS`, `VALUE_FLAGS`, `AGE_TABLE`, `defaultPrefs`, `normalizePrefs`, `describePrefs` |
 | `customRules.ts` | `parseCustomRules` callable (free text → whitelisted setting changes) |
-| `supadata.ts` | `fetchTranscript` — one queued request (≈1/sec), `text=true&lang=en`, no retries; marks "no transcript" as `definitive` |
-| `youtube.ts` | `parseChannelInput`, `getChannelDetails`, `getChannelVideos`, `getVideoDetails`, `verifyChannelHandles` — never `search.list` |
+| `supadata.ts` | `fetchTranscript` — requests start ≥1.1s apart (not one-at-a-time), `text=true&lang=en`, no retries; marks "no transcript" as `definitive` |
+| `youtube.ts` | `parseChannelInput`, `getChannelDetails`, `getChannelVideos`, `getVideoDetails`, `checkIsShort`, `verifyChannelHandles` — never `search.list` |
 | `channelCatalog.ts` | Suggested channels: `buildCatalogEntry` (shared channel profile), `scoreChannel`, `getChannelSuggestions` callable |
 | `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
 | `reprofile.ts` | `reprofileOutdated` (nightly 04:00 UTC, or Force run in Cloud Scheduler): old-version profiles → current, cached transcripts only |

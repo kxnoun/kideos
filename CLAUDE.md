@@ -5,6 +5,12 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
 
 ## Rules that have bitten us
 
+- **Propose before building.** Don't start or rewrite a system until Adam explicitly says to build it
+  (a question back is not a yes). Give cost numbers before anything that spends money per video/channel.
+- **Pay for AI once, reuse in code.** Profiles (`videoProfiles`, `channelChecks`, `channelCatalog`) are made
+  once and shared by every family; whether something fits a child is always worked out in code
+  (`evaluateProfile`). Re-run AI only by bumping `PROFILE_VERSION` / `CHECK_VERSION`.
+
 - **Never call YouTube `search.list`** (100 units). Only channels/playlistItems/videos.list.
 - **`@react-native-firebase/*` is pinned at 22.4.0** — don't upgrade (breaks iOS). In v22,
   `DocumentSnapshot.exists` is a **method**: `snap.exists()` (firebase-admin in `functions/` uses the property).
