@@ -14,6 +14,13 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
 - **Never call YouTube `search.list`** (100 units). Only channels/playlistItems/videos.list.
 - **`@react-native-firebase/*` is pinned at 22.4.0** — don't upgrade (breaks iOS). In v22,
   `DocumentSnapshot.exists` is a **method**: `snap.exists()` (firebase-admin in `functions/` uses the property).
+- **Secrets:** `YOUTUBE_API_KEY`, `SUPADATA_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`. A function only
+  sees the secrets in its `secrets: [...]` list. After deploying, wait ~1 min before testing (traffic
+  switches late).
+- **Images only raise ratings.** `applyVisualFloors` (moderation), `swearFloor`, `KNOWN_STIMULATION` and
+  "Too hyper" reports are floors — never let a new signal lower an AI rating.
+- **`LADDER_GUIDE`** is sliced from the profile prompt between `Ladders (0 = none` and `- framing:` and fed
+  to the channel check — keep those markers when editing the prompt.
 - **Supadata costs money per request.** Only fetch transcripts through `getTranscriptCached`
   (`functions/src/analyzeVideo.ts`). Never delete `transcriptCache`. Changing the profile prompt → bump
   `PROFILE_VERSION`; `reprofileOutdated` upgrades old profiles nightly from cached transcripts
@@ -37,8 +44,10 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   `npm install`): `react-native-webview` (scripts in YouTube's iframe on Android; fullscreen → landscape)
   and `react-native-youtube-iframe` (play/pause injected directly — remote pause). Upgrading either
   library means re-making the patch, or the player silently loses those features.
-- The kid player hides parts of YouTube's player — against YouTube's terms, a deliberate pre-launch
-  decision (backlog). Don't block or interfere with **ads** (ad links stay clickable).
+- The kid player hides parts of YouTube's player — against YouTube's terms; decided Oct 18 to move to the
+  standard player + a grown-up gate before links (backlog → Next up). Don't block or interfere with
+  **ads** (ad links stay clickable), and never claim videos are "ad-free" (API policy: no monetization
+  estimates).
 - Android on Windows: two-terminal build (Metro `--port 8082`/`8083` + `gradlew app:installDebug
   -PreactNativeDevServerPort=…`), never `react-native run-android`. Physical phone needs `adb reverse`.
 - App logs are in `adb logcat -s ReactNativeJS`, **not** the Metro terminal (RN ≥ 0.77).

@@ -34,7 +34,11 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 | App JS logs (both apps) | `adb logcat -s ReactNativeJS \| Select-String -NotMatch "deprecated"` — since RN 0.77 logs are **not** in the Metro terminal. Or `j` in Metro → DevTools. |
 | Backend | `firebase functions:log --only <functionName> -n 50` (times are UTC — Toronto is UTC−4 in summer) |
 | Analysis progress | `firebase functions:log --only onChannelWhitelisted -n 20` → `Progress: X/50`, then `Done: … approved=X blocked=Y` |
-| AI profiles / decisions | `… \| Select-String "AI\] Profile"` / `"AI\] Values check"` |
+| AI profiles / decisions | `… \| Select-String "AI\] Profile"` / `"AI\] Values check"` — each profile line lists every level plus `basis=` (transcript / metadata), `short=`, `visual=sex 0.xx viol 0.xx (N imgs)`, `pace={wordsPerMinute, soundTagsPerMinute, repetition}`, `mfk=` |
+| Image check | `… \| Select-String "visualCheck"` → `raised sexual=3 nudity=3` when moderation scores pushed a rating up; `not checked` = an image didn't load |
+| Images failing | `"retrying text-only"` = one of the 4 images didn't load in time for OpenAI (the profile is still made, without images) |
+| Channel checks | `firebase functions:log --only checkChannel \| Select-String "\[checkChannel\]"` → per channel: verdict, `wellKnown`, thumbnails checked, every non-zero level, and `Gemini tokens in=… out=…` (the real cost); `Cached:` = the shared report was reused (no AI) |
+| "Too hyper" reports | `firebase functions:log --only onPaceReport` → `N "too hyper" report(s)` per video |
 | Why a channel isn't suggested | `firebase functions:log --only getChannelSuggestions \| Select-String "Not suggested"` → fit %, severe videos (title + rating + evidence), or the channel's audience ages |
 | Profile upgrades | `firebase functions:log --only reprofileOutdated \| Select-String "upgraded="` → `— done` or `— out of time` (Force run again) |
 | Transcripts | `… \| Select-String "Supadata\|transcriptCache"` — `Unexpected status 429` = rate limit **or out of credits** (Supadata uses 429 for both; the log line includes their error message) |
@@ -48,22 +52,48 @@ older API style; harmless (migration is in the backlog).
 ```powershell
 cd functions; npm run build; cd ..        # REQUIRED — firebase.json has no predeploy build step,
                                           # so skipping this deploys stale code from functions/lib
-firebase deploy --only functions           # backend (all functions)
+firebase deploy --only "functions:kideos-backend"   # backend (all functions)
 firebase deploy --only functions:kideos-backend:getChannelSuggestions   # one function (codebase prefix needed)
 firebase deploy --only "firestore:rules,firestore:indexes"   # when rules/indexes change
 ```
 New composite indexes take a few minutes to build; queries that need them fail until then.
 
-Secrets (Firebase Secret Manager): `firebase functions:secrets:set OPENAI_API_KEY` (also `SUPADATA_API_KEY`,
-`YOUTUBE_API_KEY`), then redeploy. Check one: `firebase functions:secrets:access OPENAI_API_KEY`.
+**Wait ~1 minute after "Deploy complete" before testing.** Google switches traffic to the new version a
+little after the CLI finishes — a test right away can still hit the old code (seen Oct 19: a check said
+`Cached:` 20 s before the new revision went live). Cloud Scheduler's "last updated" date is the
+schedule's, not the code's — a deploy doesn't change it.
+
+Secrets (Firebase Secret Manager): `OPENAI_API_KEY`, `SUPADATA_API_KEY`, `YOUTUBE_API_KEY`,
+`GEMINI_API_KEY`. Set with `firebase functions:secrets:set <NAME>` (paste at the masked prompt — nothing
+shows, that's normal), then redeploy. Check one without printing it:
+`$k = firebase functions:secrets:access GEMINI_API_KEY; $k.Length; $k.Substring(0,4)` (Gemini keys: 39
+characters, start with `AIza`). `firebase functions:secrets:get <NAME>` lists versions. A function only sees
+the secrets listed in its `secrets: [...]`.
+
+### Gemini key (channel check)
+1. aistudio.google.com → **Get API key** → **Create API key** → pick the project whose ID is `kideos-io`
+   (project number 530175410554 — there are several "Kideos" projects).
+2. Set up billing on it (same billing account as Firebase) — the free tier is small.
+3. `firebase functions:secrets:set GEMINI_API_KEY`, then deploy.
+4. Check the model exists:
+   `(Invoke-RestMethod "https://generativelanguage.googleapis.com/v1beta/models?key=$k").models.name | Select-String "flash-lite"`
+   — the code uses `GEMINI_MODEL` in `channelCheck.ts` (`gemini-3.5-flash-lite`); an `HTTP 404` in the
+   `checkChannel` log means the name changed.
 
 ### After changing the profile prompt
 Bump `PROFILE_VERSION` in `functions/src/aiAnalysis.ts` and deploy. `reprofileOutdated` upgrades old
-profiles from cached transcripts that night (OpenAI only, ~$0.001/video; never Supadata). To do it now:
+profiles from cached transcripts that night (OpenAI only, ~$0.002–0.003/video with the 4 images; never
+Supadata). To do it now:
 Google Cloud console → Cloud Scheduler (console.cloud.google.com/cloudscheduler?project=kideos-io) → the
 `reprofileOutdated` job → ⋮ → **Force run** (repeat if the log
 says "out of time"). Changing questionnaire answers
 does **not** need this.
+
+### After changing the channel check
+Bump `CHECK_VERSION` in `functions/src/channelCheck.ts` (new rating dimension, prompt change). Saved
+channel reports are then re-made **the next time a parent checks that channel** (one Gemini call each) —
+there's no batch job. Floors from analyzed videos and per-child fit are computed on every check, so
+changing those doesn't need a bump.
 
 ### Clearing data for tests
 - **Never** delete `transcriptCache` — every transcript would be paid for again.
@@ -76,13 +106,18 @@ does **not** need this.
   shows `auth/admin-restricted-operation`), **Google**, **Apple**, **Email/Password**.
 - Android app `com.kideos.parent`: SHA-1 of `apps/KideosParent/android/app/debug.keystore` registered
   (debug builds use the project keystore, not `~/.android`).
-- Secrets set for YouTube, Supadata, OpenAI. Supadata is on the Pro plan (3,000 credits/month,
-  10 req/s) — keep auto-recharge **off**. OpenAI needs prepaid credits (429 "no credits remaining" otherwise).
+- Secrets set for YouTube, Supadata, OpenAI, Gemini. Supadata is on the Pro plan (3,000 credits/month,
+  10 req/s) — keep auto-recharge **off**. OpenAI needs prepaid credits (429 "no credits remaining"
+  otherwise). Gemini needs billing on the `kideos-io` key (Google AI Studio).
 
 ## Costs (rough)
 
-Per new video: 1 YouTube unit (free quota), 1 Supadata credit, ~4k GPT-4o-mini tokens (~$0.0006).
-A new 50-video channel ≈ 50 credits + ~3¢. Re-adding channels, other families, filter changes: free.
+Per new video: 1 YouTube unit (free quota), 1 Supadata credit, one GPT-4o-mini call with transcript + 4
+low-detail images (~15k input tokens ≈ $0.002–0.003), free image moderation, one HEAD request for the
+Shorts check. A new 50-video channel ≈ 50 credits + ~10–15¢. Plus, the first time anyone checks a channel:
+one Gemini Flash-Lite call (measured ~16k in / ~1k out ≈ 0.5–0.7¢) + one grounded Google Search.
+Re-adding channels, other families, filter changes, repeat channel checks: free. A `PROFILE_VERSION` bump
+re-rates every profiled video once (OpenAI only).
 
 ## Testing
 
@@ -102,6 +137,16 @@ A new 50-video channel ≈ 50 credits + ~3¢. Re-adding channels, other families
   → confirm → it appears in the kid feed; Undo puts it back. Suggested channels: use a second test child
   (suggestions skip channels the child already has), check a toddler channel isn't suggested to a teen and
   an edgy channel isn't suggested to a young kid.
+- **Channel check** (6-year-old test child, Check & Add): Cougar MacDowall → ⛔ (sexual thumbnails);
+  Ms Rachel / SciShow Kids → ✅; Mark Rober / SmarterEveryDay → ✅ or calm yellow (sponsors); IShowSpeed →
+  ⛔. Hard cases worth re-running after prompt changes: Happy Tree Friends (cute + gore), GLITCH (Amazing
+  Digital Circus / Murder Drones), a small Gacha Life storytelling channel, Poppy Playtime fan animations,
+  Skibidi Toilet, Markiplier (swearing not visible in thumbnails). Same channel on an older child should
+  give a different badge from the same saved report (log: `Cached:`).
+- **Pace / junk / images:** CoComelon on a ≤6 child → mostly Hidden ("High energy — your limit: Lively");
+  Ms Rachel → Shown (stimulation 1–2); a video's details show "· Made for kids"; no-caption videos show
+  the "No captions — rated from…" line; "Too hyper" moves a video to Hidden and adds a
+  `videoProfiles/{v}/paceReports/{you}` doc + `tooHyperReports`.
 
 ## Git
 
