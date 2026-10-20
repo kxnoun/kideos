@@ -110,44 +110,27 @@ analyse 500 channels with a prompt we're about to change.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
   that part, and add a TTL/cleanup for `triggerEvents`.
 
-## 2b. YouTube API policy (reviewed Oct 20 — see the guide's "Only offer metrics available via YouTube's API")
+## 2b. YouTube API policy → self-hosted open source (decided Oct 20)
 
-Not legal advice — Adam's reading with Claude of the Developer Policies + guide. Kideos' core (AI analysis of
-other people's videos, per-channel fit) is "derived data" from API data; disclosure and careful wording lower
-the risk, only YouTube's approval (API Compliance Audit) removes it. Realistic trigger for a review: asking
-for more than the default 10,000 quota units/day, or a complaint — and the cost is losing the API key
-overnight (every family at once), so stay audit-ready.
+Not legal advice. The Oct 20 review (with deep research) found Kideos' core can't be made compliant as a
+hosted service: AI profiles built from API data are "derived data" (Developer Policies III.E.4.h),
+Supadata transcripts are scraped data (III.E.6 + YouTube's terms on automated access — `captions.download`
+only works for the video's owner), the shared catalog aggregates (III.E.2), and hiding parts of the player
+breaks the embed rules. Gemini / Vertex AI watching the video itself avoids the scraping, but both forbid
+use in any service "directed towards or likely to be accessed by individuals under the age of 18".
 
-Done (branch `youtube-policy`, Oct 20):
-1. **No "safe / suitable" claims.** Verdicts are about the parent's own settings: "✅ Matches Simon's
-   settings", "⛔ Doesn't match Simon's settings", "✓ Matches all of Simon's settings". The channel check's
-   general "Overall: well-regarded / not usually recommended for kids" line is gone. The old AI suggestions'
-   one-liner describes the channel instead of saying why it's "appropriate".
-2. **No custom scores or audience estimates on screen.** Suggestion cards no longer show "X of Y videos fit",
-   the fit bar, counts, AI topic chips or "Suits ages N+"; the channel check no longer adds a "Suits ages"
-   note (it used to turn a "good" fit into "things to know"). In words only: "Most of the long videos we
-   checked match Simon's settings · some would be hidden, mostly for: sponsor segments". *(Ages and topics
-   still steer which channels are suggested, in code — not displayed.)*
-3. **"ⓘ Kideos' own notes, from our analysis — not from YouTube"** (`components/KideosNotes.tsx`) under the
-   channel check, suggestion cards, video details, the now-watching card and the Channels screen's notes —
-   the disclosure III.E.4.h asks for.
-4. **30-day refresh** of stored YouTube data — `refreshYouTubeData` (nightly; every channel every ≤ 25 days;
-   deleted / private / embedding-off videos hidden everywhere as "No longer available on YouTube").
-5. **Our own player page** (`hosting/player/index.html` on Firebase Hosting): privacy-enhanced
-   `youtube-nocookie.com` embed (tracking off for Made for Kids videos), no third-party code — and it fixes
-   the tiny Shorts.
+**Decision:** Kideos becomes an **open-source, self-hosted** project — each person runs it on their own
+Firebase with their own API keys, for their family (or friends and family on one shared instance). YouTube's
+terms are the hoster's risk; the README says so plainly.
 
-Still open:
-- **Standard player + grown-up gate** (Next up #2) — the biggest visible one (we hide YouTube's buttons and run
-  `SWIPE_IN_PLAYER` inside its iframe).
-- **API Compliance Audit** before launch — describe it honestly as a parental-control app (what parents see,
-  that ratings are our own analysis, labelled).
-- **Wording rules for anything new** (e.g. the "what parents would love" suggestions): lead with the parent's
-  choice ("Because you picked Arabic"), label Kideos notes, never "safe / suitable / educational score /
-  autism-friendly", no percentages or ages on screen, cite YouTube's own fields as YouTube's.
-- Known, accepted: transcripts via Supadata (YouTube's terms on automated access); storing our own analysis
-  (profiles, verdicts) long-term — it's ours, but built partly from API data (titles, descriptions); the
-  suggestions catalog aggregates per channel.
+Branch `self-hosted` (Oct 20):
+- **Rolled back** the on-screen wording changes: "✅ Fits / ⛔ Not a fit for Simon", the channel check's
+  "Overall: …" line and "Suits ages N+" note, suggestion cards with "X of Y videos fit", the fit bar, counts,
+  topic chips and ages; the old AI suggestions' "why it's appropriate" line. `KideosNotes` removed.
+- **Kept:** `refreshYouTubeData` (nightly; drops deleted / private / embedding-off videos — useful anyway)
+  and our own player page `hosting/player/index.html` (fixes the tiny Shorts).
+- **Never in the repo:** AI ratings / profiles of YouTube videos (that's the clearest aggregation problem,
+  in public). Shareable things are channel lists + human notes ("channel packs", see Next up).
 
 ## 3. Security
 

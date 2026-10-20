@@ -64,12 +64,11 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   `npm install`): `react-native-webview` (scripts in YouTube's iframe on Android; fullscreen → landscape)
   and `react-native-youtube-iframe` (play/pause injected directly — remote pause). Upgrading either
   library means re-making the patch, or the player silently loses those features.
-- **YouTube API policy wording** (backlog → 2b): verdicts are about the parent's settings ("Matches / Doesn't
-  match Simon's settings"), never "safe / suitable / recommended"; no scores, percentages, counts-as-scores or
-  AI-estimated audience ages / topic labels on screen; put `components/KideosNotes` ("not from YouTube")
-  under any Kideos analysis. Stored YouTube data must be refreshed within 30 days — `refreshYouTubeData`
-  covers the collections that exist; a new place that stores titles / thumbnails / channel names must be
-  added to it.
+- **Self-hosted, open source** (decided Oct 20, backlog → 2b): Kideos is a project people run on their own
+  Firebase, not a service, so the parent app shows the full analysis again (scores, counts, ages, topic
+  chips, "Fits / Not a fit"). Kept from the YouTube-policy pass: `refreshYouTubeData` (drops deleted /
+  private videos; a new place that stores titles / thumbnails / channel names must be added to it) and our
+  own player page. Never put AI ratings of YouTube videos in the repo itself.
 - **The kid player page is ours** (`hosting/player/index.html`, Firebase Hosting, `baseUrlOverride`) — keep
   its `?data=` contract and events identical to react-native-youtube-iframe's page; deploy hosting first.
 - The kid player hides parts of YouTube's player — against YouTube's terms; decided Oct 18 to move to the

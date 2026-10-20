@@ -38,7 +38,6 @@ import {
 import ChannelReview from "../../components/ChannelReview";
 import { LEVEL_LABELS } from "../../prefs";
 import { DIM_TITLES } from "./VideosScreen";
-import KideosNotes from "../../components/KideosNotes";
 import { useStore } from "../../store/useStore";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Suggestions">;
@@ -225,6 +224,12 @@ export default function SuggestionsScreen({ route, navigation }: Props) {
   );
 }
 
+function audienceLabel(min: number | null, max: number | null): string | null {
+  if (min === null && max === null) return "All ages";
+  if (max === null) return `Suits ages ${min}+`;
+  return `Suits ages ${min ?? 0}–${max}`;
+}
+
 function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: string }) {
   const pct = s.analyzed ? s.fitting / s.analyzed : 0;
   const hidden = s.analyzed - s.fitting;
@@ -238,26 +243,44 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
         </View>
       </View>
 
-      {/* No AI-guessed ages, topic labels, scores or percentages on screen (YouTube API policy:
-          no audience estimates, inferred categories or custom channel scores) — only how the
-          videos compare with THIS parent's settings, in words. Ages / topics still steer which
-          channels are suggested, in code. */}
+      {audienceLabel(s.audienceMinAge, s.audienceMaxAge) ? (
+        <View style={styles.ageChip}>
+          <Text style={styles.ageText}>{audienceLabel(s.audienceMinAge, s.audienceMaxAge)}</Text>
+        </View>
+      ) : null}
       <Text style={styles.overview}>{s.overview}</Text>
+      {s.topics.length ? (
+        <View style={styles.chips}>
+          {s.topics.map((t) => (
+            <View key={t} style={styles.topicChip}>
+              <Text style={styles.topicText}>{t}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       <View style={[styles.fitBox, pct < 0.75 && styles.fitBoxWarn]}>
         <Text style={[styles.fitTitle, pct < 0.75 && styles.fitTitleWarn]}>
-          {hidden === 0
-            ? `All the ${s.longOnly ? "long videos" : "videos"} we checked match ${childName}'s settings`
-            : `Most of the ${s.longOnly ? "long videos" : "videos"} we checked match ${childName}'s settings`}
+          {s.fitting} of {s.analyzed} checked {s.longOnly ? "long videos" : "videos"} fit {childName}'s settings
         </Text>
-        {hidden > 0 && s.hiddenReasons.length ? (
-          <Text style={styles.hiddenText}>
-            Some would be hidden, mostly for: {s.hiddenReasons.map((r) => r.label).join(", ")}
+        {s.shorts ? (
+          <Text style={styles.uncheckedText}>
+            Shorts: {s.shorts.fitting} of {s.shorts.analyzed} fit (counted separately)
           </Text>
         ) : null}
-        {s.shorts ? <Text style={styles.uncheckedText}>Its Shorts are checked separately.</Text> : null}
         {s.unchecked > 0 ? (
-          <Text style={styles.uncheckedText}>Some had no transcript, so we couldn't check them.</Text>
+          <Text style={styles.uncheckedText}>{s.unchecked} more had no transcript, so we couldn't check them.</Text>
+        ) : null}
+        <View style={styles.bar}>
+          <View style={[styles.barFill, pct < 0.75 && styles.barFillWarn, { flex: pct }]} />
+          <View style={{ flex: 1 - pct }} />
+        </View>
+        {hidden > 0 && s.hiddenReasons.length ? (
+          <Text style={styles.hiddenText}>
+            {hidden} would be hidden, mostly for: {s.hiddenReasons.map((r) => `${r.label} (${r.count})`).join(", ")}
+          </Text>
+        ) : hidden === 0 ? (
+          <Text style={styles.hiddenText}>None of the checked videos would be hidden.</Text>
         ) : null}
       </View>
 
@@ -266,7 +289,7 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
           <View style={styles.checkBox}>
             <Text style={styles.checkTitle}>
               ⚠️ {s.check.thingsToKnow.length} {s.check.thingsToKnow.length === 1 ? "thing" : "things"} to know (thumbnails
-              + what people say, against {childName}'s settings)
+              + what people say)
             </Text>
             {s.check.thingsToKnow.map((t, i) => (
               <Text key={i} style={styles.checkText}>
@@ -277,7 +300,7 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
         ) : (
           <View style={[styles.checkBox, styles.checkBoxGood]}>
             <Text style={[styles.checkTitle, styles.checkTitleGood]}>
-              ✅ Thumbnails and what people say match {childName}'s settings
+              ✅ Thumbnails and what people say fit {childName}'s settings
             </Text>
           </View>
         )
@@ -286,9 +309,9 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
       {s.severe > 0 ? (
         <View style={styles.warnBox}>
           <Text style={styles.warnText}>
-            ⚠ {s.severe === 1 ? "A video has" : "A few videos have"} very strong content:{" "}
-            {s.severeLabels.map((l) => l.label).join(", ")}. Those would be hidden, but it's worth knowing before you add
-            this channel.
+            ⚠ {s.severe === 1 ? "1 video has" : `${s.severe} videos have`} very strong content:{" "}
+            {s.severeLabels.map((l) => (l.count > 1 ? `${l.label} (${l.count})` : l.label)).join(", ")}. Those would be
+            hidden, but it's worth knowing before you add this channel.
           </Text>
         </View>
       ) : null}
@@ -299,7 +322,7 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
           {s.ratings.slice(0, 8).map((r) => (
             <View key={r.dim} style={styles.chip}>
               <Text style={styles.chipText}>
-                {DIM_TITLES[r.dim] ?? r.dim}: up to {LEVEL_LABELS[r.dim]?.[r.maxLevel] ?? r.maxLevel}
+                {DIM_TITLES[r.dim] ?? r.dim}: up to {LEVEL_LABELS[r.dim]?.[r.maxLevel] ?? r.maxLevel} ({r.count})
               </Text>
             </View>
           ))}
@@ -321,7 +344,6 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
           ))}
         </>
       ) : null}
-      <KideosNotes style={{ marginTop: 14 }} />
     </ScrollView>
   );
 }

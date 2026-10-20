@@ -172,16 +172,14 @@ Channels screen "+" (and onboarding step 3) → the parent types a URL/@handle �
 4. **Per child, in code:** the channel profile goes through the same `evaluateProfile` as videos (video-only
    switches — made-for-kids, Shorts — don't apply) → `conflicts` in plain words with the child's limit,
    `fit`: **not_fit** (a medium/high-severity conflict — ≥2 levels over the limit, a level-4 rating,
-   glamorized content — or junk ≥3 over the limit), **caution** (any other conflict), **good**; plus
-   `findings` (anything ≥2). *(Until Oct 20 an AI-estimated audience age added a "Suits ages N+" note and
-   made a fit "caution" — removed: YouTube's API policy forbids estimating a channel's audience;
-   `ageNote` is always "".)*
-5. The review sheet (`components/ChannelReview.tsx`): badge "✅ Matches Simon's settings" / calm yellow
-   "⚠️ N things to know for Simon" (normal "Add channel" button) / red "⛔ Doesn't match Simon's settings"
-   ("Add anyway" / "Don't add it") — always about the parent's settings, never "safe / suitable"; what the
-   channel makes; what's past the child's settings; what people say + tappable sources; thumbnail findings;
-   findings from its already-checked videos; "ⓘ Kideos' own notes, from our analysis — not from YouTube".
-   Nothing is added until the parent confirms → `addChannel`.
+   glamorized content — or junk ≥3 over the limit), **caution** (any other conflict, or an age mismatch),
+   **good**; plus `findings` (anything ≥2) and an
+   age note ("Made for ages 13+ — Simon is 6").
+5. The review sheet (`components/ChannelReview.tsx`): badge "✅ Fits Simon's settings" / calm yellow
+   "⚠️ N things to know for Simon" (normal "Add channel" button) / red "⛔ Not a fit for Simon" ("Add
+   anyway" / "Don't add it"); the AI's general opinion as one small line ("Overall: …"); what the channel
+   makes; what's past the child's settings; what people say + tappable sources; thumbnail findings;
+   findings from its already-checked videos. Nothing is added until the parent confirms → `addChannel`.
 
 Every way of adding a channel goes through this review: the Channels screen, onboarding, the suggested-
 channel swipe cards ("Add to {child}'s feed") and the older AI suggestions on the Channels tab ("✓ Add" —
@@ -190,7 +188,7 @@ confirming marks the suggestion approved).
 **After adding — current settings vs saved checks:** callable **`getChannelFits`** (no AI) runs
 `fitForChild` on the saved checks of the child's channels (with video floors) against their *current*
 settings. The Channels screen calls it when the tab is opened and when the list changes, and shows "⚠️ N
-things to know" / "⛔ Doesn't match current settings" under a channel (tap → the reasons). Channels
+things to know" / "⛔ Not a fit with current settings" under a channel (tap → the reasons). Channels
 added before checks existed have no saved check and show nothing.
 
 ### Adding a channel → analysis
@@ -376,16 +374,16 @@ Every channel any family adds gets a shared **channel profile** in `channelCatal
 videos as compact profiles, top topics, and a 2–3 sentence overview (the only AI call, once per channel).
 No Supadata, no per-video AI — it reuses `videoProfiles`.
 **Which videos count:** the catalog holds a channel's latest 40 long videos + 10 Shorts. **Long videos
-decide** (fit share, severe count, hidden reasons); Shorts are checked separately and not counted at all if
-the child has "No Shorts". Channels with fewer than 10 checked long videos are
+decide** (fit share, severe count, hidden reasons); Shorts are shown on their own line ("Shorts: 7 of 10 fit")
+and not counted at all if the child has "No Shorts". Channels with fewer than 10 checked long videos are
 scored on everything (minus Shorts with "No Shorts"). The `Not suggested:` log line lists the top hidden
 reasons (`fit 29/40 long videos (72%) < 75% — hidden for: High energy (8), Product promotion (4)`).
 Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannelSuggestions`**: runs
 `evaluateProfile` on every catalog video against the child's answers (pure code), skips channels already
 in the child's list or dismissed. If someone has already made a **channel check** for a channel, it's used
 too (no new AI): "not a fit" for this child → not suggested (logged `channel check: not a fit (…)`);
-otherwise the card shows its "⚠️ N things to know (thumbnails + what people say, against {child}'s settings)"
-or "✅ Thumbnails and what people say match {child}'s settings". **A suggestion vouches for the channel, so the bar is higher than for
+otherwise the card shows its "⚠️ N things to know (thumbnails + what people say)" or "✅ Thumbnails and what
+people say fit {child}'s settings". **A suggestion vouches for the channel, so the bar is higher than for
 adding one:** ≥10 checked videos (no-transcript ones are left out — unknown, not bad), ≥75% of them fit, and
 at most 2 severe videos (3+ rule it out; 1–2 show as a ⚠ warning on the card). Severe is absolute, not
 relative to the child's strictness: the top of a ladder the child hasn't allowed (strong swearing, graphic
@@ -395,13 +393,11 @@ estimates the ages the channel **suits** (`audienceMinAge` = youngest age its vi
 interesting to, `audienceMaxAge` only for little-kid channels — e.g. Ms Rachel 1–5, a general science
 channel ~8+, adult-only 18+; since `OVERVIEW_VERSION` 4 — "made for" put SmarterEveryDay at 12+); a saved
 channel check's ages (backed by a Google search) are used instead when one exists;
-a channel is suggested only within ±1 year of that (all-ages channels to everyone) — **used in code only, never
-shown** (YouTube's policy: no audience estimates). Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
+a channel is suggested only within ±1 year of that (all-ages channels to everyone), and the card shows
+"Suits ages …". Rejected channels are logged with the reason (`Not suggested: … —`). The overview is written with the
 channel's content counts, so it mentions heavy content plainly. Then it ranks by share of fitting videos (then educational share if the parent
-ticked that). Each card (since Oct 20 — no numbers, scores, ages or AI topic labels on screen, YouTube API policy): the
-overview, "All / Most of the long videos we checked match {child}'s settings", "some would be hidden, mostly
-for: …", "Its Shorts are checked separately", strong-content warning, what's in the videos that would show
-(levels, no counts), sample videos, "ⓘ Kideos' own notes…". Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never
+ticked that). Each card: overview, "X of 50 videos fit", top reasons the rest would be hidden, what's in the
+videos that would show, sample videos. Swipe left / "Not for us" → `dismissedSuggestions/{ch}` (never
 suggested again); swipe right → maybe later (skipped this time). Adding is a tap on "Add to {child}'s
 feed" (→ `resolveAndAddChannel`) — never a swipe. Custom rules / religion text aren't applied to
 suggestions; they apply once the channel is added. Channels added before this feature are backfilled
@@ -491,8 +487,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 
 **Parent app (`apps/KideosParent`)** — `App.tsx` (routing), `hooks/useAuth.ts`, `store/useStore.ts`
 (Zustand; `useSelectedChild()` is a hook), `components/FiltersForm.tsx` (questionnaire), `prefs.ts` (copy),
-components: `ChannelReview` (the "Before you add it" sheet), `VideoPreview` (tap a thumbnail to play),
-`KideosNotes` (the "not from YouTube" disclosure line — put it under every block of Kideos analysis);
+components: `ChannelReview` (the "Before you add it" sheet), `VideoPreview` (tap a thumbnail to play);
 screens: `auth/AuthScreen`, `onboarding/CreateChild · SetFilters · AddChannels` (Check & Add → review),
 `main/Home` (now watching, remote control, Hide / Too hyper, link to Videos, pairing), `main/VideosScreen`
 (Shown / Hidden + reasons, details with watch, Hide, Too hyper, Show anyway),

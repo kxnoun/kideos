@@ -36,7 +36,6 @@ import {
 import { LEVEL_LABELS } from "../../prefs";
 import { useStore } from "../../store/useStore";
 import VideoPreview from "../../components/VideoPreview";
-import KideosNotes from "../../components/KideosNotes";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Videos">;
 
@@ -337,7 +336,7 @@ export default function VideosScreen({ route, navigation }: Props) {
                   : detailsLive.parentDecision === "hidden"
                   ? "Hidden — you hid this"
                   : detailsLive.approved
-                  ? `✓ Matches all of ${childName}'s settings`
+                  ? `✓ Fits all of ${childName}'s settings`
                   : "Hidden by your settings"}
               </Text>
               {!detailsLive.approved && detailsLive.reason ? (
@@ -366,7 +365,6 @@ export default function VideosScreen({ route, navigation }: Props) {
               ) : (
                 <Text style={styles.detailsRating}>Nothing on any of your lists</Text>
               )}
-              <KideosNotes />
 
               <View style={{ marginTop: 20 }}>
                 {detailsLive.parentDecision ? (
