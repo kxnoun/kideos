@@ -32,6 +32,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef, useImperative
 import {
   Animated,
   BackHandler,
+  Easing,
   FlatList,
   Image,
   ScrollView,
@@ -47,7 +48,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { subscribeToWhitelistedChannels, subscribeToApprovedVideos } from "../services/firebase";
 import { colors, fonts, modeForAge, radius, type as typo, useLayout, type Layout } from "../theme";
 import { useWatched } from "../watched";
-import Tap from "../components/Tap";
+import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
 import BackButton from "../components/BackButton";
 import type { ApprovedVideo, ChildSession, KidProfile, WhitelistedChannel } from "../types";
@@ -130,15 +131,25 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
     [named, onVideoPress]
   );
 
-  // Android back on a channel page → home (not out of the app)
-  useEffect(() => {
-    if (!openChannelId) return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      setOpenChannelId(null);
-      return true;
-    });
-    return () => sub.remove();
-  }, [openChannelId]);
+  // Built once per data change — not on every redraw (opening a channel page used to
+  // rebuild them, which redrew every row)
+  const shelves = useMemo<Shelf[]>(() => {
+    const newShelf: Shelf = {
+      key: "new",
+      label: "New",
+      emoji: "⭐",
+      color: colors.brand,
+      videos: longVideos.slice(0, mode === "little" ? LITTLE_NEW_COUNT : NEW_COUNT),
+    };
+    const shortsShelf: Shelf = { key: "shorts", label: "Shorts", emoji: "⚡", color: colors.action, videos: shorts, tall: true };
+    return [newShelf, shortsShelf, ...channelShelves].filter((s) => s.videos.length > 0);
+  }, [longVideos, shorts, channelShelves, mode]);
+
+  const channelVideos = useMemo(
+    () => (openChannelId ? named.filter((v) => v.channelId === openChannelId) : []),
+    [named, openChannelId]
+  );
+  const closeChannel = useCallback(() => setOpenChannelId(null), []);
 
   const statusBar = <StatusBar barStyle="light-content" backgroundColor={colors.bg} />;
 
@@ -151,38 +162,11 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
     );
   }
 
-  if (openChannelId) {
-    const channel = channelById.get(openChannelId);
-    return (
-      <View style={styles.screen}>
-        {statusBar}
-        <ChannelPage
-          channel={channel}
-          videos={named.filter((v) => v.channelId === openChannelId)}
-          layout={layout}
-          showDuration={mode === "big"}
-          onBack={() => setOpenChannelId(null)}
-          onPlay={play}
-        />
-      </View>
-    );
-  }
-
-  const newShelf: Shelf = {
-    key: "new",
-    label: "New",
-    emoji: "⭐",
-    color: colors.brand,
-    videos: longVideos.slice(0, mode === "little" ? LITTLE_NEW_COUNT : NEW_COUNT),
-  };
-  const shortsShelf: Shelf = { key: "shorts", label: "Shorts", emoji: "⚡", color: colors.action, videos: shorts, tall: true };
-  const shelves = [newShelf, shortsShelf, ...channelShelves].filter((s) => s.videos.length > 0);
-
   return (
     <View style={styles.screen}>
       {statusBar}
       {mode === "little" ? (
-        <LittleHome
+        <LittleHomeMemo
           shelves={shelves}
           profile={profile}
           layout={layout}
@@ -191,7 +175,7 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
           onSwitchProfile={onSwitchProfile}
         />
       ) : (
-        <BigHome
+        <BigHomeMemo
           shelves={shelves}
           profile={profile}
           layout={layout}
@@ -201,6 +185,17 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
           onSwitchProfile={onSwitchProfile}
         />
       )}
+      {/* "See all": slides in over the home screen, which stays as it was underneath */}
+      {openChannelId ? (
+        <ChannelPage
+          channel={channelById.get(openChannelId)}
+          videos={channelVideos}
+          layout={layout}
+          showDuration={mode === "big"}
+          onBack={closeChannel}
+          onPlay={play}
+        />
+      ) : null}
     </View>
   );
 }
@@ -285,6 +280,9 @@ function LittleHome({
           contentContainerStyle={{ paddingHorizontal: margin, gap }}
           snapToInterval={tileW + gap}
           decelerationRate="fast"
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={5}
           renderItem={({ item }) => (
             <VideoTile
               video={item}
@@ -456,6 +454,10 @@ function BigHome({
               data={s.channelId ? s.videos.slice(0, PER_CHANNEL_ROW) : s.videos}
               keyExtractor={(v) => v.videoId}
               showsHorizontalScrollIndicator={false}
+              // only what fits on screen first; the rest as they scroll
+              initialNumToRender={Math.ceil(layout.width / ((s.tall ? shortTileW : rowTileW) + gap)) + 1}
+              maxToRenderPerBatch={4}
+              windowSize={3}
               contentContainerStyle={{ paddingHorizontal: margin, gap }}
               renderItem={({ item }) => (
                 <VideoTile
@@ -602,20 +604,73 @@ function ChannelPage({
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();
+  const reduceMotion = useReduceMotion();
   const { margin, gap, gridColumns, gridTileW, gridTileH, touch, scale } = layout;
 
+  // Slides in from the right; the grid fills in once it's there (so the slide starts at once)
+  const x = useRef(new Animated.Value(reduceMotion ? 0 : layout.width)).current;
+  const [ready, setReady] = useState(reduceMotion);
+  const closing = useRef(false);
+  useEffect(() => {
+    if (reduceMotion) return;
+    Animated.timing(x, { toValue: 0, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(
+      () => setReady(true)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const close = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    if (reduceMotion) {
+      onBack();
+      return;
+    }
+    Animated.timing(x, { toValue: layout.width, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(
+      () => onBack()
+    );
+  }, [onBack, reduceMotion, x, layout.width]);
+
+  // Android back → home (not out of the app). Registered once: a video opened from
+  // here registers after it, so Back closes the video first.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      closeRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
-    <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <Animated.View
+      style={[
+        StyleSheet.absoluteFill,
+        styles.page,
+        { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, transform: [{ translateX: x }] },
+      ]}
+    >
       <View style={[styles.pageHeader, { paddingHorizontal: margin }]}>
-        <BackButton size={touch} onPress={onBack} label="Back" outerStyle={{ marginRight: 14 }} />
+        <BackButton size={touch} onPress={close} label="Back" outerStyle={{ marginRight: 14 }} />
         {channel?.thumbnail ? <Image source={{ uri: channel.thumbnail }} style={styles.pageAvatar} /> : null}
         <Text style={[typo.greeting, styles.pageTitle, { fontSize: 30 * scale }]} numberOfLines={1}>
           {channel?.name ?? ""}
         </Text>
       </View>
+      {!ready ? (
+        // Placeholders in the grid's shape while it slides in
+        <View style={[styles.skeleton, { paddingHorizontal: margin, gap }]}>
+          {Array.from({ length: gridColumns * 2 }, (_, i) => (
+            <View key={i} style={[styles.skeletonTile, { width: gridTileW, height: gridTileH }]} />
+          ))}
+        </View>
+      ) : (
       <FlatList
         key={`grid-${gridColumns}`} // column count changes with rotation
         data={videos}
+        initialNumToRender={gridColumns * 3}
+        maxToRenderPerBatch={gridColumns * 2}
+        windowSize={5}
         keyExtractor={(v) => v.videoId}
         numColumns={gridColumns}
         contentContainerStyle={{ paddingHorizontal: margin, paddingBottom: insets.bottom + 32, gap: gap + 4 }}
@@ -633,9 +688,14 @@ function ChannelPage({
           />
         )}
       />
-    </View>
+      )}
+    </Animated.View>
   );
 }
+
+// Redraw only when their own props change (opening "See all" doesn't touch them)
+const LittleHomeMemo = memo(LittleHome);
+const BigHomeMemo = memo(BigHome);
 
 // ── Nothing to show yet ──────────────────────────────────────
 
@@ -756,6 +816,9 @@ const styles = StyleSheet.create({
   endBtnText: { color: colors.text, fontFamily: fonts.display, fontSize: 17 },
 
   // channel page
+  page: { backgroundColor: colors.bg, zIndex: 5 },
+  skeleton: { flexDirection: "row", flexWrap: "wrap" },
+  skeletonTile: { borderRadius: radius.tile, backgroundColor: colors.surface, marginBottom: 56 },
   pageHeader: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 16 },
   pageAvatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12, backgroundColor: colors.surface },
   pageTitle: { color: colors.text, flexShrink: 1 },

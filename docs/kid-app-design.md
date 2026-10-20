@@ -114,6 +114,23 @@ more! 0:12 left", "Nice try 😄") are yellow pills. When a video ends: an end c
 again / 🏠 My videos / up to 3 more from the same channel (older ones first, unwatched first). A parent's
 Hide or a video that won't play returns to the feed with a friendly yellow note (no system pop-ups).
 
+## Motion and speed
+
+Every move has a direction, so the app feels like one place you move around in:
+- **"See all"** slides in from the right; Back slides it out to the right. The home screen stays alive
+  underneath (no rebuild, same scroll position); the grid fills in right after the slide (placeholders
+  first), so the slide starts at once.
+- **A video** zooms in; swipe down drops it away. The feed stays alive under the player, so Back from a video
+  is instant and lands where the kid was (even on a channel page).
+- **"Who's watching?"** slides down over the screen; picking a child shows a "Hi Simon!" card with their
+  avatar while their feed builds underneath, then the card slides up.
+- Reduce Motion: no slides — screens just appear.
+
+Speed rules (the 6T in a debug build is the benchmark — release builds are several times faster): never
+rebuild a screen to show another on top of it; rows build only the tiles that fit (`initialNumToRender`),
+`VideoTile` / `LittleHome` / `BigHome` / `ChipBar` are memoised, and the row list is built once per data
+change, not on every redraw.
+
 ## Who's watching? (devices 2+ kids use)
 
 Big rounded-square avatar tiles on `bg` (one colour per child), the name under each; 🔒 = has a PIN,

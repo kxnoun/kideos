@@ -2,7 +2,7 @@
 // Rounded 20 pt corners, optional channel badge (bottom-left), length (bottom-right,
 // big-kid mode only) and a mint ✓ sticker once watched.
 
-import React from "react";
+import React, { memo } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import Tap from "./Tap";
 import { colors, fonts, radius } from "../theme";
@@ -35,7 +35,8 @@ function thumbFor(video: ApprovedVideo, width: number): string {
   return video.thumbnail;
 }
 
-export default function VideoTile({
+// memo: rows redraw often (scrolling, ✓ changes) — a tile redraws only if its own props change
+export default memo(function VideoTile({
   video,
   width,
   height,
@@ -83,7 +84,7 @@ export default function VideoTile({
       </Text>
     </Tap>
   );
-}
+});
 
 const styles = StyleSheet.create({
   thumbWrap: { borderRadius: radius.tile, overflow: "hidden", backgroundColor: colors.surface },

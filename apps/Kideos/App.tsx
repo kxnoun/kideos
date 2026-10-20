@@ -21,7 +21,17 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { View, Text, ActivityIndicator, StyleSheet, StatusBar, AppState } from "react-native";
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  StyleSheet,
+  StatusBar,
+  AppState,
+  Animated,
+  Easing,
+  InteractionManager,
+} from "react-native";
 import auth from "@react-native-firebase/auth";
 
 import { useSession } from "./src/hooks/useSession";
@@ -40,8 +50,8 @@ import { normalizeRules, getUnfinished, clearUnfinished, stillOwed, type Unfinis
 import { colors, fonts, modeForAge, radius, useLayout } from "./src/theme";
 import { setLandscapeOnly } from "./src/device";
 import { useWatched, setWatchedChild, adoptLegacyWatched } from "./src/watched";
-import { rememberChild, forgetChild, markLeft, stillChosen } from "./src/gate";
-import Tap from "./src/components/Tap";
+import { rememberChild, forgetChild, markLeft, stillChosen, setAskWhoMinutes } from "./src/gate";
+import Tap, { useReduceMotion } from "./src/components/Tap";
 import {
   isLegacySession,
   type ApprovedVideo,
@@ -85,6 +95,7 @@ function Root() {
   const [pool, setPool] = useState<ApprovedVideo[]>([]); // where "up next" comes from
   const [resume, setResume] = useState<Unfinished | null>(null); // where to pick an unfinished video up
   const [notice, setNotice] = useState<string | null>(null);
+  const [curtain, setCurtain] = useState<DeviceChild | null>(null); // "Hi Simon!" after picking
   const watched = useWatched();
   const lastTap = useRef(0);
 
@@ -165,7 +176,7 @@ function Root() {
   const askWho = device?.askWhoAfterMinutes ?? DEFAULT_ASK_WHO_MINUTES;
 
   // ── Who's watching ──
-  const [activeId, setActiveId] = useState<string | null>(() => stillChosen(DEFAULT_ASK_WHO_MINUTES));
+  const [activeId, setActiveId] = useState<string | null>(() => stillChosen());
   const activeRef = useRef(activeId);
   activeRef.current = activeId;
   const active = kids.find((k) => k.id === activeId) ?? null;
@@ -221,7 +232,11 @@ function Root() {
     [resumeOwed]
   );
 
-  const switchProfile = useCallback(() => {
+  // "Who's watching?" slides down over the screen (WhoLayer), then this runs
+  const [whoEntering, setWhoEntering] = useState(false);
+  const switchProfile = useCallback(() => setWhoEntering(true), []);
+  const finishSwitch = useCallback(() => {
+    setWhoEntering(false);
     forgetChild();
     setWatchedChild(null);
     setActiveId(null);
@@ -231,8 +246,8 @@ function Root() {
 
   // The picked child was taken off this device / the remembered one isn't here
   useEffect(() => {
-    if (activeId && kidsReady && !kids.some((k) => k.id === activeId)) switchProfile();
-  }, [activeId, kidsReady, kids, switchProfile]);
+    if (activeId && kidsReady && !kids.some((k) => k.id === activeId)) finishSwitch();
+  }, [activeId, kidsReady, kids, finishSwitch]);
 
   // Only one child on this device → no picker
   useEffect(() => {
@@ -254,19 +269,23 @@ function Root() {
 
   // Away long enough (the parent's setting) → ask again. A full restart always asks
   // (gate.ts lives in memory only).
-  const askWhoRef = useRef(askWho);
-  askWhoRef.current = askWho;
+  useEffect(() => {
+    setAskWhoMinutes(askWho);
+  }, [askWho]);
   const sharedRef = useRef(shared);
   sharedRef.current = shared;
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "background") markLeft();
-      if (state === "active" && sharedRef.current && activeRef.current && !stillChosen(askWhoRef.current)) {
-        switchProfile();
+      if (state === "active" && sharedRef.current && activeRef.current && !stillChosen()) {
+        finishSwitch(); // nobody's looking — no animation
       }
     });
-    return () => sub.remove();
-  }, [switchProfile]);
+    return () => {
+      sub.remove();
+      markLeft(); // the screen is going away (Back out of the app) — counts as leaving
+    };
+  }, [finishSwitch]);
 
   // A friendly note on the feed (instead of a system pop-up)
   useEffect(() => {
@@ -331,43 +350,121 @@ function Root() {
 
   if (legacy || device === undefined || (device && !kidsReady)) return <Loading />;
 
-  if (!device || kids.length === 0) return <Message emoji="📺" title="Almost ready!" text="A grown-up is choosing who uses this device." />;
-
-  if (!active || !childSession) {
-    return <WhoScreen kids={kids} locked={locked} onChoose={(id) => {
-      const k = kids.find((c) => c.id === id);
-      if (k) choose(k);
-    }} />;
+  if (!device || kids.length === 0) {
+    return <Message emoji="📺" title="Almost ready!" text="A grown-up is choosing who uses this device." />;
   }
 
-  if (isLocked) return <TimesUp name={active.name} onSwitch={shared ? switchProfile : undefined} />;
+  if (!active && kids.length === 1) return <Loading />; // picked automatically in a moment
 
-  if (currentVideo) {
-    return (
-      <PlayerScreen
-        key={currentVideo.videoId}
-        video={currentVideo}
-        session={childSession}
-        minWatchSeconds={rules.minWatchSeconds}
-        resume={resume && resume.video.videoId === currentVideo.videoId ? resume : null}
-        upNext={upNext}
-        onPlay={handlePlayNext}
-        onBack={handleBack}
-      />
-    );
-  }
+  const pick = (id: string) => {
+    const k = kids.find((c) => c.id === id);
+    if (!k) return;
+    choose(k);
+    setCurtain(k); // "Hi Simon!" — slides up once their feed is ready
+  };
 
+  // The feed stays alive under the player (Back from a video is instant, same scroll
+  // position). "Who's watching?" and the "Hi Simon!" card are layers on top.
   return (
-    <View style={{ flex: 1 }}>
-      <FeedScreen
-        key={active.id}
-        session={childSession}
-        profile={active}
-        onVideoPress={handleVideoPress}
-        onSwitchProfile={shared ? switchProfile : undefined}
-      />
-      {notice ? <Notice text={notice} /> : null}
+    <View style={styles.root}>
+      {active && childSession ? (
+        isLocked ? (
+          <TimesUp name={active.name} onSwitch={shared ? switchProfile : undefined} />
+        ) : (
+          <>
+            <View style={styles.root}>
+              <FeedScreen
+                key={active.id}
+                session={childSession}
+                profile={active}
+                onVideoPress={handleVideoPress}
+                onSwitchProfile={shared ? switchProfile : undefined}
+              />
+              {notice ? <Notice text={notice} /> : null}
+            </View>
+            {currentVideo ? (
+              <View style={StyleSheet.absoluteFill}>
+                <PlayerScreen
+                  key={currentVideo.videoId}
+                  video={currentVideo}
+                  session={childSession}
+                  minWatchSeconds={rules.minWatchSeconds}
+                  resume={resume && resume.video.videoId === currentVideo.videoId ? resume : null}
+                  upNext={upNext}
+                  onPlay={handlePlayNext}
+                  onBack={handleBack}
+                />
+              </View>
+            ) : null}
+          </>
+        )
+      ) : null}
+      {!active || whoEntering ? (
+        <WhoLayer slideIn={whoEntering} onIn={finishSwitch}>
+          <WhoScreen kids={kids} locked={locked} onChoose={pick} />
+        </WhoLayer>
+      ) : null}
+      {curtain ? <Curtain kid={curtain} onDone={() => setCurtain(null)} /> : null}
     </View>
+  );
+}
+
+// "Who's watching?" — slides down from the top when switching (appears in place on start-up)
+function WhoLayer({ slideIn, onIn, children }: { slideIn: boolean; onIn: () => void; children: React.ReactNode }) {
+  const { height } = useLayout();
+  const reduceMotion = useReduceMotion();
+  const y = useRef(new Animated.Value(slideIn && !reduceMotion ? -height : 0)).current;
+  useEffect(() => {
+    if (!slideIn) return;
+    if (reduceMotion) {
+      onIn();
+      return;
+    }
+    Animated.timing(y, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(
+      () => onIn()
+    );
+    // only when it first appears
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateY: y }] }]}>{children}</Animated.View>;
+}
+
+// After picking a child: their avatar and "Hi Simon!" while their feed gets ready
+// underneath, then the card slides up out of the way
+function Curtain({ kid, onDone }: { kid: DeviceChild; onDone: () => void }) {
+  const { height, phone } = useLayout();
+  const reduceMotion = useReduceMotion();
+  const y = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    let cancelled = false;
+    const started = Date.now();
+    // Wait for the feed to finish building (and at least a beat to read the card)
+    const task = InteractionManager.runAfterInteractions(() => {
+      const wait = Math.max(0, 450 - (Date.now() - started));
+      setTimeout(() => {
+        if (cancelled) return;
+        if (reduceMotion) {
+          onDone();
+          return;
+        }
+        Animated.timing(y, { toValue: -height, duration: 340, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(
+          () => onDone()
+        );
+      }, wait);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+    // once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, styles.center, { transform: [{ translateY: y }] }]}>
+      <StatusBar hidden />
+      <Text style={{ fontSize: phone ? 96 : 128 }}>{kid.avatar || "🙂"}</Text>
+      <Text style={styles.curtainHi}>{kid.name ? `Hi ${kid.name}!` : "Hi!"}</Text>
+    </Animated.View>
   );
 }
 
@@ -445,6 +542,8 @@ function TimesUp({ name, onSwitch }: { name: string; onSwitch?: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  curtainHi: { color: colors.text, fontFamily: fonts.displayBold, fontSize: 40, marginTop: 12 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: "center", justifyContent: "center" },
   logo: { color: colors.text, fontFamily: fonts.displayBold, fontSize: 48, marginBottom: 24 },
   noticeWrap: { position: "absolute", left: 16, right: 16, alignItems: "center" },
