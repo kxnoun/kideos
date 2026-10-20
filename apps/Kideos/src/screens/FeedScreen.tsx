@@ -146,7 +146,7 @@ export default function FeedScreen({ session, profile, onVideoPress, onSwitchPro
     return (
       <View style={styles.screen}>
         {statusBar}
-        <Empty waitingForChannels={channels.length === 0} layout={layout} />
+        <Empty waitingForChannels={channels.length === 0} layout={layout} onSwitchProfile={onSwitchProfile} />
       </View>
     );
   }
@@ -571,7 +571,16 @@ function ChannelPage({
 
 // ── Nothing to show yet ──────────────────────────────────────
 
-function Empty({ waitingForChannels, layout }: { waitingForChannels: boolean; layout: Layout }) {
+// Nothing to watch yet — on a shared device, a way back to "Who's watching?" (a sibling may have videos)
+function Empty({
+  waitingForChannels,
+  layout,
+  onSwitchProfile,
+}: {
+  waitingForChannels: boolean;
+  layout: Layout;
+  onSwitchProfile?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.empty, { paddingTop: insets.top, paddingHorizontal: layout.margin * 2 }]}>
@@ -582,6 +591,11 @@ function Empty({ waitingForChannels, layout }: { waitingForChannels: boolean; la
           ? "A grown-up is picking your channels. Check back soon!"
           : "We're checking your videos. This only takes a moment."}
       </Text>
+      {onSwitchProfile ? (
+        <Tap style={styles.endBtn} onPress={onSwitchProfile} accessibilityLabel="Who's watching?">
+          <Text style={styles.endBtnText}>Who's watching?</Text>
+        </Tap>
+      ) : null}
     </View>
   );
 }
