@@ -3,6 +3,7 @@
 //
 // - Child profile management (view / add / delete)
 // - Content filter editing per child
+// - Viewing rules per child (break between videos, must finish each video)
 // - Data & Privacy: delete child watch history
 // - Sign out
 // ─────────────────────────────────────────────────────────────
@@ -19,14 +20,23 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  Switch,
 } from "react-native";
-import type { ValueFilters } from "../../types";
+import type { ValueFilters, ViewingRules } from "../../types";
 import {
   signOut,
   saveValueFilters,
   getValueFilters,
   deleteChildData,
+  updateChild,
 } from "../../services/firebase";
+
+const BREAKS: { value: number; label: string }[] = [
+  { value: 0, label: "Off" },
+  { value: 30, label: "30 sec" },
+  { value: 60, label: "1 min" },
+  { value: 120, label: "2 min" },
+];
 import { useStore } from "../../store/useStore";
 import FiltersForm from "../../components/FiltersForm";
 import { defaultPrefs, normalizePrefs } from "../../prefs";
@@ -44,6 +54,32 @@ export default function SettingsScreen() {
   const [filters, setFilters] = useState<ValueFilters>(() => defaultPrefs(8));
   const [savingFilters, setSavingFilters] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(false);
+  const [viewingChildId, setViewingChildId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ViewingRules>({ breakSeconds: 0, mustFinish: false });
+  const [savingViewing, setSavingViewing] = useState(false);
+
+  const openViewing = useCallback(
+    (childId: string) => {
+      const v = children.find((c) => c.id === childId)?.profile.viewing;
+      setViewing({ breakSeconds: v?.breakSeconds ?? 0, mustFinish: Boolean(v?.mustFinish) });
+      setViewingChildId(childId);
+    },
+    [children]
+  );
+
+  const handleSaveViewing = useCallback(async () => {
+    if (!user || !viewingChildId) return;
+    setSavingViewing(true);
+    try {
+      await updateChild(user.uid, viewingChildId, { viewing });
+      setViewingChildId(null);
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to save.");
+    } finally {
+      setSavingViewing(false);
+    }
+  }, [user, viewingChildId, viewing]);
+  const viewingChildName = children.find((c) => c.id === viewingChildId)?.profile.name ?? "your child";
 
   const openFilters = useCallback(
     async (childId: string) => {
@@ -139,6 +175,9 @@ export default function SettingsScreen() {
                 >
                   <Text style={styles.childActionText}>Filters</Text>
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.childActionBtn} onPress={() => openViewing(c.id)}>
+                  <Text style={styles.childActionText}>Viewing</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.childActionBtn, styles.childActionBtnDanger]}
                   onPress={() => handleDeleteChild(c.id, c.profile.name)}
@@ -177,6 +216,66 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Viewing rules Modal */}
+      <Modal
+        visible={viewingChildId !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setViewingChildId(null)}
+      >
+        <SafeAreaView style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setViewingChildId(null)}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Viewing rules</Text>
+            <TouchableOpacity onPress={handleSaveViewing} disabled={savingViewing}>
+              {savingViewing ? (
+                <ActivityIndicator size="small" color="#6C63FF" />
+              ) : (
+                <Text style={styles.modalSave}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Break between videos</Text>
+              <View style={styles.segment}>
+                {BREAKS.map((b) => (
+                  <TouchableOpacity
+                    key={b.value}
+                    style={[styles.segmentBtn, viewing.breakSeconds === b.value && styles.segmentBtnActive]}
+                    onPress={() => setViewing({ ...viewing, breakSeconds: b.value })}
+                  >
+                    <Text style={[styles.segmentText, viewing.breakSeconds === b.value && styles.segmentTextActive]}>
+                      {b.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.hint}>
+                After each video, {viewingChildName} sees a calm “Take a breather” screen with a countdown before the
+                videos come back.
+              </Text>
+            </View>
+            <View style={styles.field}>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchLabel}>Must finish each video</Text>
+                <Switch
+                  value={viewing.mustFinish}
+                  onValueChange={(mustFinish) => setViewing({ ...viewing, mustFinish })}
+                  trackColor={{ true: "#6C63FF" }}
+                />
+              </View>
+              <Text style={styles.hint}>
+                {viewingChildName} can't leave a video until most of it has actually played — skipping ahead doesn't
+                count. If you need to get them out, use Hide this video or End Session on Home.
+              </Text>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
       {/* Filters Edit Modal */}
       <Modal
@@ -354,4 +453,5 @@ const styles = StyleSheet.create({
     borderColor: "#E8E8F0",
   },
   textArea: { minHeight: 80, textAlignVertical: "top" },
+  hint: { fontSize: 13, color: "#888", lineHeight: 19, marginTop: 8 },
 });

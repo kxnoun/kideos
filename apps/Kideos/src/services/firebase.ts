@@ -61,6 +61,22 @@ export function subscribeToApprovedVideos(
     }, (err) => console.warn("[videoVerdicts] listener error:", err));
 }
 
+// ── Parent's viewing rules (break between videos, must finish) ─
+// On the child doc, which a paired kid device may read.
+
+export function subscribeToViewingRules(
+  parentId: string,
+  childId: string,
+  onUpdate: (rules: unknown) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/children/${childId}`)
+    .onSnapshot(
+      (snap) => onUpdate(snap.data()?.viewing),
+      (err) => console.warn("[viewing] listener error:", err)
+    );
+}
+
 // ── Subscribe to parent's play signal (pause/stop/play) ───────
 
 export function subscribeToPlaySignal(

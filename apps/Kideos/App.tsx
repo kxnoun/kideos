@@ -7,6 +7,8 @@
 //   paired, video selected → PlayerScreen
 //   parent pressed End Session → "Time's up" over everything, until the parent
 //   lets them watch again (the last playSignal is "stop"; survives restarts)
+//   after a video, if the parent set a break → BreakScreen until it's over
+//   "must finish" + an unfinished video → that video reopens (also after a restart)
 // ─────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useEffect } from "react";
@@ -17,13 +19,26 @@ import auth from "@react-native-firebase/auth";
 import { useSession } from "./src/hooks/useSession";
 import PairingScreen from "./src/screens/PairingScreen";
 import FeedScreen from "./src/screens/FeedScreen";
-import PlayerScreen from "./src/screens/PlayerScreen";
-import { subscribeToPlaySignal } from "./src/services/firebase";
-import type { ApprovedVideo, ChildSession } from "./src/types";
+import PlayerScreen, { type ExitReason } from "./src/screens/PlayerScreen";
+import BreakScreen from "./src/screens/BreakScreen";
+import { subscribeToPlaySignal, subscribeToViewingRules } from "./src/services/firebase";
+import {
+  NO_RULES,
+  normalizeRules,
+  getBreakUntil,
+  setBreakUntil,
+  getUnfinished,
+  clearUnfinished,
+  type Unfinished,
+} from "./src/viewing";
+import type { ApprovedVideo, ChildSession, ViewingRules } from "./src/types";
 
 export default function App() {
   const { session, loading, saveSession } = useSession();
   const [currentVideo, setCurrentVideo] = useState<ApprovedVideo | null>(null);
+  const [resume, setResume] = useState<Unfinished | null>(null); // where to pick an unfinished video up
+  const [rules, setRules] = useState<ViewingRules>(NO_RULES);
+  const [breakUntil, setBreakUntilState] = useState(0);
 
   // Sign in anonymously so Firestore security rules allow reads/writes.
   // The anonymous UID is stable across restarts on the same device.
@@ -51,9 +66,39 @@ export default function App() {
     return subscribeToPlaySignal(session.parentId, session.childId, (signal) => {
       const stop = signal?.action === "stop";
       setLocked(stop);
-      if (stop) setCurrentVideo(null);
+      if (stop) {
+        // End Session wins over everything, including "must finish"
+        setCurrentVideo(null);
+        setResume(null);
+        clearUnfinished();
+      }
     });
   }, [authed, session?.paired, session?.parentId, session?.childId]);
+
+  // The parent's viewing rules (break between videos, must finish)
+  useEffect(() => {
+    if (!authed || !session?.paired) return;
+    return subscribeToViewingRules(session.parentId, session.childId, (raw) => setRules(normalizeRules(raw)));
+  }, [authed, session?.paired, session?.parentId, session?.childId]);
+
+  // After a restart: a break still running, or a video that has to be finished
+  useEffect(() => {
+    if (!authed || !session?.paired) return;
+    getBreakUntil().then((t) => {
+      if (t > Date.now()) setBreakUntilState(t);
+    });
+    getUnfinished().then((u) => {
+      if (u) {
+        setResume(u);
+        setCurrentVideo(u.video);
+      }
+    });
+  }, [authed, session?.paired]);
+
+  // "Must finish" turned off → don't reopen anything
+  useEffect(() => {
+    if (!rules.mustFinish) clearUnfinished();
+  }, [rules.mustFinish]);
 
   const handlePaired = useCallback(
     (newSession: ChildSession) => {
@@ -63,12 +108,27 @@ export default function App() {
   );
 
   const handleVideoPress = useCallback((video: ApprovedVideo) => {
+    setResume(null);
     setCurrentVideo(video);
   }, []);
 
-  const handleBack = useCallback(() => {
-    setCurrentVideo(null);
-  }, []);
+  // done = watched (or left, when allowed) → break if the parent set one.
+  // removed / error = a parent hid it, or it won't play → straight back, no break.
+  const handleBack = useCallback(
+    (reason: ExitReason = "done") => {
+      setCurrentVideo(null);
+      setResume(null);
+      clearUnfinished();
+      if (reason === "done" && rules.breakSeconds > 0) {
+        const until = Date.now() + rules.breakSeconds * 1000;
+        setBreakUntil(until);
+        setBreakUntilState(until);
+      }
+    },
+    [rules.breakSeconds]
+  );
+
+  const endBreak = useCallback(() => setBreakUntilState(0), []);
 
   if (loading || !authed) {
     return (
@@ -100,12 +160,19 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <PlayerScreen
+          key={currentVideo.videoId}
           video={currentVideo}
           session={session}
+          mustFinish={rules.mustFinish}
+          resume={resume && resume.video.videoId === currentVideo.videoId ? resume : null}
           onBack={handleBack}
         />
       </SafeAreaProvider>
     );
+  }
+
+  if (breakUntil > Date.now()) {
+    return <BreakScreen until={breakUntil} onDone={endBreak} />;
   }
 
   return (

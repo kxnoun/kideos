@@ -215,6 +215,21 @@ Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe
 - If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`), the player closes it with
   "This video can't play here — pick another one!".
 
+**Viewing rules (cooldowns)** — parent app Settings → a child → **Viewing** → saved on the child doc as
+`viewing: { breakSeconds: 0 | 30 | 60 | 120, mustFinish }` (the kid app may read the child doc;
+`subscribeToViewingRules`). In the kid app (`App.tsx`, `src/viewing.ts`):
+- **Break between videos:** leaving a video normally (it ended, or Back when allowed) starts a break —
+  `BreakScreen`, a calm "Take a breather 🌿 Next video in 0:30" with nothing to tap, then the feed. The end
+  time is kept in AsyncStorage, so closing the app doesn't skip it. No break after a parent's Hide or a
+  video that won't play.
+- **Must finish each video:** `PlayerScreen` counts seconds actually played (1 s ticks while playing and the
+  app is in front; seeking doesn't count). Until ~90% of the length has played (`FINISHED_SHARE`), ← Back
+  and Android's back button show "Finish this one first! m:ss left"; skipping to the end shows "Nice try 😄
+  m:ss left" and jumps back to the furthest point reached by playing. Progress is saved to AsyncStorage
+  (on open and every 5 s), so closing the app reopens the same video where it was. A parent's **Hide this
+  video** or **End Session** always gets the kid out (and clears it); turning the rule off releases it.
+  Unknown length → never blocked. Android back now returns to the feed instead of closing the app.
+
 Remote control: parent → `currentSession/parentCommand` (`pause` / `play` / `stop`) →
 **`handleParentCommand`** → `currentSession/playSignal`. The kid player reacts only to commands sent while
 the video is open (the first snapshot is the last command, maybe old). `stop` locks the **whole** kid app
@@ -275,7 +290,7 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | Path | Contents | Written by | Read by |
 |---|---|---|---|
 | `users/{p}` | parent profile (email, createdAt) | parent app | parent |
-| `users/{p}/children/{c}` | child profile (name, age, avatar, mode) | parent app | parent, signed-in kid devices |
+| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing` rules: `breakSeconds`, `mustFinish`) | parent app | parent, signed-in kid devices |
 | `…/children/{c}/dismissedSuggestions/{ch}` | "Not for us" on a suggested channel | parent | parent |
 | `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | parent, functions |
 | `…/children/{c}/whitelistedChannels/{ch}` | name, thumbnail, `seedingStatus` pending/ready/error, `videoCount` | functions (create), parent (delete) | parent, kid |
@@ -325,7 +340,9 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 
 ## Apps
 
-**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player),
+**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Break / Time's
+up), `src/viewing.ts` (viewing rules, break end time + unfinished video in AsyncStorage),
+`screens/BreakScreen.tsx`,
 `hooks/useSession.ts` (paired session in AsyncStorage), `screens/PairingScreen.tsx`,
 `screens/FeedScreen.tsx` (grid, channel names, remote stop), `screens/PlayerScreen.tsx`,
 `services/firebase.ts` (`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`,
@@ -338,7 +355,7 @@ screens: `auth/AuthScreen`, `onboarding/CreateChild · SetFilters · AddChannels
 `main/Home` (now watching, remote control, Hide / Too hyper, link to Videos, pairing), `main/VideosScreen`
 (Shown / Hidden + reasons, details with watch, Hide, Too hyper, Show anyway),
 `main/SuggestionsScreen` (suggested-channel cards: swipe left "Not for us", swipe right "maybe later",
-tap "Add to {child}'s feed"), `main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
+tap "Add to {child}'s feed"), `main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire, viewing rules, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
 signs out of Google), children, `saveValueFilters` / `getValueFilters` (raw → `normalizePrefs`), channels
 (`checkChannel` → review, `addChannel` → `resolveAndAddChannel`, `removeChannel`), `subscribeToVerdicts`,
 `setShowAnyway`, `hideVideo` / `hideVideos`, `reportTooHyper`, `getVideoSummary`,

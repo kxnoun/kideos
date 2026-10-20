@@ -12,11 +12,18 @@ export type ChildMode = "young" | "older";
 export type { ValueFilters, Dim, DimRule } from "../prefs";
 import type { Dim } from "../prefs";
 
+// Viewing rules (cooldowns) — on the child doc so the kid app can read them
+export interface ViewingRules {
+  breakSeconds: number; // 0 (off) / 30 / 60 / 120 — a break screen after each video
+  mustFinish: boolean; // can't leave a video until ~90% has actually played
+}
+
 export interface ChildProfile {
   name: string;
   age: number;
   avatar: string;
   mode: ChildMode;
+  viewing?: ViewingRules;
 }
 
 export interface WhitelistedChannel {

@@ -16,9 +16,15 @@
 //   on Android that needs patches/react-native-webview+13.16.1.patch).
 //   ⚠️ Changing the YouTube player is against YouTube's terms — decide before launch
 //   (docs/backlog.md → kid player).
+// - "Must finish each video" (parent's viewing rules): Back / Android back show
+//   "Finish this one first! m:ss left" until ~90% has actually played (seeking
+//   doesn't count; skipping to the end → "Nice try" and back to where they were).
+//   Progress is saved, so closing the app reopens the same video. A parent's Hide /
+//   End Session always gets the kid out.
 // ─────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { AppState, BackHandler } from "react-native";
 import {
   View,
   Text,
@@ -30,7 +36,7 @@ import {
   Linking,
   Alert,
 } from "react-native";
-import YoutubePlayer from "react-native-youtube-iframe";
+import YoutubePlayer, { type YoutubeIframeRef } from "react-native-youtube-iframe";
 import type { ShouldStartLoadRequest, WebViewOpenWindowEvent } from "react-native-webview/lib/WebViewTypes";
 import {
   subscribeToPlaySignal,
@@ -42,6 +48,10 @@ import {
   logWatchSessionEnd,
 } from "../services/firebase";
 import type { ApprovedVideo, ChildSession } from "../types";
+import { FINISHED_SHARE, formatLeft, saveUnfinished, type Unfinished } from "../viewing";
+
+// done = watched or left normally; removed = a parent hid it; error = it won't play here
+export type ExitReason = "done" | "removed" | "error";
 
 // Runs at document start in every frame; acts only inside YouTube's player.
 // Hides by class AND by label, so it keeps working if YouTube renames classes.
@@ -117,14 +127,78 @@ const PLAYER_HEIGHT = width * 0.5625; // 16:9
 interface Props {
   video: ApprovedVideo;
   session: ChildSession;
-  onBack: () => void;
+  mustFinish: boolean;
+  resume: Unfinished | null; // pick up an unfinished video where it was
+  onBack: (reason?: ExitReason) => void;
 }
 
-export default function PlayerScreen({ video, session, onBack }: Props) {
+export default function PlayerScreen({ video, session, mustFinish, resume, onBack }: Props) {
   const { parentId, childId } = session;
   const [playing, setPlaying] = useState(true); // kept in step with the real player (onChangeState)
   const sessionIdRef = useRef<string | null>(null);
   const startTimeRef = useRef<number>(Date.now());
+
+  // ── Must finish: count real play time ──
+  const playerRef = useRef<YoutubeIframeRef>(null);
+  const isPlayingRef = useRef(false);
+  const playedRef = useRef(resume?.played ?? 0); // seconds actually played
+  const lastPosRef = useRef(resume?.position ?? 0); // last position reached by playing (not seeking)
+  const durationRef = useRef(video.durationSeconds ?? 0);
+  const [message, setMessage] = useState("");
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const leftToFinish = () => Math.max(0, durationRef.current * FINISHED_SHARE - playedRef.current);
+  const finished = () => !durationRef.current || leftToFinish() <= 0; // unknown length → never block
+  const blocked = () => mustFinish && !finished();
+
+  const flash = useCallback((text: string) => {
+    setMessage(text);
+    if (messageTimer.current) clearTimeout(messageTimer.current);
+    messageTimer.current = setTimeout(() => setMessage(""), 3000);
+  }, []);
+
+  useEffect(() => {
+    const tick = setInterval(async () => {
+      if (!isPlayingRef.current || AppState.currentState !== "active") return;
+      playedRef.current += 1;
+      const pos = await playerRef.current?.getCurrentTime().catch(() => undefined);
+      // Normal playback moves ~1s per tick; a bigger jump is a seek and doesn't count
+      if (typeof pos === "number" && pos >= lastPosRef.current - 1 && pos <= lastPosRef.current + 3) {
+        lastPosRef.current = pos;
+      }
+      if (mustFinish && !finished() && playedRef.current % 5 === 0) {
+        saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current });
+      }
+    }, 1000);
+    return () => clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mustFinish, video]);
+
+  // Remember it right away, so closing the app in the first seconds still reopens it
+  useEffect(() => {
+    if (mustFinish && !finished()) saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mustFinish, video]);
+
+  // Leaving is only blocked while "must finish" applies
+  const tryLeave = useCallback(() => {
+    if (blocked()) {
+      flash(`Finish this one first! ${formatLeft(leftToFinish())} left`);
+      return;
+    }
+    setPlaying(false);
+    onBack("done");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onBack, flash, mustFinish]);
+
+  // Android back button: same as ← Back (instead of closing the app)
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      tryLeave();
+      return true;
+    });
+    return () => sub.remove();
+  }, [tryLeave]);
 
   // Log session start + write now-playing on mount
   useEffect(() => {
@@ -169,16 +243,12 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
   useEffect(() => {
     return subscribeToVideoAllowed(parentId, childId, video.videoId, (allowed) => {
       if (!allowed) {
-        onBack();
+        onBack("removed");
         Alert.alert("This video was removed", "A parent removed this video. Pick another one!");
       }
     });
   }, [parentId, childId, video.videoId, onBack]);
 
-  const handleBack = useCallback(() => {
-    setPlaying(false);
-    onBack();
-  }, [onBack]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -186,18 +256,36 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
 
       <View style={styles.playerWrapper}>
         <YoutubePlayer
+          ref={playerRef}
           height={PLAYER_HEIGHT}
           videoId={video.videoId}
           play={playing}
           // Safety net: some videos (often record-label music) refuse to play outside YouTube
           onError={(err: string) => {
             if (err === "embed_not_allowed" || err === "video_not_found") {
-              onBack();
+              onBack("error");
               Alert.alert("This video can't play here", "Pick another one!");
             }
           }}
+          onReady={() => {
+            playerRef.current?.getDuration().then((d) => {
+              if (d > 0) durationRef.current = d;
+            });
+            if (resume && resume.position > 5) playerRef.current?.seekTo(resume.position, true);
+          }}
           onChangeState={(state: string) => {
-            if (state === "ended") onBack();
+            isPlayingRef.current = state === "playing";
+            if (state === "ended") {
+              if (blocked()) {
+                // Skipped to the end without watching — back to where they really were
+                flash(`Nice try 😄 ${formatLeft(leftToFinish())} left`);
+                playerRef.current?.seekTo(lastPosRef.current, true);
+                setPlaying(true);
+                return;
+              }
+              onBack("done");
+              return;
+            }
             // keep `playing` matching the real player, so a parent's pause is always a change
             if (state === "playing") {
               setPlaying(true);
@@ -219,9 +307,15 @@ export default function PlayerScreen({ video, session, onBack }: Props) {
       </View>
 
       <View style={styles.info}>
-        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={tryLeave} style={styles.backBtn}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
+
+        {message ? (
+          <View style={styles.message}>
+            <Text style={styles.messageText}>{message}</Text>
+          </View>
+        ) : null}
 
         <Text style={styles.title} numberOfLines={2}>
           {video.title}
@@ -265,4 +359,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#666",
   },
+  message: {
+    backgroundColor: "#FFF6E0",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  messageText: { fontSize: 16, fontWeight: "700", color: "#6B4600" },
 });
