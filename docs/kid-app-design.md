@@ -116,8 +116,9 @@ Hide or a video that won't play returns to the feed with a friendly yellow note 
 
 ## Motion and speed
 
-Every move has a direction, so the app feels like one place you move around in. Moves are **linear and
-short** (`MOTION` in theme.ts: slide 220 ms, out 200 ms, zoom 180 ms) — eased curves felt heavy:
+Every move has a direction, so the app feels like one place you move around in. Moves are **quick with an
+ease-out only at the end** (`MOTION` in theme.ts: slide 180 ms, out 160 ms, zoom 150 ms) — ease-in at the
+start felt heavy, linear felt mechanical:
 - **"See all"** slides in from the right; Back slides it out to the right. The home screen stays alive
   underneath (no rebuild, same scroll position); the grid fills in right after the slide (placeholders
   first), so the slide starts at once.
