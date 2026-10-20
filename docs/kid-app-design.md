@@ -20,9 +20,12 @@ The kid app's look and layout (Oct 20, 2026). Code: `apps/Kideos/src/theme.ts` (
 
 ## Two modes (from the child's age, live from the child doc)
 
-| | **Little** (age ≤ 7) | **Big** (8+) |
+Thresholds are Adam's call (Oct 20): little = 4 and under, big = 5+.
+
+| | **Little** (age ≤ 4) | **Big** (5+) |
 |---|---|---|
-| Home | A band of round **bubbles** on top: the child's avatar, ⭐ New, ⚡ Shorts, then each channel's picture. Tapping a bubble swaps the **one sideways film strip** below (big tiles, ~1.3 visible on a phone, ~2.5 on a tablet). No vertical scrolling. Nothing in the bottom 48 pt (where wrists rest on a tablet). | **Shelves** like YouTube Kids: ✨ New (15), ⚡ Shorts (20, tall tiles), one row per channel (12 + a "See all" tile), then the end cap. |
+| Orientation | **Landscape only** (either way up) — portrait wasted most of the screen. | Rotates freely. |
+| Home | The child's avatar on the left — just the emoji and a divider, **no circle**, so it doesn't read as a button — then a band of round **bubbles**: ⭐ New, ⚡ Shorts, each channel's picture. Tapping a bubble swaps the **one sideways film strip** below. The strip's tiles are sized to the space actually left under the band (measured, so nothing is cut off), capped at the design size (~2.5 visible on a tablet). No vertical scrolling. Nothing in the bottom 48 pt on tablets (wrists rest there; 12 pt on phones). | **Shelves** like YouTube Kids: ✨ New (15), ⚡ Shorts (20, tall tiles), one row per channel (12 + a "See all" tile), then the end cap. |
 | Header | None — no greeting text for pre-readers. | "Hi Simon 👋" + a bar of jump-chips (one per shelf). Scrolling collapses it: the greeting fades and slides away (48–60 pt), the chip bar stays pinned (64 pt) and highlights the shelf you're on; tapping a chip scrolls to it. |
 | Channel page | — (the bubble *is* the channel) | "See all" → grid of everything (2–5 columns by width), big ← button. |
 | Tiles | Title only, bigger text. | Title + length. |
@@ -69,6 +72,14 @@ by PostScript name so `fontFamily: "Fredoka-SemiBold"` works on both platforms. 
 - Tiles wider than 300 pt load YouTube's 480 px thumbnail (`hqdefault`, letterbox cropped by "cover").
 - Safe-area insets on every screen (notches, Android edge-to-edge).
 
+## Full screen (Android)
+
+The status and navigation bars are hidden everywhere (like YouTube Kids); a swipe from the edge shows them
+for a few seconds. This is comfort, not a lock — a kid can still swipe and leave. Locking the device to
+Kideos is screen pinning (Android) / Guided Access (iPad): backlog → "lock your kid's phone" guide.
+Native: `MainActivity.kt` (`hideSystemBars`, re-applied on focus) and `KideosWindowModule.kt`
+(`setLandscapeOnly`, `hideSystemBars`; JS `src/device.ts`). Leaving YouTube's fullscreen re-hides them.
+
 ## Player
 
 Dark screen: a big orange ← and the title on top; the player as large as the window allows (landscape fits
@@ -96,4 +107,6 @@ when the child scrolls).
 - **Several kids per device** ("Who's watching?" + optional PIN) — backlog #2.
 - A real mascot instead of the 🌙 / emoji placeholders; sounds / haptics (no libraries installed yet).
 - "Continue watching" shelf (needs per-video progress, not only the owed video).
-- iOS: fonts need `npx react-native-asset` once on a Mac (adds them to Xcode + Info.plist).
+- iOS: fonts need `npx react-native-asset` once on a Mac (adds them to Xcode + Info.plist); the landscape
+  lock and hidden bars are Android-only so far (iPad: `supportedInterfaceOrientations` in AppDelegate +
+  `prefersHomeIndicatorAutoHidden`).

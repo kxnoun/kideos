@@ -6,8 +6,8 @@
 // (always with Ink text — white on orange fails contrast), Sunny Yellow for focus.
 // Fonts: Fredoka (headings/buttons) + Nunito (titles/body), both SIL OFL.
 //
-// Two modes from the child's age: "little" (≈2–7, pre-readers: pictures, one
-// horizontal strip, no vertical scrolling) and "big" (≈8–12: rows of shelves).
+// Two modes from the child's age: "little" (≤4: pictures, one horizontal strip, no
+// vertical scrolling, landscape only) and "big" (5+: rows of shelves, rotates freely).
 // Layout sizes come from the WINDOW width (useLayout), so phones, tablets,
 // rotation and split screen all work; TV later = same tokens, bigger class.
 // ─────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export type Mode = "little" | "big";
 export type SizeClass = "compact" | "medium" | "expanded" | "large";
 
 export function modeForAge(age: number | undefined): Mode {
-  return age !== undefined && age > 0 && age <= 7 ? "little" : "big";
+  return age !== undefined && age > 0 && age <= 4 ? "little" : "big";
 }
 
 // Window-size classes (Android's, used on both platforms): by width, not device type

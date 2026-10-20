@@ -48,6 +48,7 @@ import { FINISHED_SHARE, WHOLE_VIDEO, formatLeft, saveUnfinished, type Unfinishe
 import { colors, fonts, radius, useLayout } from "../theme";
 import { markWatched, useWatched } from "../watched";
 import Tap from "../components/Tap";
+import { hideSystemBars } from "../device";
 import VideoTile from "../components/VideoTile";
 
 // done = watched or left normally; removed = a parent hid it; error = it won't play here
@@ -316,6 +317,9 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
             height={playerH}
             videoId={video.videoId}
             play={playing}
+            onFullScreenChange={(full: boolean) => {
+              if (!full) hideSystemBars(); // leaving YouTube's fullscreen gives the bars back
+            }}
             // Safety net: some videos (often record-label music) refuse to play outside YouTube
             onError={(err: string) => {
               if (err === "embed_not_allowed" || err === "video_not_found") onBack("error");

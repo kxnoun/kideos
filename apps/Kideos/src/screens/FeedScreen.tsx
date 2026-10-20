@@ -5,12 +5,13 @@
 // parent approved). Live: new videos appear and hidden ones disappear by themselves.
 // Design notes: docs/kid-app-design.md. Two modes from the child's age (theme.ts):
 //
-//   LITTLE (≤7) — pre-readers. A band of big round bubbles on top (⭐ New, ⚡ Shorts,
-//   then each channel's picture); tapping one swaps the single sideways film strip
-//   below. No vertical scrolling, no greeting text, nothing in the bottom 48 pt
-//   (where wrists rest on a tablet).
+//   LITTLE (≤4) — pre-readers, landscape only (App.tsx locks it). The child's avatar
+//   (not a button — no circle) then a band of big round bubbles (⭐ New, ⚡ Shorts, each
+//   channel's picture); tapping one swaps the single sideways film strip below. No
+//   vertical scrolling, no greeting text; the strip is sized to the space really left,
+//   with nothing in the bottom 48 pt on tablets (where wrists rest).
 //
-//   BIG (8+) — shelves like YouTube Kids: New / Shorts / one row per channel, and a
+//   BIG (5+) — shelves like YouTube Kids: New / Shorts / one row per channel, and a
 //   channel page with everything. The header collapses as they scroll: the
 //   "Hi Simon" line fades out and only a slim bar of jump-chips stays pinned.
 //
@@ -210,29 +211,42 @@ function LittleHome({
   const watched = useWatched();
   const [selected, setSelected] = useState(shelves[0]?.key ?? "new");
   const shelf = shelves.find((s) => s.key === selected) ?? shelves[0];
-  const { bubble, margin, gap, stripTileW, stripTileH } = layout;
+  const { bubble, margin, gap } = layout;
+  const [stripSpace, setStripSpace] = useState(0); // measured height under the bubble band
 
-  const tileW = shelf.tall ? Math.round(stripTileH * (9 / 16)) : stripTileW;
-  const tileH = stripTileH;
+  // Fit the tile to the space really left (title = 2 lines under it), never wider than the design size
+  const titleSize = Math.round(19 * layout.scale);
+  const titleBlock = 8 + 2 * Math.round(titleSize * 1.3) + 8;
+  const wrist = layout.phone ? 12 : 48; // tablets rest on wrists; phones are held
+  const fitH = stripSpace ? Math.max(90, stripSpace - wrist - insets.bottom - titleBlock) : layout.stripTileH;
+  const tileH = Math.min(layout.stripTileH, fitH);
+  const tileW = shelf.tall ? Math.round(tileH * (9 / 16)) : Math.round(tileH * (16 / 9));
   const showBadge = !shelf.channelId; // mixed shelves show whose video it is
 
   return (
     <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0 }}
-        contentContainerStyle={{ paddingHorizontal: margin, paddingTop: 16, paddingBottom: 8, gap }}
-      >
-        <View style={[styles.meBubble, { width: bubble, height: bubble, borderRadius: bubble / 2 }]}>
-          <Text style={{ fontSize: bubble * 0.5 }}>{profile.avatar || "🙂"}</Text>
+      <View style={styles.band}>
+        {/* Who's watching — a picture, not a button */}
+        <View style={[styles.me, { paddingLeft: margin, height: bubble }]} accessible accessibilityLabel={profile.name}>
+          <Text style={{ fontSize: Math.round(bubble * 0.55) }}>{profile.avatar || "🙂"}</Text>
+          <View style={[styles.meDivider, { height: bubble * 0.7 }]} />
         </View>
-        {shelves.map((s) => (
-          <Bubble key={s.key} shelf={s} size={bubble} selected={s.key === shelf.key} onPress={() => setSelected(s.key)} />
-        ))}
-      </ScrollView>
+        <ScrollView
+          horizontal
+          style={{ flex: 1 }}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingRight: margin, paddingLeft: 4, paddingTop: 16, paddingBottom: 8, gap }}
+        >
+          {shelves.map((s) => (
+            <Bubble key={s.key} shelf={s} size={bubble} selected={s.key === shelf.key} onPress={() => setSelected(s.key)} />
+          ))}
+        </ScrollView>
+      </View>
 
-      <View style={{ flex: 1, justifyContent: "center", paddingBottom: 48 + insets.bottom }}>
+      <View
+        style={{ flex: 1, justifyContent: "center", paddingBottom: wrist + insets.bottom }}
+        onLayout={(e: LayoutChangeEvent) => setStripSpace(Math.round(e.nativeEvent.layout.height))}
+      >
         <FlatList
           key={shelf.key} // a new shelf starts at its beginning
           horizontal
@@ -250,7 +264,7 @@ function LittleHome({
               onPress={onPlay}
               watched={watched.has(item.videoId)}
               channelThumb={showBadge ? channelById.get(item.channelId)?.thumbnail : undefined}
-              titleSize={Math.round(19 * layout.scale)}
+              titleSize={titleSize}
             />
           )}
         />
@@ -539,7 +553,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
 
   // little
-  meBubble: { backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" },
+  band: { flexDirection: "row", alignItems: "flex-start" },
+  me: { flexDirection: "row", alignItems: "center", marginTop: 16, paddingRight: 8 },
+  meDivider: { width: 2, borderRadius: 1, backgroundColor: colors.surfacePressed, marginLeft: 14 },
   bubble: {
     alignItems: "center",
     justifyContent: "center",

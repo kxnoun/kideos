@@ -217,7 +217,8 @@ filtered to currently whitelisted channels; channel names filled from the whitel
 (latest long videos across channels), **⚡ Shorts** (tall tiles; only if the child has any — none with "No
 Shorts"; uses the verdict's `isShort`) and **one shelf per channel** (channels with the newest video first).
 Two layouts by the child's age (live from the child doc; design: [kid-app-design.md](kid-app-design.md)):
-**little (≤ 7)** — channel bubbles on top swap one sideways film strip, no vertical scrolling; **big (8+)** —
+**little (≤ 4)** — landscape only, channel bubbles on top swap one sideways film strip, no vertical
+scrolling; **big (5+)** —
 shelves (New 15 / Shorts 20 / 12 per channel + "See all" → channel page grid) under a collapsing header
 whose chip bar stays pinned. Sizes come from the window (`theme.ts` → `useLayout`), so tablets, rotation
 and split screen work. Watched videos get a ✓ (`src/watched.ts`, on this device: ~90% played or ended).
@@ -397,7 +398,8 @@ mode), `watched.ts` (✓ stickers), `components/Tap.tsx` (press feedback) · `Vi
 `screens/PairingScreen.tsx`, `screens/FeedScreen.tsx` (little: bubbles + strip; big: shelves, collapsing
 header, channel pages), `screens/PlayerScreen.tsx` (end card), `services/firebase.ts`
 (`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`, `subscribeToChild`, `subscribeToPlaySignal`,
-`writeNowPlaying`, watch sessions). Fonts (Fredoka, Nunito) in `assets/fonts` + Android
+`writeNowPlaying`, watch sessions), `device.ts` (landscape lock + hidden system bars, Android native module
+`KideosWindowModule.kt`; `MainActivity` hides the bars). Fonts (Fredoka, Nunito) in `assets/fonts` + Android
 `android/app/src/main/assets/fonts`. Design notes: [kid-app-design.md](kid-app-design.md).
 
 **Parent app (`apps/KideosParent`)** — `App.tsx` (routing), `hooks/useAuth.ts`, `store/useStore.ts`

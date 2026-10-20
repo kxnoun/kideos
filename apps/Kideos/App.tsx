@@ -24,7 +24,8 @@ import FeedScreen from "./src/screens/FeedScreen";
 import PlayerScreen, { type ExitReason } from "./src/screens/PlayerScreen";
 import { subscribeToPlaySignal, subscribeToChild } from "./src/services/firebase";
 import { NO_RULES, normalizeRules, getUnfinished, clearUnfinished, stillOwed, type Unfinished } from "./src/viewing";
-import { colors, fonts, radius, useLayout } from "./src/theme";
+import { colors, fonts, modeForAge, radius, useLayout } from "./src/theme";
+import { setLandscapeOnly } from "./src/device";
 import { useWatched } from "./src/watched";
 import type { ApprovedVideo, ChildSession, KidProfile, ViewingRules } from "./src/types";
 
@@ -169,6 +170,12 @@ function Root() {
     }),
     [child, session?.childName, session?.childAge]
   );
+
+  // Young mode stays landscape (a portrait strip wastes most of the screen); older kids rotate
+  const littleMode = Boolean(session?.paired) && modeForAge(profile.age) === "little";
+  useEffect(() => {
+    setLandscapeOnly(littleMode);
+  }, [littleMode]);
 
   const upNext = useMemo(
     () => (currentVideo ? pickNext(pool, currentVideo, watched) : []),
