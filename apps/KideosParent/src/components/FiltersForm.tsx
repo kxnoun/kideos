@@ -17,6 +17,7 @@ import {
   type Dim,
   type ValueFilters,
   type Tradition,
+  FREE_TEXT_MAX,
 } from "../prefs";
 import { parseCustomRules, type RuleChange } from "../services/firebase";
 import { useStore } from "../store/useStore";
@@ -613,7 +614,11 @@ export default function FiltersForm({
           placeholderTextColor="#aaa"
           multiline
           numberOfLines={3}
+          maxLength={FREE_TEXT_MAX}
         />
+        <Text style={styles.counter}>
+          {value.customRules.length}/{FREE_TEXT_MAX}
+        </Text>
         {value.customRules.trim() ? (
           <TouchableOpacity style={styles.parseBtn} onPress={turnIntoSettings} disabled={parsing}>
             {parsing ? <ActivityIndicator color="#6C63FF" /> : <Text style={styles.parseText}>Turn this into settings</Text>}
@@ -661,6 +666,7 @@ export default function FiltersForm({
             onChangeText={(religion) => onChange({ ...value, religion })}
             placeholder="e.g. Christian, Jewish, Muslim..."
             placeholderTextColor="#aaa"
+            maxLength={FREE_TEXT_MAX}
           />
         )}
       </View>
@@ -669,6 +675,7 @@ export default function FiltersForm({
 }
 
 const styles = StyleSheet.create({
+  counter: { fontSize: 12, color: "#999", textAlign: "right", marginTop: 4 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,

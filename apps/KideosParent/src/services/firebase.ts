@@ -214,17 +214,18 @@ export interface CheckChannelResult {
   channel: { channelId: string; name: string; handle: string; thumbnail: string; subscriberCount: number };
   alreadyAdded: boolean;
   report: {
-    verdict: "good" | "caution" | "not_recommended" | "unchecked";
+    verdict: "good" | "caution" | "not_recommended"; // the AI's general opinion for kids
     summary: string;
     reputation: string;
     wellKnown: boolean;
     audienceMinAge: number | null;
     audienceMaxAge: number | null;
-    concerns: { dim: string | null; flag: string | null; level: number; what: string; basis: "thumbnails" | "reputation" }[];
     sources: { title: string; uri: string }[];
     thumbnailsChecked: number;
   } | null;
+  fit: "good" | "caution" | "not_fit" | null; // for THIS child (worked out in code)
   conflicts: string[];
+  findings: { what: string; basis: "thumbnails" | "reputation" | "both" | "" }[];
   ageNote: string;
 }
 export async function checkChannel(parentId: string, childId: string, input: string): Promise<CheckChannelResult> {

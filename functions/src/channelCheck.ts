@@ -2,19 +2,21 @@
 // Kideos — channel check before a parent adds a channel
 //
 // checkChannel (callable): the parent types a channel → we resolve it and show a
-// review BEFORE it's added (the app's "Add anyway" then calls resolveAndAddChannel).
+// review BEFORE it's added (the app's "Add" then calls resolveAndAddChannel).
 //
-// The report is per CHANNEL, shared by every family, made once
-// (channelChecks/{channelId}). Re-made only when CHECK_VERSION changes (e.g. a new
-// rating dimension). One Gemini Flash-Lite call:
-//   - the latest ~50 thumbnails + titles (what the child will see in the feed)
+// ONE shared profile per CHANNEL, made once, used by every family
+// (channelChecks/{channelId}); re-made only when CHECK_VERSION changes (e.g. a new
+// rating dimension). It records everything a video profile records — every 0–4
+// rating with evidence and where it came from, framing, faith, holidays, music,
+// LGBTQ+, value flags, topics, purpose — so any filter, now or later, is answered
+// from saved data. One Gemini Flash-Lite call:
+//   - the latest ~50 thumbnails + titles (what the child sees in the feed)
 //   - a Google Search for the channel's reputation (news, parents, Elsagate lists)
-// Cost: low media resolution ≈ 50 × ~280 image tokens + text ≈ 0.5¢ (default resolution
-// measured 57.7k tokens ≈ 1.8¢), plus one grounded search.
+// Cost: low media resolution ≈ 16k tokens ≈ 0.5¢ (measured), plus one grounded search.
 //
-// Conflicts with a child's settings are worked out in code from the shared
-// report's concerns (same 0–4 ladders as video profiles) — no AI per family.
-// The per-video checks are unchanged; this only adds a warning at add time.
+// Per child, in code (no AI): the channel profile goes through the SAME
+// evaluateProfile as videos → conflicts in plain words, and a per-child badge.
+// The per-video checks are unchanged; this only adds a review at add time.
 // ─────────────────────────────────────────────────────────────
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
@@ -23,31 +25,51 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { APP_CONFIG, YOUTUBE_API_KEY, GEMINI_API_KEY } from "./config";
 import { getChannelDetails, getChannelVideos } from "./youtube";
 import { loadValueFiltersForChild } from "./analyzeVideo";
-import { DIMS, LEVEL_LABELS, VALUE_FLAGS, VALUE_FLAG_LABELS, type Dim, type ValueFlag } from "./prefs";
+import { evaluateProfile } from "./contentFilter";
+import {
+  DIMS,
+  HOLIDAYS,
+  LEVEL_LABELS,
+  VALUE_FLAGS,
+  VALUE_FLAG_LABELS,
+  type Dim,
+  type Holiday,
+  type ValueFlag,
+  type ValueFilters,
+} from "./prefs";
+import type { ContentProfile, Framing } from "./types";
 
-export const CHECK_VERSION = 2; // v2: low-resolution thumbnails (cost) — bump when the criteria change (new dimension etc.) → channels re-checked on next add
+export const CHECK_VERSION = 3; // v3: full profile (everything a video profile has). Bump when the criteria change → re-checked on next add
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const THUMBNAILS = 50;
 
-export interface ChannelConcern {
-  dim: Dim | null; // one of our 0–4 ladders…
-  flag: ValueFlag | null; // …or a faith & family value flag
-  level: number; // 0–4 on that ladder (flags: 1)
-  what: string; // plain words for the parent
-  basis: "thumbnails" | "reputation";
+type Basis = "thumbnails" | "reputation" | "both" | "";
+
+export interface ChannelProfile {
+  purpose: ContentProfile["purpose"];
+  dims: Record<Dim, { level: number | null; evidence: string; basis: Basis }>;
+  violenceRealism: ContentProfile["violenceRealism"];
+  framing: ContentProfile["framing"];
+  religionTraditions: string[];
+  religiousThemes: string[];
+  holidays: ContentProfile["holidays"];
+  music: ContentProfile["music"];
+  lgbtq: ContentProfile["lgbtq"];
+  flags: Record<ValueFlag, { present: boolean; evidence: string }>;
+  topics: string[];
 }
 
 export interface ChannelReport {
   version: number;
   channelId: string;
   name: string;
-  verdict: "good" | "caution" | "not_recommended" | "unchecked";
+  verdict: "good" | "caution" | "not_recommended"; // the AI's general opinion for kids (not per child)
   summary: string; // what the channel is
   reputation: string; // what people say ("" if nothing found)
   wellKnown: boolean; // false = small channel, little found about it
   audienceMinAge: number | null;
   audienceMaxAge: number | null;
-  concerns: ChannelConcern[];
+  profile: ChannelProfile;
   sources: { title: string; uri: string }[];
   thumbnailsChecked: number;
   createdAt: Timestamp;
@@ -57,26 +79,24 @@ export interface CheckChannelResponse {
   channel: { channelId: string; name: string; handle: string; thumbnail: string; subscriberCount: number };
   alreadyAdded: boolean;
   report: Omit<ChannelReport, "createdAt"> | null; // null = the check failed (the parent can still add it)
-  conflicts: string[]; // concerns above THIS child's limits, plain words
+  fit: "good" | "caution" | "not_fit" | null; // per child, from code
+  conflicts: string[]; // what's past THIS child's settings, plain words
+  findings: { what: string; basis: Basis }[]; // notable things found (level ≥ 2 or flags), for the review
   ageNote: string; // "" or e.g. "Made for ages 13+ — Simon is 6"
 }
 
 // ── The prompt ─────────────────────────────────────────────────
 
-function ladderText(): string {
-  return DIMS.map((d) => `- ${d}: ${LEVEL_LABELS[d].map((l, i) => `${i} ${l}`).join(" · ")}`).join("\n");
-}
+const ladders = DIMS.map((d) => `- ${d}: ${LEVEL_LABELS[d].map((l, i) => `${i} ${l}`).join(" · ")}`).join("\n");
 
-const SYSTEM = `You check a YouTube channel for a parental control app, before a parent adds it to their child's list.
+const SYSTEM = `You build a content profile of a YouTube CHANNEL for a parental control app, before a parent adds it to their child's list.
 You get the channel's details and its latest video thumbnails with titles. You can also search Google.
 
 1. Search Google for the channel's reputation: news articles, Common Sense Media, parent discussions (Reddit etc.), lists of "Elsagate" / disturbing fake kids' channels, controversies. Use what you find; don't invent.
-2. Look at EVERY thumbnail. Thumbnails are part of what the child sees. Look for: sexualized or suggestive images (including cartoons), revealing outfits, gore, creepy or disturbing imagery, horror, knock-off characters in weird situations (Elsagate), clickbait, dangerous stunts, and a style too intense for young kids.
+2. Look at EVERY thumbnail — they are part of what the child sees. Look for sexualized or suggestive images (including cartoons), revealing outfits, gore, creepy or disturbing imagery, horror, knock-off characters in weird situations (Elsagate), clickbait, dangerous stunts, and a style too intense for young kids.
 
-Report what you find on these 0–4 ladders (the same ones the app uses for single videos):
-${ladderText()}
-
-and these yes/no value flags: ${VALUE_FLAGS.map((f) => `${f} (${VALUE_FLAG_LABELS[f]})`).join("; ")}.
+Rate the channel on EVERY ladder below: the highest level that shows up in the thumbnails/titles or that people report about the channel (not a one-off from years ago). 0 if there's no sign of it. null only if you truly can't tell.
+${ladders}
 
 Respond with ONLY a JSON object, no other text:
 {
@@ -86,12 +106,23 @@ Respond with ONLY a JSON object, no other text:
   "wellKnown": true | false,
   "audienceMinAge": number | null,
   "audienceMaxAge": number | null,
-  "concerns": [ { "dim": "<a ladder name or null>", "flag": "<a flag name or null>", "level": 0-4, "what": "short plain words, e.g. 'several thumbnails show sexualized cartoon women'", "basis": "thumbnails" | "reputation" } ]
+  "purpose": "entertainment" | "educational" | "news" | "devotional" | "commercial",
+  "topics": ["3-8 short tags"],
+  "dims": { "<every ladder name>": { "level": 0, "evidence": "short plain words, '' if 0", "basis": "thumbnails" | "reputation" | "both" | "" } },
+  "violenceRealism": "none" | "cartoon_fantasy" | "realistic_fiction" | "real_footage",
+  "framing": { "violence": "neutral" | "condemned" | "glorified", "substances": "...", "selfHarm": "...", "meanness": "..." },
+  "religionTraditions": [ONLY from "islam", "judaism", "christianity", "hinduism", "sikhism", "buddhism", "other"],
+  "religiousThemes": ["short phrases"],
+  "holidays": [ { "name": ONLY from ${HOLIDAYS.map((h) => `"${h}"`).join(", ")}, "prominence": "theme" | "incidental" } ],
+  "music": "none" | "background" | "prominent" | "music_video",
+  "lgbtq": "none" | "incidental" | "discussion" | "advocacy",
+  "flags": { "<every flag name>": { "present": false, "evidence": "" } }
 }
-- verdict: "not_recommended" = clearly not for kids (sexualized, disturbing, Elsagate, adult content dressed as kids' content). "caution" = fine for some ages or has some concerns. "good" = a normal, well-regarded channel for its audience.
+Flags: ${VALUE_FLAGS.map((f) => `${f} = ${VALUE_FLAG_LABELS[f]}`).join("; ")}.
+- verdict (your general opinion for kids): "not_recommended" = clearly not for kids (sexualized, disturbing, Elsagate, adult content dressed as kids' content). "caution" = fine for some ages or has some concerns. "good" = a normal, well-regarded channel for its audience.
 - wellKnown: false if you found little or nothing about it online (small channel) — then judge from thumbnails only and say so in "reputation".
 - audienceMinAge / audienceMaxAge: who the channel is made for (null max = and up; both null = all ages).
-- concerns: only real ones, each with the ladder level it reaches. Empty array if none. Thumbnails can only add concerns, never excuse them.`;
+- Thumbnails can only raise a rating, never excuse one. holidays / music / lgbtq / religion: what the channel regularly features.`;
 
 // ── Gemini call ────────────────────────────────────────────────
 
@@ -105,7 +136,11 @@ async function fetchThumb(videoId: string): Promise<string | null> {
   }
 }
 
-async function askGemini(apiKey: string, parts: unknown[], withSearch: boolean): Promise<{ text: string; sources: { title: string; uri: string }[] }> {
+async function askGemini(
+  apiKey: string,
+  parts: unknown[],
+  withSearch: boolean
+): Promise<{ text: string; sources: { title: string; uri: string }[] }> {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -114,7 +149,7 @@ async function askGemini(apiKey: string, parts: unknown[], withSearch: boolean):
       contents: [{ role: "user", parts }],
       ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
       // Low resolution: ~280 tokens per thumbnail instead of ~1,100 (thumbnails are only 320×180)
-      generationConfig: { temperature: 0, maxOutputTokens: 2000, mediaResolution: "MEDIA_RESOLUTION_LOW" },
+      generationConfig: { temperature: 0, maxOutputTokens: 4000, mediaResolution: "MEDIA_RESOLUTION_LOW" },
     }),
     signal: AbortSignal.timeout(90_000),
   });
@@ -133,7 +168,9 @@ async function askGemini(apiKey: string, parts: unknown[], withSearch: boolean):
   return { text, sources };
 }
 
-function parseReport(text: string): any {
+// ── Parse into a full profile ──────────────────────────────────
+
+function parseJson(text: string): any {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error(`No JSON in Gemini reply: ${text.slice(0, 200)}`);
@@ -143,6 +180,57 @@ function parseReport(text: string): any {
 function ageOrNull(v: unknown): number | null {
   const n = Number(v);
   return v === null || v === undefined || !Number.isFinite(n) ? null : Math.max(0, Math.min(18, Math.round(n)));
+}
+
+function levelOrNull(v: unknown): number | null {
+  if (v === null) return null;
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.max(0, Math.min(4, n)) : 0;
+}
+
+const strList = (v: unknown, max = 10) => (Array.isArray(v) ? v.map(String).filter((s) => s.trim()).slice(0, max) : []);
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+  (allowed as readonly string[]).includes(v as string) ? (v as T) : fallback;
+const framingOf = (v: unknown): Framing => oneOf(v, ["neutral", "condemned", "glorified"] as const, "neutral");
+
+function parseProfile(p: any): ChannelProfile {
+  const dims = {} as ChannelProfile["dims"];
+  for (const dim of DIMS) {
+    const d = p.dims?.[dim] ?? {};
+    dims[dim] = {
+      level: levelOrNull(d.level ?? 0),
+      evidence: String(d.evidence ?? "").slice(0, 200),
+      basis: oneOf(d.basis, ["thumbnails", "reputation", "both", ""] as const, ""),
+    };
+  }
+  const flags = {} as ChannelProfile["flags"];
+  for (const f of VALUE_FLAGS) {
+    const v = p.flags?.[f];
+    flags[f] = { present: Boolean(v?.present ?? v), evidence: String(v?.evidence ?? "").slice(0, 200) };
+  }
+  return {
+    purpose: oneOf(p.purpose, ["entertainment", "educational", "news", "devotional", "commercial"] as const, "entertainment"),
+    dims,
+    violenceRealism: oneOf(p.violenceRealism, ["none", "cartoon_fantasy", "realistic_fiction", "real_footage"] as const, "none"),
+    framing: {
+      violence: framingOf(p.framing?.violence),
+      substances: framingOf(p.framing?.substances),
+      selfHarm: framingOf(p.framing?.selfHarm),
+      meanness: framingOf(p.framing?.meanness),
+    },
+    religionTraditions: strList(p.religionTraditions).map((t) => t.toLowerCase()),
+    religiousThemes: strList(p.religiousThemes),
+    holidays: (Array.isArray(p.holidays) ? p.holidays : [])
+      .filter((h: { name?: string }) => (HOLIDAYS as readonly string[]).includes(String(h?.name)))
+      .map((h: { name: string; prominence?: string }) => ({
+        name: h.name as Holiday,
+        prominence: h.prominence === "theme" ? ("theme" as const) : ("incidental" as const),
+      })),
+    music: { level: oneOf(p.music, ["none", "background", "prominent", "music_video"] as const, "none") },
+    lgbtq: oneOf(p.lgbtq, ["none", "incidental", "discussion", "advocacy"] as const, "none"),
+    flags,
+    topics: strList(p.topics),
+  };
 }
 
 async function makeReport(
@@ -177,51 +265,76 @@ LATEST VIDEOS (thumbnail follows each title):`,
     logger.warn(`[checkChannel] With Google Search failed for ${details.name}, retrying thumbnails only:`, err);
     reply = await askGemini(geminiKey, parts, false);
   }
-  const p = parseReport(reply.text);
-
-  const concerns: ChannelConcern[] = (Array.isArray(p.concerns) ? p.concerns : [])
-    .map((c: any) => ({
-      dim: (DIMS as readonly string[]).includes(c?.dim) ? (c.dim as Dim) : null,
-      flag: (VALUE_FLAGS as readonly string[]).includes(c?.flag) ? (c.flag as ValueFlag) : null,
-      level: Math.max(0, Math.min(4, Math.round(Number(c?.level) || 0))),
-      what: String(c?.what ?? "").slice(0, 200),
-      basis: c?.basis === "reputation" ? ("reputation" as const) : ("thumbnails" as const),
-    }))
-    .filter((c: ChannelConcern) => c.what && (c.dim || c.flag))
-    .slice(0, 12);
-  const verdicts = ["good", "caution", "not_recommended"] as const;
+  const p = parseJson(reply.text);
   return {
     version: CHECK_VERSION,
     channelId: details.channelId,
     name: details.name,
-    verdict: verdicts.includes(p.verdict) ? p.verdict : "caution",
+    verdict: oneOf(p.verdict, ["good", "caution", "not_recommended"] as const, "caution"),
     summary: String(p.summary ?? "").slice(0, 400),
     reputation: String(p.reputation ?? "").slice(0, 600),
     wellKnown: Boolean(p.wellKnown),
     audienceMinAge: ageOrNull(p.audienceMinAge),
     audienceMaxAge: ageOrNull(p.audienceMaxAge),
-    concerns,
+    profile: parseProfile(p),
     sources: reply.sources,
     thumbnailsChecked,
   };
 }
 
-// ── This child's conflicts (code, no AI) ───────────────────────
+// ── Per child, in code (no AI) ─────────────────────────────────
 
-function conflictsFor(report: Omit<ChannelReport, "createdAt">, prefs: Awaited<ReturnType<typeof loadValueFiltersForChild>>): string[] {
-  const out: string[] = [];
-  for (const c of report.concerns) {
-    const where = c.basis === "thumbnails" ? "in its thumbnails" : "people say";
-    if (c.dim) {
-      const max = prefs.rules[c.dim].max;
-      if (c.level > max) {
-        out.push(`${c.what} (${where}) — ${LEVEL_LABELS[c.dim][c.level]}; your limit: ${LEVEL_LABELS[c.dim][max]}`);
-      }
-    } else if (c.flag && prefs.flags[c.flag] === "hide") {
-      out.push(`${c.what} (${where}) — you chose to hide ${VALUE_FLAG_LABELS[c.flag].toLowerCase()}`);
-    }
+const BASIS_WORDS: Record<Basis, string> = { thumbnails: "thumbnails", reputation: "what people say", both: "thumbnails + what people say", "": "" };
+
+// The channel profile as a ContentProfile, so the SAME filter code as videos applies
+function asContentProfile(r: Omit<ChannelReport, "createdAt">): ContentProfile {
+  const p = r.profile;
+  const dims = {} as ContentProfile["dims"];
+  for (const dim of DIMS) {
+    const d = p.dims[dim];
+    const where = BASIS_WORDS[d.basis];
+    dims[dim] = { level: d.level, evidence: [where, d.evidence].filter(Boolean).join(": ") };
   }
-  return out;
+  return {
+    version: 0,
+    status: "ok",
+    title: r.name,
+    channelName: r.name,
+    purpose: p.purpose,
+    dims,
+    violenceRealism: p.violenceRealism,
+    framing: p.framing,
+    religionTraditions: p.religionTraditions,
+    religiousThemes: p.religiousThemes,
+    holidays: p.holidays,
+    music: p.music,
+    lgbtq: p.lgbtq,
+    flags: Object.fromEntries(VALUE_FLAGS.map((f) => [f, p.flags[f].present])) as ContentProfile["flags"],
+    topics: p.topics,
+    summary: r.summary,
+    createdAt: Timestamp.now(),
+  };
+}
+
+export function fitForChild(r: Omit<ChannelReport, "createdAt">, prefs: ValueFilters) {
+  // Video-only switches (made-for-kids label, Shorts) don't apply to a whole channel;
+  // "can't tell" ratings don't count against a channel
+  const decision = evaluateProfile(asContentProfile(r), { ...prefs, madeForKidsOnly: false, hideShorts: false, unknown: "allow" });
+  // Reasons come from the video filter — reworded for a channel
+  const conflicts = decision.reason ? decision.reason.split("; ").map((c) => c.replace(/\bthe video\b/g, "the channel")) : [];
+  const junk = r.profile.dims.junk.level ?? 0;
+  const serious = decision.severity === "high" || decision.severity === "medium" || (junk >= 3 && junk > prefs.rules.junk.max);
+  const fit: "good" | "caution" | "not_fit" = serious ? "not_fit" : conflicts.length ? "caution" : "good";
+  const findings: { what: string; basis: Basis }[] = [];
+  for (const dim of DIMS) {
+    const d = r.profile.dims[dim];
+    if ((d.level ?? 0) >= 2 && d.evidence) findings.push({ what: `${LEVEL_LABELS[dim][d.level ?? 0]}: ${d.evidence}`, basis: d.basis });
+  }
+  for (const f of VALUE_FLAGS) {
+    const v = r.profile.flags[f];
+    if (v.present) findings.push({ what: `${VALUE_FLAG_LABELS[f]}${v.evidence ? `: ${v.evidence}` : ""}`, basis: "" });
+  }
+  return { fit, conflicts, findings };
 }
 
 // ── Callable ───────────────────────────────────────────────────
@@ -245,7 +358,7 @@ export const checkChannel = onCall(
     };
     const alreadyAdded = (await db.doc(`users/${parentId}/children/${childId}/whitelistedChannels/${details.channelId}`).get()).exists;
 
-    // Shared report: made once per channel (per CHECK_VERSION)
+    // Shared profile: made once per channel (per CHECK_VERSION)
     const ref = db.doc(`channelChecks/${details.channelId}`);
     const snap = await ref.get();
     let report: Omit<ChannelReport, "createdAt"> | null = null;
@@ -257,29 +370,29 @@ export const checkChannel = onCall(
       try {
         report = await makeReport(details, YOUTUBE_API_KEY.value(), GEMINI_API_KEY.value());
         await ref.set({ ...report, createdAt: Timestamp.now() });
+        const d = report.profile.dims;
         logger.info(
           `[checkChannel] ${details.name}: ${report.verdict} wellKnown=${report.wellKnown} thumbs=${report.thumbnailsChecked} ` +
-            `concerns=${JSON.stringify(report.concerns.map((c) => `${c.dim ?? c.flag}=${c.level}`))}`
+            DIMS.filter((x) => (d[x].level ?? 0) > 0).map((x) => `${x}=${d[x].level}`).join(" ")
         );
       } catch (err) {
         logger.error(`[checkChannel] Check failed for ${details.name}:`, err);
       }
     }
 
-    let conflicts: string[] = [];
+    if (!report) return { channel, alreadyAdded, report: null, fit: null, conflicts: [], findings: [], ageNote: "" };
+
+    const prefs = await loadValueFiltersForChild(parentId, childId);
+    const { fit, conflicts, findings } = fitForChild(report, prefs);
+    const child = (await db.doc(`users/${parentId}/children/${childId}`).get()).data();
+    const age = Number(child?.age ?? child?.profile?.age ?? prefs.ageGroup);
+    const name = String(child?.name ?? child?.profile?.name ?? "your child");
     let ageNote = "";
-    if (report) {
-      const prefs = await loadValueFiltersForChild(parentId, childId);
-      conflicts = conflictsFor(report, prefs);
-      const child = (await db.doc(`users/${parentId}/children/${childId}`).get()).data();
-      const age = Number(child?.profile?.age ?? child?.age ?? prefs.ageGroup);
-      const name = String(child?.profile?.name ?? child?.name ?? "your child");
-      if (report.audienceMinAge !== null && age < report.audienceMinAge) {
-        ageNote = `Made for ages ${report.audienceMinAge}+ — ${name} is ${age}`;
-      } else if (report.audienceMaxAge !== null && age > report.audienceMaxAge + 1) {
-        ageNote = `Made for ages up to ${report.audienceMaxAge} — ${name} is ${age}`;
-      }
+    if (report.audienceMinAge !== null && age < report.audienceMinAge) {
+      ageNote = `Made for ages ${report.audienceMinAge}+ — ${name} is ${age}`;
+    } else if (report.audienceMaxAge !== null && age > report.audienceMaxAge + 1) {
+      ageNote = `Made for ages up to ${report.audienceMaxAge} — ${name} is ${age}`;
     }
-    return { channel, alreadyAdded, report, conflicts, ageNote };
+    return { channel, alreadyAdded, report, fit: fit === "good" && ageNote ? "caution" : fit, conflicts, findings, ageNote };
   }
 );

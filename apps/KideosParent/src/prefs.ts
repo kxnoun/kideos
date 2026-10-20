@@ -13,6 +13,8 @@
 // KEEP IN SYNC with functions/src/prefs.ts (copied — the apps and backend share no package)
 // ─────────────────────────────────────────────────────────────
 
+export const FREE_TEXT_MAX = 300; // religion + "anything else?" boxes
+
 export const DIMS = [
   "violence",
   "scary",
@@ -242,6 +244,9 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
       music: raw2.music === undefined ? "ok" : okOrHide(raw2.music),
       lgbtq: lg === "allow" || lg === undefined ? "allow" : lg === "review" || lg === "hide_all" ? "hide_all" : "hide_discussion",
       madeForKidsOnly: Boolean(raw2.madeForKidsOnly),
+      // Free text goes to an AI — capped (cost, and keeps prompt tricks short)
+      religion: String(r.religion ?? "").slice(0, FREE_TEXT_MAX),
+      customRules: String(r.customRules ?? "").slice(0, FREE_TEXT_MAX),
       hideShorts: Boolean(raw2.hideShorts),
       gamblingLadder: true,
     };
@@ -258,8 +263,8 @@ export function normalizePrefs(raw: Record<string, unknown> | undefined, fallbac
   set("sexual", map(raw.sexualContent, { none: 0, innuendo: 1 }));
   set("politics", map(raw.political, { block_all: 0, allow_educational: 1, allow_all: 3 }));
   p.religiousSensitivity = Boolean(raw.religiousSensitivity);
-  p.religion = typeof raw.religion === "string" ? raw.religion : "";
-  p.customRules = typeof raw.customRules === "string" ? raw.customRules : "";
+  p.religion = typeof raw.religion === "string" ? raw.religion.slice(0, FREE_TEXT_MAX) : "";
+  p.customRules = typeof raw.customRules === "string" ? raw.customRules.slice(0, FREE_TEXT_MAX) : "";
   return p;
 }
 

@@ -11,11 +11,18 @@ import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, Linking, ActivityIndicator } from "react-native";
 import type { CheckChannelResult } from "../services/firebase";
 
-const VERDICTS = {
-  good: { label: "✅ Looks like a good fit", color: "#2E7D32", bg: "#E8F5E9" },
-  caution: { label: "⚠️ Use caution", color: "#B26A00", bg: "#FFF4E0" },
-  not_recommended: { label: "⛔ Not recommended for kids", color: "#C62828", bg: "#FDECEA" },
-  unchecked: { label: "We couldn't check this channel", color: "#555", bg: "#F0F0F5" },
+// The big badge is for THIS child (worked out from the saved channel profile + their settings)
+const FIT = {
+  good: { label: (n: string) => `✅ Fits ${n}'s settings`, color: "#2E7D32", bg: "#E8F5E9" },
+  caution: { label: (n: string) => `⚠️ Some concerns for ${n}`, color: "#B26A00", bg: "#FFF4E0" },
+  not_fit: { label: (n: string) => `⛔ Not a fit for ${n}`, color: "#C62828", bg: "#FDECEA" },
+  unchecked: { label: () => "We couldn't check this channel", color: "#555", bg: "#F0F0F5" },
+} as const;
+// The AI's general opinion, shown as one smaller line
+const OVERALL = {
+  good: "Overall: generally well-regarded for its audience",
+  caution: "Overall: fine for some ages, with some concerns",
+  not_recommended: "Overall: not usually recommended for kids",
 } as const;
 
 interface Props {
@@ -27,10 +34,10 @@ interface Props {
 }
 
 export default function ChannelReview({ result, childName, confirming, onConfirm, onCancel }: Props) {
-  const { channel, report, conflicts, ageNote } = result;
-  const verdict = VERDICTS[report?.verdict ?? "unchecked"];
-  const thumbConcerns = report?.concerns.filter((c) => c.basis === "thumbnails") ?? [];
-  const warn = !report || report.verdict !== "good" || conflicts.length > 0 || Boolean(ageNote);
+  const { channel, report, fit, conflicts, findings, ageNote } = result;
+  const badge = FIT[fit ?? "unchecked"];
+  const thumbFindings = findings.filter((f) => f.basis === "thumbnails" || f.basis === "both");
+  const warn = !report || fit !== "good";
 
   return (
     <View style={{ flex: 1 }}>
@@ -43,8 +50,9 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
           </View>
         </View>
 
-        <View style={[styles.verdict, { backgroundColor: verdict.bg }]}>
-          <Text style={[styles.verdictText, { color: verdict.color }]}>{verdict.label}</Text>
+        <View style={[styles.verdict, { backgroundColor: badge.bg }]}>
+          <Text style={[styles.verdictText, { color: badge.color }]}>{badge.label(childName)}</Text>
+          {report ? <Text style={styles.overall}>{OVERALL[report.verdict]}</Text> : null}
         </View>
 
         {!report ? (
@@ -81,10 +89,10 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
             ))}
 
             <Text style={styles.section}>Thumbnails ({report.thumbnailsChecked} checked)</Text>
-            {thumbConcerns.length ? (
-              thumbConcerns.map((c, i) => (
+            {thumbFindings.length ? (
+              thumbFindings.map((f, i) => (
                 <Text key={i} style={styles.text}>
-                  • {c.what}
+                  • {f.what}
                 </Text>
               ))
             ) : (
@@ -128,6 +136,7 @@ const styles = StyleSheet.create({
   subs: { fontSize: 13, color: "#888", marginTop: 2 },
   verdict: { borderRadius: 12, padding: 12, marginBottom: 12 },
   verdictText: { fontSize: 15, fontWeight: "800" },
+  overall: { fontSize: 12, color: "#666", marginTop: 4 },
   text: { fontSize: 14, color: "#444", lineHeight: 20, marginBottom: 6 },
   section: { fontSize: 15, fontWeight: "800", color: "#1A1A2E", marginTop: 14, marginBottom: 6 },
   source: { fontSize: 13, color: "#6C63FF", marginBottom: 4 },

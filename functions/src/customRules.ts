@@ -12,7 +12,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { logger } from "firebase-functions/v2";
 import OpenAI from "openai";
 import { APP_CONFIG, OPENAI_API_KEY } from "./config";
-import { DIMS, HOLIDAYS, VALUE_FLAGS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS } from "./prefs";
+import { DIMS, HOLIDAYS, VALUE_FLAGS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS, FREE_TEXT_MAX } from "./prefs";
 
 export interface RuleChange {
   key: string; // e.g. "holidays.halloween", "rules.language.max", "flags.pork", "music"
@@ -51,7 +51,7 @@ export const parseCustomRules = onCall(
   async (request): Promise<{ changes: RuleChange[]; remaining: string }> => {
     const { parentId, text } = request.data as { parentId: string; text: string };
     if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not your account");
-    const input = String(text ?? "").trim().slice(0, 1000);
+    const input = String(text ?? "").trim().slice(0, FREE_TEXT_MAX);
     if (!input) return { changes: [], remaining: "" };
 
     const client = new OpenAI({ apiKey: OPENAI_API_KEY.value() });

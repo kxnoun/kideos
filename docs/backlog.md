@@ -62,6 +62,13 @@ What's next, in rough priority order. Update this file as things land.
   one grounded search (~1–3.5¢) per channel, once. Per-video checks unchanged. Not yet on the Suggestions
   swipe cards (those come from analyzed channels already). Later: short Gemini clips (clip offsets + fps
   are controllable, ~0.3¢ for 3×1 min).
+- ✅ Channel check v3 (Oct 19): the saved channel profile records **everything a video profile records**
+  (every 0–4 rating with evidence + where it came from — thumbnails / what people say — framing, faith,
+  holidays, music, LGBTQ+, value flags, topics, purpose), so any filter is answered from saved data.
+  Per child it goes through the SAME `evaluateProfile` as videos → conflicts + a per-child badge
+  (✅ fits / ⚠️ some concerns / ⛔ not a fit), with the AI's general opinion as one smaller line.
+  Low media resolution measured 15.9k tokens per channel (vs 57.7k default). Free-text boxes (religion,
+  "anything else?") capped at 300 characters (app + server).
 - Backlog (Oct 19): **channel conflicts after filter changes** — a ⚠️ badge on the Channels screen next to
   channels whose saved check conflicts with the child's CURRENT settings (code only, from
   `channelChecks/{id}` concerns; no AI).
