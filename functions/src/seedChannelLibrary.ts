@@ -556,6 +556,8 @@ export const onMoreVideosRequested = onDocumentUpdated(
         { seedingStatus: "ready", videoCount: (Number(after.videoCount) || 0) + approved, moreAddedCount: approved },
         { merge: true }
       );
+      // The suggestions catalog picks the latest long videos — refresh it with the new ones
+      if (fresh.length) await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
       logger.info(`[onMoreVideosRequested] ${channelId} for ${parentId}/${childId}: ${fresh.length} more long videos, ${approved} fit`);
     } catch (err) {
       logger.error(`[onMoreVideosRequested] Failed for ${channelId}:`, err);
