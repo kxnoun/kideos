@@ -111,6 +111,15 @@ more! 0:12 left", "Nice try 😄") are yellow pills. When a video ends: an end c
 again / 🏠 My videos / up to 3 more from the same channel (older ones first, unwatched first). A parent's
 Hide or a video that won't play returns to the feed with a friendly yellow note (no system pop-ups).
 
+## Who's watching? (devices 2+ kids use)
+
+Big rounded-square avatar tiles on `bg` (one colour per child), the name under each; 🔒 = has a PIN,
+🌙 = a parent ended that child's session. The PIN pad: avatar + name, four dots that fill yellow, round
+keys (72–88 pt), a shake + "Not quite — try again" on a wrong PIN, "Forgot it? Ask a grown-up…" — side by
+side on phones in landscape. On the feed the avatar switches profile: little mode a rounded square (never
+a circle — those are the channel bubbles), big mode the avatar by "Hi Simon" with a yellow ⇄ badge. Time's
+up has a "Who's watching?" button so a sibling can watch. When it asks again: architecture → Pairing.
+
 ## Time's up / pairing / loading
 
 - **Time's up** (End Session): 🌙 "Great watching, Simon! Time for a break. What will you do next?" + three
@@ -127,7 +136,6 @@ when the child scrolls).
 ## Not yet / later
 
 - **TV:** focus states (yellow ring) on `Tap`, D-pad order, overscan margins — tokens are ready.
-- **Several kids per device** ("Who's watching?" + optional PIN) — backlog #2.
 - A real mascot instead of the 🌙 / emoji placeholders; sounds / haptics (no libraries installed yet).
 - "Continue watching" shelf (needs per-video progress, not only the owed video).
 - iOS: fonts need `npx react-native-asset` once on a Mac (adds them to Xcode + Info.plist); the landscape

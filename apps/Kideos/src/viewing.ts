@@ -7,8 +7,8 @@
 //   - Timed: counts from when the video first starts playing, wall-clock — pausing
 //     counts, and so does time with the app closed.
 //   - Whole video: ~90% actually played (pausing / seeking don't count).
-// The video still being "owed" is kept on this device (AsyncStorage), so closing
-// the app reopens it.
+// The video still being "owed" is kept on this device per child (AsyncStorage), so
+// closing the app reopens it once that child is watching again.
 // ─────────────────────────────────────────────────────────────
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -18,7 +18,7 @@ export const WHOLE_VIDEO = -1;
 export const NO_RULES: ViewingRules = { minWatchSeconds: 0 };
 export const FINISHED_SHARE = 0.9; // "whole video": this much actually played = finished
 
-const UNFINISHED_KEY = "@kideos_unfinished";
+const unfinishedKey = (childId: string) => `@kideos_unfinished:${childId}`;
 
 export interface Unfinished {
   video: ApprovedVideo;
@@ -41,23 +41,23 @@ export function stillOwed(u: Unfinished, rules: ViewingRules, now = Date.now()):
   return u.startedAt !== null && now - u.startedAt < rules.minWatchSeconds * 1000;
 }
 
-export async function getUnfinished(): Promise<Unfinished | null> {
+export async function getUnfinished(childId: string): Promise<Unfinished | null> {
   try {
-    const raw = await AsyncStorage.getItem(UNFINISHED_KEY);
+    const raw = await AsyncStorage.getItem(unfinishedKey(childId));
     return raw ? (JSON.parse(raw) as Unfinished) : null;
   } catch {
     return null;
   }
 }
 
-export async function saveUnfinished(u: Unfinished): Promise<void> {
+export async function saveUnfinished(childId: string, u: Unfinished): Promise<void> {
   // Timestamp objects don't survive JSON; the player doesn't need publishedAt
   const video = { ...u.video, publishedAt: null as unknown as ApprovedVideo["publishedAt"] };
-  await AsyncStorage.setItem(UNFINISHED_KEY, JSON.stringify({ ...u, video })).catch(() => {});
+  await AsyncStorage.setItem(unfinishedKey(childId), JSON.stringify({ ...u, video })).catch(() => {});
 }
 
-export async function clearUnfinished(): Promise<void> {
-  await AsyncStorage.removeItem(UNFINISHED_KEY).catch(() => {});
+export async function clearUnfinished(childId: string): Promise<void> {
+  await AsyncStorage.removeItem(unfinishedKey(childId)).catch(() => {});
 }
 
 export function formatLeft(seconds: number): string {

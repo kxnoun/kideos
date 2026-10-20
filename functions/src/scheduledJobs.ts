@@ -24,6 +24,7 @@ import OpenAI from "openai";
 import { OPENAI_API_KEY } from "./config";
 import { APP_CONFIG } from "./config";
 import type { WatchSession, DeleteChildDataRequest } from "./types";
+import { removeChildFromDevices } from "./kidDevices";
 
 // ── 1. cleanupExpiredData ──────────────────────────────────────
 // Runs nightly at 2am UTC.
@@ -339,6 +340,7 @@ export const deleteChildData = onCall(
     // recursiveDelete removes the child doc and every subcollection under it,
     // however large (a plain batch caps at 500 writes and would fail midway).
     await db.recursiveDelete(db.doc(`users/${parentId}/children/${childId}`));
+    await removeChildFromDevices(parentId, childId);
 
     logger.info(`[deleteChildData] Complete for child ${childId}`);
     return { success: true };

@@ -130,12 +130,10 @@ re-rates every profiled video once (OpenAI only).
 
 - **Type-check all three packages** (the main safety net):
   `node node_modules/typescript/bin/tsc --noEmit -p .` in `functions/`, `apps/Kideos`, `apps/KideosParent`.
-  Known pre-existing error: `apps/Kideos/src/screens/PlayerScreen.tsx(111)` implicit `any`.
 - The backend logic was verified with throwaway mock harnesses (fake Firestore / Supadata / OpenAI
   counting every call). They aren't in the repo yet — adding a real test suite is in the backlog.
-- **Firestore rules:** `tests/rules/` — real emulator tests (paired vs unpaired devices, Show anyway,
-  pairing). ⚠️ They describe the device-binding rules, which were reverted — the binding cases fail
-  until binding returns. Run on your machine (needs Java 21: in PowerShell first
+- **Firestore rules:** `tests/rules/` — real emulator tests (paired vs unpaired devices, siblings a device
+  isn't paired to, Show anyway, pairing, moving old devices over). Run on your machine (needs Java 21: in PowerShell first
   `$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; $env:Path = "$env:JAVA_HOME\bin;$env:Path"`):
   `cd tests\rules; npm install; cd ..\..; firebase emulators:exec --only firestore --project demo-kideos "node tests/rules/rules.test.mjs"`.
   Run them after any change to `firestore.rules`.

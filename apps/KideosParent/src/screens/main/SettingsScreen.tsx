@@ -3,12 +3,13 @@
 //
 // - Child profile management (view / add / delete)
 // - Content filter editing per child
-// - Viewing rules per child (minimum time on a video before switching)
+// - Viewing rules per child (minimum time on a video before switching) + profile PIN
+// - Devices: which children use each kid device, how often it asks "Who's watching?", unpair
 // - Data & Privacy: delete child watch history
 // - Sign out
 // ─────────────────────────────────────────────────────────────
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -20,15 +21,31 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
-import type { ValueFilters, ViewingRules } from "../../types";
+import type { KidDevice, ValueFilters, ViewingRules } from "../../types";
 import {
   signOut,
   saveValueFilters,
   getValueFilters,
   deleteChildData,
   updateChild,
+  subscribeToKidDevices,
+  updateKidDevice,
+  unpairKidDevice,
+  setChildPinHash,
 } from "../../services/firebase";
+import { PIN_LENGTH, hashPin, isValidPin } from "../../pin";
+
+// "Ask who's watching" on a shared device: after the app has been away this long
+const ASK_WHO: { value: number; label: string }[] = [
+  { value: 0, label: "Every time" },
+  { value: 1, label: "1 min" },
+  { value: 5, label: "5 min" },
+  { value: 10, label: "10 min" },
+  { value: 20, label: "20 min" },
+  { value: 30, label: "30 min" },
+];
 
 const MIN_WATCH: { value: number; label: string }[] = [
   { value: 0, label: "Off" },
@@ -57,6 +74,121 @@ export default function SettingsScreen() {
   const [viewingChildId, setViewingChildId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<ViewingRules>({ minWatchSeconds: 0 });
   const [savingViewing, setSavingViewing] = useState(false);
+  const [devices, setDevices] = useState<KidDevice[]>([]);
+  // PIN entry inside the Viewing sheet: type it, then type it again
+  const [pinStep, setPinStep] = useState<"enter" | "confirm" | null>(null);
+  const [pinFirst, setPinFirst] = useState("");
+  const [pinInput, setPinInput] = useState("");
+  const [savingPin, setSavingPin] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToKidDevices(user.uid, setDevices);
+  }, [user]);
+
+  const closeViewing = useCallback(() => {
+    setViewingChildId(null);
+    setPinStep(null);
+    setPinFirst("");
+    setPinInput("");
+  }, []);
+
+  const handlePinInput = useCallback(
+    async (text: string) => {
+      const digits = text.replace(/\D/g, "").slice(0, PIN_LENGTH);
+      setPinInput(digits);
+      if (!isValidPin(digits) || !user || !viewingChildId) return;
+      if (pinStep === "enter") {
+        setPinFirst(digits);
+        setPinInput("");
+        setPinStep("confirm");
+        return;
+      }
+      if (digits !== pinFirst) {
+        Alert.alert("PINs don't match", "Type the new PIN again.");
+        setPinFirst("");
+        setPinInput("");
+        setPinStep("enter");
+        return;
+      }
+      setSavingPin(true);
+      try {
+        await setChildPinHash(user.uid, viewingChildId, hashPin(viewingChildId, digits));
+        setPinStep(null);
+        setPinFirst("");
+        setPinInput("");
+      } catch (e: unknown) {
+        Alert.alert("Error", e instanceof Error ? e.message : "Failed to save the PIN.");
+      } finally {
+        setSavingPin(false);
+      }
+    },
+    [user, viewingChildId, pinStep, pinFirst]
+  );
+
+  const handleRemovePin = useCallback(async () => {
+    if (!user || !viewingChildId) return;
+    try {
+      await setChildPinHash(user.uid, viewingChildId, null);
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to remove the PIN.");
+    }
+  }, [user, viewingChildId]);
+
+  const toggleDeviceChild = useCallback(
+    async (device: KidDevice, childId: string) => {
+      if (!user) return;
+      const on = device.childIds.includes(childId);
+      if (on && device.childIds.length === 1) {
+        Alert.alert("A device needs at least one child", `To stop using ${device.name}, unpair it instead.`);
+        return;
+      }
+      const childIds = on ? device.childIds.filter((id) => id !== childId) : [...device.childIds, childId];
+      try {
+        await updateKidDevice(user.uid, device.id, { childIds });
+      } catch (e: unknown) {
+        Alert.alert("Error", e instanceof Error ? e.message : "Failed to save.");
+      }
+    },
+    [user]
+  );
+
+  const setAskWho = useCallback(
+    async (device: KidDevice, minutes: number) => {
+      if (!user) return;
+      try {
+        await updateKidDevice(user.uid, device.id, { askWhoAfterMinutes: minutes });
+      } catch (e: unknown) {
+        Alert.alert("Error", e instanceof Error ? e.message : "Failed to save.");
+      }
+    },
+    [user]
+  );
+
+  const handleUnpair = useCallback(
+    (device: KidDevice) => {
+      Alert.alert(
+        `Unpair ${device.name}?`,
+        "It stops showing videos right away and goes back to its pairing screen.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Unpair",
+            style: "destructive",
+            onPress: async () => {
+              if (!user) return;
+              try {
+                await unpairKidDevice(user.uid, device.id);
+              } catch (e: unknown) {
+                Alert.alert("Error", e instanceof Error ? e.message : "Failed to unpair.");
+              }
+            },
+          },
+        ]
+      );
+    },
+    [user]
+  );
 
   const openViewing = useCallback(
     (childId: string) => {
@@ -75,13 +207,14 @@ export default function SettingsScreen() {
     setSavingViewing(true);
     try {
       await updateChild(user.uid, viewingChildId, { viewing });
-      setViewingChildId(null);
+      closeViewing();
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Failed to save.");
     } finally {
       setSavingViewing(false);
     }
-  }, [user, viewingChildId, viewing]);
+  }, [user, viewingChildId, viewing, closeViewing]);
+  const viewingChildHasPin = Boolean(children.find((c) => c.id === viewingChildId)?.profile.pinHash);
   const viewingChildName = children.find((c) => c.id === viewingChildId)?.profile.name ?? "your child";
 
   const openFilters = useCallback(
@@ -169,6 +302,7 @@ export default function SettingsScreen() {
                 <Text style={styles.childName}>{c.profile.name}</Text>
                 <Text style={styles.childAge}>
                   Age {c.profile.age} · {c.profile.mode === "young" ? "Young mode" : "Older mode"}
+                  {c.profile.pinHash ? " · 🔒 PIN" : ""}
                 </Text>
               </View>
               <View style={styles.childActions}>
@@ -198,6 +332,68 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Kid devices */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Devices</Text>
+          {devices.length === 0 ? (
+            <Text style={styles.emptyText}>No kid devices yet — pair one with "+ Pair Device" on Home.</Text>
+          ) : (
+            devices.map((d) => (
+              <View key={d.id} style={styles.deviceCard}>
+                <View style={styles.deviceHeader}>
+                  <Text style={styles.deviceName} numberOfLines={1}>
+                    📱 {d.name}
+                  </Text>
+                  <TouchableOpacity onPress={() => handleUnpair(d)} hitSlop={8}>
+                    <Text style={styles.unpairText}>Unpair</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.deviceLabel}>Who can use it</Text>
+                <View style={styles.chipRow}>
+                  {children.map((c) => {
+                    const on = d.childIds.includes(c.id);
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
+                        style={[styles.chip, on && styles.chipOn]}
+                        onPress={() => toggleDeviceChild(d, c.id)}
+                      >
+                        <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                          {c.profile.avatar} {c.profile.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {d.childIds.length > 1 ? (
+                  <>
+                    <Text style={styles.deviceLabel}>Ask "Who's watching?"</Text>
+                    <View style={styles.chipRow}>
+                      {ASK_WHO.map((o) => {
+                        const on = d.askWhoAfterMinutes === o.value;
+                        return (
+                          <TouchableOpacity
+                            key={o.value}
+                            style={[styles.chip, on && styles.chipOn]}
+                            onPress={() => setAskWho(d, o.value)}
+                          >
+                            <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                    <Text style={styles.hint}>
+                      {d.askWhoAfterMinutes === 0
+                        ? "Every time the app is opened."
+                        : `When the app has been away for ${d.askWhoAfterMinutes} min or more — and always after a restart. Kids with a PIN type it each time.`}
+                    </Text>
+                  </>
+                ) : null}
+              </View>
+            ))
+          )}
+        </View>
+
         {/* Data & Privacy */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Data & Privacy</Text>
@@ -225,11 +421,11 @@ export default function SettingsScreen() {
         visible={viewingChildId !== null}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setViewingChildId(null)}
+        onRequestClose={closeViewing}
       >
         <SafeAreaView style={styles.modal}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setViewingChildId(null)}>
+            <TouchableOpacity onPress={closeViewing}>
               <Text style={styles.modalCancel}>Cancel</Text>
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Viewing rules</Text>
@@ -266,6 +462,48 @@ export default function SettingsScreen() {
                 {viewing.minWatchSeconds !== 0
                   ? " To get them out sooner, use Hide this video or End Session on Home."
                   : ""}
+              </Text>
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Profile PIN {viewingChildHasPin ? "· 🔒 on" : ""}</Text>
+              {pinStep ? (
+                <>
+                  <Text style={styles.hint}>
+                    {pinStep === "enter" ? `Type a new ${PIN_LENGTH}-digit PIN` : "Type it again"}
+                  </Text>
+                  <TextInput
+                    style={styles.pinInput}
+                    value={pinInput}
+                    onChangeText={handlePinInput}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    maxLength={PIN_LENGTH}
+                    autoFocus
+                    editable={!savingPin}
+                  />
+                  <TouchableOpacity onPress={() => setPinStep(null)}>
+                    <Text style={styles.pinLink}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <View style={styles.pinRow}>
+                  <TouchableOpacity style={styles.childActionBtn} onPress={() => setPinStep("enter")}>
+                    <Text style={styles.childActionText}>{viewingChildHasPin ? "Change PIN" : "Set a PIN"}</Text>
+                  </TouchableOpacity>
+                  {viewingChildHasPin ? (
+                    <TouchableOpacity
+                      style={[styles.childActionBtn, styles.childActionBtnDanger]}
+                      onPress={handleRemovePin}
+                    >
+                      <Text style={styles.childActionTextDanger}>Remove PIN</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              )}
+              <Text style={styles.hint}>
+                On a device more than one child uses, {viewingChildName} types it after picking their profile —
+                so a younger sibling can't watch with {viewingChildName}'s settings. Forgotten? Change it here.
               </Text>
             </View>
           </ScrollView>
@@ -352,6 +590,31 @@ const styles = StyleSheet.create({
   childActionBtnDanger: { backgroundColor: "#FFEBEE" },
   childActionText: { fontSize: 13, fontWeight: "600", color: "#6C63FF" },
   childActionTextDanger: { fontSize: 13, fontWeight: "600", color: "#FF5252" },
+
+  emptyText: { fontSize: 14, color: "#888", lineHeight: 20 },
+  deviceCard: { backgroundColor: "#fff", borderRadius: 14, padding: 16, marginBottom: 10 },
+  deviceHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  deviceName: { fontSize: 16, fontWeight: "700", color: "#1A1A2E", flex: 1, paddingRight: 12 },
+  unpairText: { fontSize: 14, fontWeight: "600", color: "#FF5252" },
+  deviceLabel: { fontSize: 13, fontWeight: "700", color: "#555", marginTop: 10, marginBottom: 8 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: "#F0F0F7" },
+  chipOn: { backgroundColor: "#6C63FF" },
+  chipText: { fontSize: 14, fontWeight: "600", color: "#555" },
+  chipTextOn: { color: "#fff" },
+  pinRow: { flexDirection: "row", gap: 8, marginBottom: 4 },
+  pinInput: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E8E8F0",
+    padding: 14,
+    fontSize: 28,
+    letterSpacing: 16,
+    textAlign: "center",
+    marginVertical: 8,
+  },
+  pinLink: { fontSize: 15, color: "#888", textAlign: "center", paddingVertical: 8 },
   addChildBtn: {
     backgroundColor: "#fff",
     borderRadius: 14,

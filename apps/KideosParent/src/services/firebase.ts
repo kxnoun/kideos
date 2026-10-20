@@ -12,6 +12,7 @@ import appleAuth from "@invertase/react-native-apple-authentication";
 import type {
   ValueFilters,
   ChildProfile,
+  KidDevice,
   WhitelistedChannel,
   VideoVerdict,
   WeeklyDigest,
@@ -474,14 +475,18 @@ export function subscribeToDigests(
 
 // ─── Pairing ─────────────────────────────────────────────────
 
+export const DEFAULT_ASK_WHO_MINUTES = 5;
+
+// Claims the code shown on the kid device and records which children may use it
+// (users/{p}/kidDevices/{deviceUid} — the rules only let that device read those children).
 export async function claimPairingCode(
   code: string,
   parentId: string,
-  childId: string,
-  childName: string,
-  childAge: number
+  childIds: string[],
+  deviceName: string
 ): Promise<void> {
-  const ref = firestore().doc(`pairingCodes/${code.toUpperCase()}`);
+  if (childIds.length === 0) throw new Error("Pick at least one child.");
+  const ref = firestore().doc(`pairingCodes/${code.trim().toUpperCase()}`);
   const snap = await ref.get();
 
   if (!snap.exists()) throw new Error("Invalid code. Please try again.");
@@ -493,15 +498,73 @@ export async function claimPairingCode(
   if (expiresAt && expiresAt < new Date()) {
     throw new Error("This code has expired. Ask the child to generate a new one.");
   }
+  const deviceUid = data.deviceUid as string | undefined;
+  if (!deviceUid) throw new Error("Update the Kideos app on the child's device, then try again.");
 
-  await ref.update({
+  const batch = firestore().batch();
+  batch.update(ref, {
     claimed: true,
     parentId,
-    childId,
-    childName,
-    childAge,
+    childIds,
     claimedAt: firestore.FieldValue.serverTimestamp(),
   });
+  // merge: pairing an already-known device again keeps its settings
+  batch.set(
+    firestore().doc(`users/${parentId}/kidDevices/${deviceUid}`),
+    {
+      name: deviceName.trim() || (typeof data.deviceName === "string" && data.deviceName) || "Kid device",
+      childIds,
+      askWhoAfterMinutes: DEFAULT_ASK_WHO_MINUTES,
+      pairedAt: firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  await batch.commit();
+}
+
+// ─── Kid devices ─────────────────────────────────────────────
+
+export function subscribeToKidDevices(parentId: string, onUpdate: (devices: KidDevice[]) => void): () => void {
+  return firestore()
+    .collection(`users/${parentId}/kidDevices`)
+    .onSnapshot(
+      (snap) =>
+        onUpdate(
+          snap.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              name: data.name ?? "Kid device",
+              childIds: Array.isArray(data.childIds) ? data.childIds : [],
+              askWhoAfterMinutes:
+                typeof data.askWhoAfterMinutes === "number" ? data.askWhoAfterMinutes : DEFAULT_ASK_WHO_MINUTES,
+              pairedAt: data.pairedAt,
+              movedOver: data.movedOver === true,
+            };
+          })
+        ),
+      (err) => console.warn("[kidDevices] listener error:", err)
+    );
+}
+
+export async function updateKidDevice(
+  parentId: string,
+  deviceUid: string,
+  updates: Partial<Pick<KidDevice, "name" | "childIds" | "askWhoAfterMinutes">>
+): Promise<void> {
+  await firestore().doc(`users/${parentId}/kidDevices/${deviceUid}`).update(updates);
+}
+
+// The device loses access right away and goes back to its pairing screen
+export async function unpairKidDevice(parentId: string, deviceUid: string): Promise<void> {
+  await firestore().doc(`users/${parentId}/kidDevices/${deviceUid}`).delete();
+}
+
+// Profile PIN: store only the hash (null = no PIN)
+export async function setChildPinHash(parentId: string, childId: string, pinHash: string | null): Promise<void> {
+  await firestore()
+    .doc(`users/${parentId}/children/${childId}`)
+    .update({ pinHash: pinHash ?? firestore.FieldValue.delete() });
 }
 
 // ─── Data deletion ───────────────────────────────────────────

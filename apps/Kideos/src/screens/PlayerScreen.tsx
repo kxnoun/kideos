@@ -242,7 +242,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   };
   const blocked = () => owed() > 0;
   const save = () =>
-    saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current, startedAt: startedAtRef.current });
+    saveUnfinished(childId, { video, position: lastPosRef.current, played: playedRef.current, startedAt: startedAtRef.current });
 
   const flash = useCallback((text: string) => {
     setMessage(text);

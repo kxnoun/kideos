@@ -104,14 +104,35 @@ Age defaults: `AGE_TABLE` in `prefs.ts`. Old (v1) saved filters are converted by
 otherwise → tabs (Home, Channels, Digest, Settings). Store flags `inOnboarding` / `childrenLoaded` prevent
 mid-onboarding stack swaps and onboarding flashes.
 
-### Pairing the kid's device
-Kid app signs in anonymously (it waits for auth before rendering anything — Firestore listeners started
-earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars) including its
-→ parent enters the code on Home → `claimPairingCode` marks it claimed with `parentId`/`childId` → kid app
-sees the update and saves the session in AsyncStorage (`useSession`). To unpair: clear app data
-(`adb shell pm clear com.kideos.app`) and pair again.
-⚠️ Kid paths in the rules allow **any signed-in device** (`isKid()` = signed in). Device binding
-(`kidDeviceUids`) was built on Oct 17 and reverted the same day — see backlog → Security.
+### Pairing the kid's device — one device, several kids (Oct 20)
+A device is paired to the **family**; `users/{p}/kidDevices/{deviceUid}` (doc id = the kid app's anonymous
+UID) says which children use it: `{ name, childIds, askWhoAfterMinutes, pairedAt }`.
+1. Kid app signs in anonymously (it waits for auth before rendering anything — Firestore listeners started
+   earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars) with its
+   `deviceUid` and `deviceName` (e.g. "OnePlus A6013").
+2. Parent: Home → **+ Pair Device** → code, **who will use this device** (checkboxes) and an optional name →
+   `claimPairingCode` claims the code (`parentId`, `childIds`) and writes the `kidDevices` doc in one batch.
+3. Kid app sees the claim, saves `{parentId, paired, version: 2}` (AsyncStorage, `useSession`), then reads
+   its `kidDevices` doc and each child's doc live.
+
+**Who's watching?** (kid app `WhoScreen`, only when 2+ children use the device): big avatar tiles; a child
+with a **profile PIN** (parent: Settings → child → Viewing → Profile PIN; only a SHA-256 `pinHash` on the
+child doc — `src/pin.ts`, copied in both apps) types it on a number pad (5 wrong → 30 s wait). Asked after a
+**full restart** always, and when the app has been away ≥ `askWhoAfterMinutes` (parent: Settings → Devices →
+Ask "Who's watching?": every time / 1 / 5 / 10 / 20 / 30 min; default 5) — `src/gate.ts`, kept in memory
+so closing and reopening the app within the time keeps the same child. The avatar on the feed (and a
+button on Time's up) switches profile. Per child on the device: layout (age), videos, viewing rules, owed
+video (`@kideos_unfinished:{childId}`), ✓s (`@kideos_watched:{childId}`), End Session.
+
+**Device binding (rules):** `isKid(p, c)` = the caller's `kidDevices/{uid}` exists and lists `c`. Kid devices
+can read only their own children (child doc, whitelist, verdicts, session) and write `nowPlaying` / watch
+sessions for them. **Settings → Devices** (parent): change who uses each device, the ask-again time, or
+**Unpair** (deletes the doc → the device loses access at once and returns to its pairing screen).
+Deleting a child removes it from every device (`deleteChildData` → `removeChildFromDevices`).
+
+**Devices paired before Oct 20, 2026** (one saved `{parentId, childId}`, no `kidDevices` doc): the new kid app
+writes `deviceMigrations/{uid}` once; **`onDeviceMigration`** (`kidDevices.ts`) moves it over if that parent
+claimed a pairing code for that child (accepted until Dec 31, 2026), else `status: "refused"` → pair again.
 
 ### Checking a channel before adding it
 Channels screen "+" (and onboarding step 3) → the parent types a URL/@handle → **Check & Add** → callable
@@ -343,7 +364,8 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | Path | Contents | Written by | Read by |
 |---|---|---|---|
 | `users/{p}` | parent profile (email, createdAt) | parent app | parent |
-| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing.minWatchSeconds`) | parent app | parent, signed-in kid devices |
+| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing.minWatchSeconds`, `pinHash`) | parent app | parent, kid devices paired to this child |
+| `users/{p}/kidDevices/{deviceUid}` | a kid device: `name`, `childIds`, `askWhoAfterMinutes`, `pairedAt`, `movedOver` | parent app (pair / Settings → Devices), `onDeviceMigration` | parent, that device |
 | `…/children/{c}/dismissedSuggestions/{ch}` | "Not for us" on a suggested channel | parent | parent |
 | `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | parent, functions |
 | `…/children/{c}/whitelistedChannels/{ch}` | name, thumbnail, `seedingStatus` pending/ready/error, `videoCount` | functions (create), parent (delete) | parent, kid |
@@ -353,7 +375,8 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `…/children/{c}/currentSession/nowPlaying·parentCommand·playSignal` | live session (`nowPlaying.paused`) + remote control (`pause`/`play`/`stop`; last `stop` = kid app locked) | kid / parent / function | both |
 | `…/children/{c}/suggestions/{id}` | AI channel suggestions + `parentResponse` | functions | parent |
 | `…/children/{c}/digests/{week}` | weekly digest | functions | *(parent reads the wrong path — backlog)* |
-| `pairingCodes/{code}` | pairing handshake: `claimed`, `parentId`, `childId` | kid (create), parent (claim) | anyone |
+| `pairingCodes/{code}` | pairing handshake: `deviceUid`, `deviceName`, `claimed`, `parentId`, `childIds` (old codes: `childId`) | kid (create, own UID), parent (claim as themselves) | signed-in users |
+| `deviceMigrations/{deviceUid}` | an old one-child device asking to be moved over (`parentId`, `childId`) + `status` | kid (create, own UID), `onDeviceMigration` | that device |
 | `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata, `longSeededAt` / `longPageToken` / `longExhausted` (long-video seeding); video stubs with `kind` (long / short; absent = mixed list) (`approved` field is legacy) | functions | kid (metadata), functions |
 | `channelCatalog/{ch}` | shared channel profile for suggestions (compact video profiles, overview, topics) | functions | functions only |
 | `channelChecks/{ch}` | channel check made once before the first add (`CHECK_VERSION`): verdict, reputation + sources, audience age, full channel profile (every rating with evidence and source) | functions | functions only (returned via `checkChannel`) |
@@ -363,8 +386,8 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `triggerEvents/{eventId}` | dedupe markers for at-least-once triggers | functions | functions only |
 | `videoAnalysisCache/…` | **legacy** (pre-profile verdict cache), unused — safe to delete | — | — |
 
-Rules: `firestore.rules`. Kid devices (any signed-in device — binding reverted) can read a child's whitelist,
-verdicts and session, write `nowPlaying` and watch sessions; parents own
+Rules: `firestore.rules` (tests: `tests/rules/`). Kid devices can read only the children their `kidDevices`
+doc lists (child doc, whitelist, verdicts, session) and write `nowPlaying` and watch sessions for them; parents own
 everything under `users/{their uid}`; server-only collections are default-deny. Indexes: `firestore.indexes.json` (notably
 `videoVerdicts: approved ASC, publishedAt DESC` for the kid feed).
 
@@ -388,18 +411,20 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `channelCatalog.ts` | Suggested channels: `buildCatalogEntry` (shared channel profile from analyzed videos — also the source of the channel check's video floors), `scoreChannel`, `getChannelSuggestions` callable |
 | `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
 | `reprofile.ts` | `reprofileOutdated` (nightly 04:00 UTC, or Force run in Cloud Scheduler): old-version profiles → current, cached transcripts only |
-| `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` |
+| `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` (also removes the child from every kid device) |
+| `kidDevices.ts` | `onDeviceMigration` (moves devices paired before Oct 20, 2026 over to `kidDevices`), `removeChildFromDevices` |
 | `types.ts` | Firestore types (`ContentProfile`, `VideoVerdict`, `ValueFilters`, …) |
 
 ## Apps
 
-**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Time's up;
-reopens a video still owed), `src/viewing.ts` (viewing rules, the owed video in AsyncStorage),
+**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / move-over / Who's watching / Feed /
+Player / Time's up; reopens a video still owed), `screens/WhoScreen.tsx` (profile tiles + PIN pad), `gate.ts`
+(when to ask again), `pin.ts` (PIN hash, copied in the parent app), `src/viewing.ts` (viewing rules, the owed video in AsyncStorage),
 `hooks/useSession.ts` (paired session in AsyncStorage), `theme.ts` (colours, fonts, `useLayout`, little/big
 mode), `watched.ts` (✓ stickers), `components/Tap.tsx` (press feedback) · `VideoTile.tsx`,
 `screens/PairingScreen.tsx`, `screens/FeedScreen.tsx` (little: bubbles + strip; big: shelves, collapsing
 header, channel pages), `screens/PlayerScreen.tsx` (end card), `services/firebase.ts`
-(`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`, `subscribeToChild`, `subscribeToPlaySignal`,
+(`subscribeToKidDevice`, `requestDeviceMigration`, `subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`, `subscribeToChild`, `subscribeToPlaySignal`,
 `writeNowPlaying`, watch sessions), `device.ts` (landscape lock + hidden system bars, Android native module
 `KideosWindowModule.kt`; `MainActivity` hides the bars). Fonts (Fredoka, Nunito) in `assets/fonts` + Android
 `android/app/src/main/assets/fonts`. Design notes: [kid-app-design.md](kid-app-design.md).

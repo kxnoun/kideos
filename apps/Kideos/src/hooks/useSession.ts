@@ -3,12 +3,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { ChildSession } from "../types";
+import type { StoredSession } from "../types";
 
 const SESSION_KEY = "@kideos_session";
 
 export function useSession() {
-  const [session, setSession] = useState<ChildSession | null>(null);
+  const [session, setSession] = useState<StoredSession | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export function useSession() {
     });
   }, []);
 
-  const saveSession = useCallback(async (s: ChildSession) => {
+  const saveSession = useCallback(async (s: StoredSession) => {
     await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(s));
     setSession(s);
   }, []);

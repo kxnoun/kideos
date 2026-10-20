@@ -7,23 +7,18 @@ What's next, in rough priority order. Update this file as things land.
 1. **Compilations switch** — waiting for the sister's examples of the compilations she means (Ms Rachel's
    "+ MORE Nursery Rhymes" ones are fine). Likely reupload channels stitching others' clips ("BEST Peppa Pig
    moments 3 HOURS"). Needs a profile field → one `PROFILE_VERSION` bump.
-2. **Several kids on one device** (agreed Oct 20): pairing links the device to the family (parent picks which
-   children use it), a "Who's watching?" screen, optional 4-digit PIN per profile (so a younger sibling
-   can't use an older one's looser settings), "Switch profile" in the kid app; remote control / history
-   stay per child.
-3. **Kid player: standard YouTube player + a grown-up gate** (agreed Oct 18) instead of hiding YouTube's
+2. **Kid player: standard YouTube player + a grown-up gate** (agreed Oct 18) instead of hiding YouTube's
    buttons (`HIDE_IN_PLAYER`, against YouTube's terms — see Security → kid player): links (share, Watch on
    YouTube, More videos, title) work again but first ask a grown-up question / passcode, then open the
    YouTube app. Apple *requires* a parental gate before links leave a Kids-category app. Plus a short
    "lock your kid's phone to Kideos" guide in parent setup (Guided Access on iPhone, screen pinning on
    Android — free, built in).
-4. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
+3. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
    app already writes `watchHistory` sessions (kept 90 days); there's just no screen for them.
-5. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
+4. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
    channels, shown/hidden counts. Today it sends a child's watch history to OpenAI — avoid that (COPPA:
    children's data to a third party). In-app screen only, no push.
-6. **Redo device binding** (see Security).
-7. **Compliance pack before launch** — see section 7.
+5. **Compliance pack before launch** — see section 7.
 
 Smaller follow-ups:
 - **Clean up a removed channel's results**: removing a channel keeps its `videoVerdicts` (hidden in the
@@ -91,12 +86,11 @@ analyse 500 channels with a prompt we're about to change.
 ## 3. Security
 
 - `pairingCodes`: expired codes are never deleted, and there's no rate limiting on creating/claiming.
-- **Kid devices aren't bound to their child.** Any signed-in device can read any child's whitelist,
-  verdicts and session if it knows the IDs. Binding (`kidDeviceUids` on the child, `isKid()` in the rules,
-  `deviceUid` in the pairing code) was built Oct 17 and reverted the same day: the parent app's onboarding
-  bug (below, fixed) made it look broken, and existing pairings need a re-pair when it ships. Redo it in a
-  calm moment: the rules + `tests/rules/` are in git history (commit bdf672f), plus a "paired devices" list
-  in the parent app so it can be managed without the console.
+- **Device binding is back (Oct 20)** with several kids per device (`kidDevices`, architecture → Pairing).
+  Old one-child pairings move over by themselves until **Dec 31, 2026** (`onDeviceMigration`, `MIGRATION_CUTOFF`)
+  — after that, remove the migration (rule, function, kid-app code) and old devices re-pair.
+- The profile PIN is 4 digits checked on the kid device against a hash it can read — a sibling lock, not
+  security (5 wrong → 30 s wait, in memory only).
 
 - **Kid player — decide before launch.** Inside YouTube's player we hide the share button, the YouTube
   logo / "Watch on YouTube" button and "More videos" (`HIDE_IN_PLAYER` in
@@ -105,7 +99,7 @@ analyse 500 channels with a prompt we're about to change.
   (controls, fullscreen, skip ad, title) is YouTube's as normal. **Changing the player is against YouTube's
   terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
   explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
-  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #3). Also: "Made for
+  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #2). Also: "Made for
   Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
   library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
   The title, channel name and channel picture are untappable; YouTube links never open (web view level
@@ -199,7 +193,7 @@ COPPA's amended rule is in force since Apr 22, 2026:
 YouTube API Services policies (reviewed Oct 18 with Adam — he accepts the risk at 100–200 families, but
 these are the known gaps):
 - **Player changes** — hiding share / YouTube logo / More videos and blocking links breaks "don't modify or
-  block the standard player". Plan: Next up #3 (standard player + grown-up gate).
+  block the standard player". Plan: Next up #2 (standard player + grown-up gate).
 - **"Safe / suitable" claims and custom scores** — the policies forbid claiming a video/channel is safe or
   suitable, custom channel scores, and inferring content categories. Ratings are our own analysis of what's
   said and shown; word them as findings ("mentions gambling, shown once"), not verdicts ("safe"). Adam
@@ -287,4 +281,5 @@ Oct 17 (merged as `videos-and-suggestions`):
   transcripts; first run: 149 videos, no Supadata).
 - Deleting a child is recursive; fixed parent onboarding looping back to "Who is this for?" after Done.
 - Device binding built, then reverted (see Security) — so a kid device still doesn't notice its child was
-  deleted until it's re-paired.
+  deleted until it's re-paired. *(Fixed Oct 20: binding is back; deleting a child removes it from devices.)*
+- **Several kids on one device** (Oct 20): Who's watching?, PINs, Settings → Devices, per-child state.

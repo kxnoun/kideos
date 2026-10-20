@@ -18,6 +18,9 @@
 // Sizes come from the window (useLayout), so phone / tablet / rotation / split screen
 // all lay out properly.
 //
+// On a device more than one child uses, the child's avatar (little: the rounded square
+// on the left; big: next to "Hi Simon") goes back to "Who's watching?" (onSwitchProfile).
+//
 // Data flow:
 //   1. Subscribe to whitelisted channels
 //   2. Subscribe to this child's videoVerdicts where approved == true,
@@ -59,6 +62,7 @@ interface Props {
   profile: KidProfile;
   // pool = the videos "up next" can come from (same channel, same kind)
   onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[]) => void;
+  onSwitchProfile?: () => void; // only on devices with 2+ children
 }
 
 interface Shelf {
@@ -72,7 +76,7 @@ interface Shelf {
   channelId?: string;
 }
 
-export default function FeedScreen({ session, profile, onVideoPress }: Props) {
+export default function FeedScreen({ session, profile, onVideoPress, onSwitchProfile }: Props) {
   const [channels, setChannels] = useState<WhitelistedChannel[]>([]);
   const [videos, setVideos] = useState<ApprovedVideo[]>([]);
   const [openChannelId, setOpenChannelId] = useState<string | null>(null);
@@ -178,7 +182,14 @@ export default function FeedScreen({ session, profile, onVideoPress }: Props) {
     <View style={styles.screen}>
       {statusBar}
       {mode === "little" ? (
-        <LittleHome shelves={shelves} profile={profile} layout={layout} channelById={channelById} onPlay={play} />
+        <LittleHome
+          shelves={shelves}
+          profile={profile}
+          layout={layout}
+          channelById={channelById}
+          onPlay={play}
+          onSwitchProfile={onSwitchProfile}
+        />
       ) : (
         <BigHome
           shelves={shelves}
@@ -187,6 +198,7 @@ export default function FeedScreen({ session, profile, onVideoPress }: Props) {
           channelById={channelById}
           onPlay={play}
           onOpenChannel={setOpenChannelId}
+          onSwitchProfile={onSwitchProfile}
         />
       )}
     </View>
@@ -201,12 +213,14 @@ function LittleHome({
   layout,
   channelById,
   onPlay,
+  onSwitchProfile,
 }: {
   shelves: Shelf[];
   profile: KidProfile;
   layout: Layout;
   channelById: Map<string, WhitelistedChannel>;
   onPlay: (v: ApprovedVideo) => void;
+  onSwitchProfile?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();
@@ -227,9 +241,22 @@ function LittleHome({
   return (
     <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View style={styles.band}>
-        {/* Who's watching — a picture, not a button */}
-        <View style={[styles.me, { paddingLeft: margin, height: bubble }]} accessible accessibilityLabel={profile.name}>
-          <Text style={{ fontSize: Math.round(bubble * 0.55) }}>{profile.avatar || "🙂"}</Text>
+        {/* Who's watching — just a picture; on a shared device a rounded square (not a
+            round bubble) that goes back to "Who's watching?" */}
+        <View style={[styles.me, { paddingLeft: margin, height: bubble }]}>
+          {onSwitchProfile ? (
+            <Tap
+              style={[styles.meSwitch, { width: bubble * 0.82, height: bubble * 0.82 }]}
+              onPress={onSwitchProfile}
+              accessibilityLabel={`${profile.name} — switch who's watching`}
+            >
+              <Text style={{ fontSize: Math.round(bubble * 0.46) }}>{profile.avatar || "🙂"}</Text>
+            </Tap>
+          ) : (
+            <Text style={{ fontSize: Math.round(bubble * 0.55) }} accessibilityLabel={profile.name}>
+              {profile.avatar || "🙂"}
+            </Text>
+          )}
           <View style={[styles.meDivider, { height: bubble * 0.7 }]} />
         </View>
         <ScrollView
@@ -308,6 +335,7 @@ function BigHome({
   channelById,
   onPlay,
   onOpenChannel,
+  onSwitchProfile,
 }: {
   shelves: Shelf[];
   profile: KidProfile;
@@ -315,6 +343,7 @@ function BigHome({
   channelById: Map<string, WhitelistedChannel>;
   onPlay: (v: ApprovedVideo) => void;
   onOpenChannel: (channelId: string) => void;
+  onSwitchProfile?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();
@@ -436,9 +465,22 @@ function BigHome({
         style={[styles.header, { paddingTop: insets.top, height: insets.top + greetH + BAR_H, transform: [{ translateY: headerY }] }]}
       >
         <Animated.View style={[styles.greetRow, { height: greetH, paddingHorizontal: margin, opacity: greetOpacity }]}>
-          <View style={styles.greetAvatar}>
-            <Text style={{ fontSize: 22 }}>{profile.avatar || "🙂"}</Text>
-          </View>
+          {onSwitchProfile ? (
+            <Tap
+              style={[styles.greetAvatar, styles.greetAvatarSwitch]}
+              onPress={onSwitchProfile}
+              accessibilityLabel={`${profile.name} — switch who's watching`}
+            >
+              <Text style={{ fontSize: 24 }}>{profile.avatar || "🙂"}</Text>
+              <View style={styles.switchBadge}>
+                <Text style={styles.switchBadgeText}>⇄</Text>
+              </View>
+            </Tap>
+          ) : (
+            <View style={styles.greetAvatar}>
+              <Text style={{ fontSize: 22 }}>{profile.avatar || "🙂"}</Text>
+            </View>
+          )}
           <Text style={[typo.greeting, styles.greetText, { fontSize: layout.phone ? 26 : 32 }]} numberOfLines={1}>
             {profile.name ? `Hi ${profile.name} 👋` : "Hi there 👋"}
           </Text>
@@ -551,6 +593,7 @@ const styles = StyleSheet.create({
   band: { flexDirection: "row", alignItems: "flex-start" },
   me: { flexDirection: "row", alignItems: "center", marginTop: 16, paddingRight: 8 },
   meDivider: { width: 2, borderRadius: 1, backgroundColor: colors.surfacePressed, marginLeft: 14 },
+  meSwitch: { borderRadius: 20, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" },
   bubble: {
     alignItems: "center",
     justifyContent: "center",
@@ -573,6 +616,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 12,
   },
+  greetAvatarSwitch: { width: 48, height: 48, borderRadius: 24 },
+  switchBadge: {
+    position: "absolute",
+    right: -4,
+    bottom: -4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.focus,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  switchBadgeText: { color: colors.ink, fontFamily: fonts.bodyHeavy, fontSize: 13, lineHeight: 16 },
   greetText: { color: colors.text, flexShrink: 1 },
   chip: {
     height: 48,

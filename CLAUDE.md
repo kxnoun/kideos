@@ -41,8 +41,9 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
 - **Channels are seeded with 40 long videos + 10 Shorts** from YouTube's undocumented `UULF…` / `UUSH…`
   playlists (fallback: the mixed uploads list). If those ever stop working, seeding silently falls back. Tune with the
   `Not suggested: … —` log lines, not by guessing; a wrong rating is a prompt problem, not a rule problem.
-- Device binding (`kidDeviceUids`) was reverted — kid paths allow any signed-in device for now. Redo it
-  carefully (backlog → Security); `tests/rules/` still describes the binding version.
+- **Kid devices are bound** (`users/{p}/kidDevices/{uid}.childIds`, `isKid()` in the rules) — anything the kid
+  app reads or writes under a child must be allowed by `isKid`. Run `tests/rules/` after rule changes.
+- **`apps/Kideos/src/pin.ts` is copied to `apps/KideosParent/src/pin.ts`** — change both (identical).
 - **Kid app UI: use `src/theme.ts`** (colours, fonts, `useLayout` sizes, little/big mode) and
   `components/Tap` / `VideoTile` — no hard-coded colours, `Dimensions.get` or `TouchableOpacity`. Never white
   text on Sunset Orange (use Ink). Design rules: docs/kid-app-design.md.
