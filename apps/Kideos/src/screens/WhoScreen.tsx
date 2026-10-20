@@ -13,7 +13,7 @@ import { Animated, StatusBar, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, fonts, useLayout } from "../theme";
 import { PIN_LENGTH, hashPin } from "../pin";
-import Tap, { useReduceMotion } from "../components/Tap";
+import Tap, { LIT, useReduceMotion } from "../components/Tap";
 import BackButton from "../components/BackButton";
 import type { DeviceChild } from "../types";
 
@@ -32,6 +32,7 @@ interface Props {
 
 export default function WhoScreen({ kids, locked, onChoose }: Props) {
   const [pinFor, setPinFor] = useState<DeviceChild | null>(null);
+  const [pressed, setPressed] = useState<string | null>(null); // lights that tile's square
   const layout = useLayout();
   const insets = useSafeAreaInsets();
 
@@ -63,6 +64,9 @@ export default function WhoScreen({ kids, locked, onChoose }: Props) {
           <Tap
             key={k.id}
             style={styles.tileWrap}
+            highlight={false}
+            onPressIn={() => setPressed(k.id)}
+            onPressOut={() => setTimeout(() => setPressed((p) => (p === k.id ? null : p)), 140)}
             onPress={() => (k.pinHash ? setPinFor(k) : onChoose(k.id))}
             accessibilityLabel={`${k.name}${k.pinHash ? ", needs a PIN" : ""}${locked[k.id] ? ", time's up" : ""}`}
           >
@@ -73,6 +77,7 @@ export default function WhoScreen({ kids, locked, onChoose }: Props) {
               ]}
             >
               <Text style={{ fontSize: tile * 0.52 }}>{k.avatar || "🙂"}</Text>
+              {pressed === k.id ? <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.tileLit]} /> : null}
               {k.pinHash ? (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>🔒</Text>
@@ -215,6 +220,7 @@ const styles = StyleSheet.create({
   tiles: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center" },
   tileWrap: { alignItems: "center" },
   tile: { borderRadius: 32, alignItems: "center", justifyContent: "center" },
+  tileLit: { borderRadius: 32, backgroundColor: LIT },
   badge: {
     position: "absolute",
     top: -8,

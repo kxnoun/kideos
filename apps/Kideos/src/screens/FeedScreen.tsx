@@ -246,6 +246,7 @@ function LittleHome({
         <View style={[styles.me, { paddingLeft: margin, height: bubble }]}>
           {onSwitchProfile ? (
             <Tap
+              highlight={false}
               style={[styles.meSwitch, { width: bubble * 0.82, height: bubble * 0.82 }]}
               onPress={onSwitchProfile}
               accessibilityLabel={`${profile.name} — switch who's watching`}
@@ -303,7 +304,7 @@ function LittleHome({
 
 function Bubble({ shelf, size, selected, onPress }: { shelf: Shelf; size: number; selected: boolean; onPress: () => void }) {
   return (
-    <Tap onPress={onPress} style={{ width: size + 12, alignItems: "center" }} accessibilityLabel={shelf.label} accessibilityState={{ selected }}>
+    <Tap onPress={onPress} highlight={false} style={{ width: size + 12, alignItems: "center" }} accessibilityLabel={shelf.label} accessibilityState={{ selected }}>
       <View
         style={[
           styles.bubble,
@@ -348,14 +349,28 @@ function BigHome({
   const insets = useSafeAreaInsets();
   const watched = useWatched();
   const { margin, gap, rowTileW, rowTileH, shortTileW, shortTileH, scale } = layout;
-  const greetH = layout.phone ? 48 : 60;
+  // Breathing room above "Hi Simon" and between it and the chip bar
+  const greetH = layout.phone ? 72 : 88;
+  const avatar = layout.phone ? 52 : 60;
   const topPad = insets.top + greetH + BAR_H + 8;
 
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const sectionY = useRef<Record<string, number>>({});
-  const [active, setActive] = useState(shelves[0]?.key);
+  const [active, setActive] = useState<string | undefined>(shelves[0]?.key);
   const activeRef = useRef(active);
+  const setActiveKey = (key: string | undefined) => {
+    if (key === activeRef.current) return;
+    activeRef.current = key;
+    setActive(key);
+  };
+  // A chip was tapped: that chip stays lit while the list scrolls there (instead of
+  // every shelf on the way lighting up), until the kid scrolls by hand
+  const jumpedTo = useRef<string | null>(null);
+  const viewportH = useRef(0);
+  const contentH = useRef(0);
+  const chipBar = useRef<ScrollView>(null);
+  const chipX = useRef<Record<string, number>>({});
 
   // Where a section's top lands just under the pinned bar
   const targetY = useCallback(
@@ -365,22 +380,32 @@ function BigHome({
 
   // Highlight the chip for the shelf currently under the bar
   const onScrollJS = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (jumpedTo.current) return;
     const value = e.nativeEvent.contentOffset.y;
     let current = shelves[0]?.key;
     shelves.forEach((s, i) => {
       if (sectionY.current[s.key] !== undefined && targetY(s.key, i) <= value + 12) current = s.key;
     });
-    if (current !== activeRef.current) {
-      activeRef.current = current;
-      setActive(current);
-    }
+    // At the very bottom the last shelves can't reach the bar — the last one counts
+    if (contentH.current && value >= contentH.current - viewportH.current - 8) current = shelves[shelves.length - 1]?.key;
+    setActiveKey(current);
   };
+
+  // Keep the lit chip in view in the chip bar
+  useEffect(() => {
+    const x = active ? chipX.current[active] : undefined;
+    if (x !== undefined) chipBar.current?.scrollTo({ x: Math.max(0, x - margin - 48), animated: true });
+  }, [active, margin]);
 
   const headerY = scrollY.interpolate({ inputRange: [0, greetH], outputRange: [0, -greetH], extrapolate: "clamp" });
   const greetOpacity = scrollY.interpolate({ inputRange: [0, greetH * 0.7], outputRange: [1, 0], extrapolate: "clamp" });
   const lineOpacity = scrollY.interpolate({ inputRange: [greetH * 0.7, greetH], outputRange: [0, 1], extrapolate: "clamp" });
 
-  const jump = (key: string, index: number) => scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
+  const jump = (key: string, index: number) => {
+    jumpedTo.current = key;
+    setActiveKey(key); // lights up right away
+    scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
+  };
 
   return (
     <View style={{ flex: 1, paddingLeft: insets.left, paddingRight: insets.right }}>
@@ -389,6 +414,15 @@ function BigHome({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: topPad, paddingBottom: insets.bottom + 32 }}
         scrollEventThrottle={16}
+        onScrollBeginDrag={() => {
+          jumpedTo.current = null; // scrolling by hand again
+        }}
+        onLayout={(e: LayoutChangeEvent) => {
+          viewportH.current = e.nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_w: number, h: number) => {
+          contentH.current = h;
+        }}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
           listener: onScrollJS,
@@ -467,18 +501,19 @@ function BigHome({
         <Animated.View style={[styles.greetRow, { height: greetH, paddingHorizontal: margin, opacity: greetOpacity }]}>
           {onSwitchProfile ? (
             <Tap
-              style={[styles.greetAvatar, styles.greetAvatarSwitch]}
+              highlight={false}
+              style={[styles.greetAvatar, { width: avatar, height: avatar, borderRadius: avatar / 2 }]}
               onPress={onSwitchProfile}
               accessibilityLabel={`${profile.name} — switch who's watching`}
             >
-              <Text style={{ fontSize: 24 }}>{profile.avatar || "🙂"}</Text>
+              <Text style={{ fontSize: Math.round(avatar * 0.55) }}>{profile.avatar || "🙂"}</Text>
               <View style={styles.switchBadge}>
                 <Text style={styles.switchBadgeText}>⇄</Text>
               </View>
             </Tap>
           ) : (
-            <View style={styles.greetAvatar}>
-              <Text style={{ fontSize: 22 }}>{profile.avatar || "🙂"}</Text>
+            <View style={[styles.greetAvatar, { width: avatar, height: avatar, borderRadius: avatar / 2 }]}>
+              <Text style={{ fontSize: Math.round(avatar * 0.55) }}>{profile.avatar || "🙂"}</Text>
             </View>
           )}
           <Text style={[typo.greeting, styles.greetText, { fontSize: layout.phone ? 26 : 32 }]} numberOfLines={1}>
@@ -486,6 +521,7 @@ function BigHome({
           </Text>
         </Animated.View>
         <ScrollView
+          ref={chipBar}
           horizontal
           showsHorizontalScrollIndicator={false}
           style={{ height: BAR_H, flexGrow: 0 }}
@@ -497,6 +533,9 @@ function BigHome({
               <Tap
                 key={s.key}
                 style={[styles.chip, on && styles.chipOn]}
+                onLayout={(e: LayoutChangeEvent) => {
+                  chipX.current[s.key] = e.nativeEvent.layout.x;
+                }}
                 onPress={() => jump(s.key, i)}
                 accessibilityLabel={s.label}
                 accessibilityState={{ selected: on }}
@@ -620,29 +659,27 @@ const styles = StyleSheet.create({
 
   // big — header
   header: { position: "absolute", top: 0, left: 0, right: 0, backgroundColor: colors.bg, zIndex: 2 },
-  greetRow: { flexDirection: "row", alignItems: "center" },
+  greetRow: { flexDirection: "row", alignItems: "center", paddingTop: 8 },
   greetAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     backgroundColor: colors.brand,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    marginRight: 14,
   },
-  greetAvatarSwitch: { width: 48, height: 48, borderRadius: 24 },
   switchBadge: {
     position: "absolute",
-    right: -4,
-    bottom: -4,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    right: -5,
+    bottom: -5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: colors.bg,
     backgroundColor: colors.focus,
     alignItems: "center",
     justifyContent: "center",
   },
-  switchBadgeText: { color: colors.ink, fontFamily: fonts.bodyHeavy, fontSize: 13, lineHeight: 16 },
+  switchBadgeText: { color: colors.ink, fontFamily: fonts.bodyHeavy, fontSize: 14, lineHeight: 18 },
   greetText: { color: colors.text, flexShrink: 1 },
   chip: {
     height: 48,

@@ -51,6 +51,7 @@ export default function VideoTile({
   return (
     <Tap
       style={{ width }}
+      highlight={false}
       onPress={() => onPress(video)}
       accessibilityLabel={`${video.title}${video.channelName ? `, ${video.channelName}` : ""}${watched ? ", watched" : ""}`}
     >

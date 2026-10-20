@@ -10,7 +10,8 @@ The kid app's look and layout (Oct 20, 2026). Code: `apps/Kideos/src/theme.ts` (
 - **Pictures before words.** The youngest users can't read: channel pictures and emoji carry meaning;
   text is a label, never the only cue. Colour is never the only cue either (✓ on watched, emoji on chips).
 - **Big, forgiving targets.** Small hands and imprecise taps: buttons ≥ 64 pt (80 on tablets), chips 48 pt,
-  `hitSlop` 12, feedback on press-**in** (a squish), no long-press / double-tap / pull-to-refresh, video
+  `hitSlop` 12, feedback on press-**in** (a squish + a light wash over the button, shown ≥ 140 ms so quick taps
+  see it — not on thumbnails, channel bubbles or the profile switcher), no long-press / double-tap / pull-to-refresh, video
   taps debounced 600 ms (excited double taps).
 - **Calm, not sticky.** No autoplay, no infinite feed (big mode ends with "You've seen all your
   channels! 🎉"), the end of a video is a choice (Watch again / My videos / 3 more), and Time's up offers
@@ -26,7 +27,8 @@ Thresholds are Adam's call (Oct 20): little = 4 and under, big = 5+.
 |---|---|---|
 | Orientation | **Landscape only** (either way up) — portrait wasted most of the screen. | Rotates freely. |
 | Home | The child's avatar on the left — just the emoji and a divider, **no circle**, so it doesn't read as a button — then a band of round **bubbles**: ⭐ New, ⚡ Shorts, each channel's picture. Tapping a bubble swaps the **one sideways film strip** below. The strip's tiles are sized to the space actually left under the band (measured, so nothing is cut off), capped at the design size (~2.5 visible on a tablet). No vertical scrolling. Nothing in the bottom 48 pt on tablets (wrists rest there; 12 pt on phones). | **Shelves** like YouTube Kids: ✨ New (15), ⚡ Shorts (20, tall tiles), one row per channel (12 + a "See all" tile), then the end cap. |
-| Header | None — no greeting text for pre-readers. | "Hi Simon 👋" + a bar of jump-chips (one per shelf). Scrolling collapses it: the greeting fades and slides away (48–60 pt), the chip bar stays pinned (64 pt) and highlights the shelf you're on; tapping a chip scrolls to it. |
+| Header | None — no greeting text for pre-readers. | "Hi Simon 👋" + a bar of jump-chips (one per shelf). Scrolling collapses it: the greeting fades and slides away (48–60 pt), the chip bar stays pinned (64 pt) and highlights the shelf you're on; tapping a chip lights it at once and scrolls there (shelves passed on the way don't light up); the lit chip
+is kept in view in the bar. |
 | Channel page | — (the bubble *is* the channel) | "See all" → grid of everything (2–5 columns by width), big ← button. |
 | Tiles | Title only, bigger text. | Title + length. |
 
