@@ -24,10 +24,18 @@ import {
   Animated,
   PanResponder,
   Dimensions,
+  Modal,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList, SuggestedChannel } from "../../types";
-import { getChannelSuggestions, dismissSuggestion, addChannel } from "../../services/firebase";
+import {
+  getChannelSuggestions,
+  dismissSuggestion,
+  addChannel,
+  checkChannel,
+  type CheckChannelResult,
+} from "../../services/firebase";
+import ChannelReview from "../../components/ChannelReview";
 import { LEVEL_LABELS } from "../../prefs";
 import { DIM_TITLES } from "./VideosScreen";
 import { useStore } from "../../store/useStore";
@@ -41,7 +49,9 @@ export default function SuggestionsScreen({ route, navigation }: Props) {
   const user = useStore((s) => s.user);
   const [queue, setQueue] = useState<SuggestedChannel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(false); // checking the channel
+  const [review, setReview] = useState<CheckChannelResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const pan = useRef(new Animated.ValueXY()).current;
 
   const load = useCallback(async () => {
@@ -102,17 +112,36 @@ export default function SuggestionsScreen({ route, navigation }: Props) {
   const flyRef = useRef(flyOut);
   flyRef.current = flyOut;
 
+  // Same review as the Channels screen before anything is added (instant if the channel was checked before)
   const add = async (s: SuggestedChannel) => {
     if (!user) return;
     setAdding(true);
     try {
-      await addChannel(user.uid, childId, s.channelId);
-      Alert.alert("Added", `${s.name} is being added to ${childName}'s feed. Videos that fit your answers will show up in a few minutes.`);
+      const result = await checkChannel(user.uid, childId, s.channelId);
+      if (result.alreadyAdded) {
+        Alert.alert("Already added", `${s.name} is already on the list.`);
+        next();
+      } else setReview(result);
+    } catch {
+      Alert.alert("Couldn't check that channel. Check your connection and try again.");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const confirmAdd = async () => {
+    if (!user || !review) return;
+    setConfirming(true);
+    try {
+      await addChannel(user.uid, childId, review.channel.channelId);
+      const name = review.channel.name;
+      setReview(null);
+      Alert.alert("Added", `${name} is being added to ${childName}'s feed. Videos that fit your answers will show up in a few minutes.`);
       next();
     } catch {
       Alert.alert("Couldn't add that channel. Check your connection and try again.");
     } finally {
-      setAdding(false);
+      setConfirming(false);
     }
   };
 
@@ -174,6 +203,23 @@ export default function SuggestionsScreen({ route, navigation }: Props) {
           </View>
         </>
       )}
+
+      <Modal visible={!!review} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setReview(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+          <View style={{ flex: 1, padding: 24 }}>
+            <Text style={styles.heading}>Before you add it</Text>
+            {review ? (
+              <ChannelReview
+                result={review}
+                childName={childName}
+                confirming={confirming}
+                onConfirm={confirmAdd}
+                onCancel={() => setReview(null)}
+              />
+            ) : null}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -232,6 +278,28 @@ function SuggestionCard({ s, childName }: { s: SuggestedChannel; childName: stri
           <Text style={styles.hiddenText}>None of the checked videos would be hidden.</Text>
         ) : null}
       </View>
+
+      {s.check ? (
+        s.check.thingsToKnow.length ? (
+          <View style={styles.checkBox}>
+            <Text style={styles.checkTitle}>
+              ⚠️ {s.check.thingsToKnow.length} {s.check.thingsToKnow.length === 1 ? "thing" : "things"} to know (thumbnails
+              + what people say)
+            </Text>
+            {s.check.thingsToKnow.map((t, i) => (
+              <Text key={i} style={styles.checkText}>
+                • {t}
+              </Text>
+            ))}
+          </View>
+        ) : (
+          <View style={[styles.checkBox, styles.checkBoxGood]}>
+            <Text style={[styles.checkTitle, styles.checkTitleGood]}>
+              ✅ Thumbnails and what people say fit {childName}'s settings
+            </Text>
+          </View>
+        )
+      ) : null}
 
       {s.severe > 0 ? (
         <View style={styles.warnBox}>
@@ -328,6 +396,11 @@ const styles = StyleSheet.create({
   chip: { backgroundColor: "#F0F0F5", borderRadius: 12, paddingVertical: 4, paddingHorizontal: 10, marginRight: 6, marginBottom: 6 },
   chipText: { fontSize: 12, color: "#555" },
   fitBox: { backgroundColor: "#F4FBF6", borderRadius: 12, padding: 12, marginTop: 14 },
+  checkBox: { backgroundColor: "#FFF6E0", borderRadius: 12, padding: 12, marginTop: 12 },
+  checkBoxGood: { backgroundColor: "#E8F5E9" },
+  checkTitle: { fontSize: 14, fontWeight: "800", color: "#8A5A00", marginBottom: 4 },
+  checkTitleGood: { color: "#2E7D32", marginBottom: 0 },
+  checkText: { fontSize: 13, color: "#6B4600", lineHeight: 19, marginTop: 2 },
   fitTitle: { fontSize: 16, fontWeight: "800", color: "#1E7A44" },
   bar: { flexDirection: "row", height: 8, borderRadius: 4, backgroundColor: "#DDEFE3", overflow: "hidden", marginTop: 8 },
   barFill: { backgroundColor: "#2EAD5F" },

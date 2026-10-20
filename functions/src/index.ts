@@ -32,7 +32,7 @@ export { getChannelSuggestions } from "./channelCatalog";
 
 // checkChannel: before a parent adds a channel — thumbnails + reputation search (Gemini),
 // one shared report per channel, conflicts with the child's settings worked out in code
-export { checkChannel } from "./channelCheck";
+export { checkChannel, getChannelFits } from "./channelCheck";
 
 export { reprofileOutdated } from "./reprofile";
 

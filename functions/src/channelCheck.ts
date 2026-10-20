@@ -379,6 +379,39 @@ export function fitForChild(r: Omit<ChannelReport, "createdAt">, prefs: ValueFil
   return { fit, conflicts, findings };
 }
 
+// ── Fit of the channels a child already has (Channels screen) ──
+// Saved checks only (no AI): after a parent changes their settings, the Channels
+// screen shows which channels now conflict.
+
+export const getChannelFits = onCall(
+  { region: APP_CONFIG.FUNCTIONS_REGION, timeoutSeconds: 30, memory: "256MiB" },
+  async (request): Promise<{ fits: Record<string, { fit: "good" | "caution" | "not_fit"; conflicts: string[] }> }> => {
+    const { parentId, childId } = request.data as { parentId?: string; childId?: string };
+    if (!parentId || !childId) throw new HttpsError("invalid-argument", "parentId and childId are required");
+    if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
+
+    const db = getFirestore();
+    const channels = await db.collection(`users/${parentId}/children/${childId}/whitelistedChannels`).select().get();
+    if (channels.empty) return { fits: {} };
+    const ids = channels.docs.map((d) => d.id);
+    const [prefs, checks, catalogs] = await Promise.all([
+      loadValueFiltersForChild(parentId, childId),
+      db.getAll(...ids.map((id) => db.doc(`channelChecks/${id}`))),
+      db.getAll(...ids.map((id) => db.doc(`channelCatalog/${id}`))),
+    ]);
+    const fits: Record<string, { fit: "good" | "caution" | "not_fit"; conflicts: string[] }> = {};
+    ids.forEach((id, i) => {
+      const snap = checks[i];
+      if (!snap.exists || snap.data()!.version !== CHECK_VERSION) return; // never checked (added before checks existed)
+      const { createdAt: _c, ...saved } = snap.data() as ChannelReport;
+      const videos = (catalogs[i].data() as CatalogEntry | undefined)?.videos ?? [];
+      const { fit, conflicts } = fitForChild(applyVideoFloors(saved, videos), prefs);
+      fits[id] = { fit, conflicts };
+    });
+    return { fits };
+  }
+);
+
 // ── Callable ───────────────────────────────────────────────────
 
 export const checkChannel = onCall(

@@ -124,6 +124,8 @@ export interface SuggestedChannel {
   hiddenReasons: { label: string; count: number }[];
   ratings: { dim: Dim; maxLevel: number; count: number }[];
   samples: { videoId: string; title: string; thumbnail: string }[];
+  // From the channel's saved channel check (if anyone checked it): "not a fit" ones aren't suggested
+  check?: { fit: "good" | "caution"; thingsToKnow: string[]; overall: "good" | "caution" | "not_recommended" };
 }
 
 export type MainTabParamList = {

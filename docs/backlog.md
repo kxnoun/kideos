@@ -13,23 +13,18 @@ What's next, in rough priority order. Update this file as things land.
    YouTube app. Apple *requires* a parental gate before links leave a Kids-category app. Plus a short
    "lock your kid's phone to Kideos" guide in parent setup (Guided Access on iPhone, screen pinning on
    Android — free, built in).
-3. **Channel conflicts after filter changes** — a ⚠️ badge on the Channels screen next to channels whose
-   saved check conflicts with the child's *current* settings (code only, from `channelChecks/{id}` via
-   `fitForChild`; no AI).
-4. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
+3. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
    app already writes `watchHistory` sessions (kept 90 days); there's just no screen for them.
-5. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
+4. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
    channels, shown/hidden counts. Today it sends a child's watch history to OpenAI — avoid that (COPPA:
    children's data to a third party). In-app screen only, no push.
-6. **Redo device binding** (see Security).
-7. **Compliance pack before launch** — see section 7.
+5. **Redo device binding** (see Security).
+6. **Compliance pack before launch** — see section 7.
 
 Smaller follow-ups:
 - **Clean up a removed channel's results**: removing a channel keeps its `videoVerdicts` (hidden in the
   parent app since Oct 19, never in the kid feed). Delete them ~1 month after removal if the channel wasn't
   re-added (re-adding within that time keeps the parent's Hide / Show anyway choices).
-- **Channel check on the Suggestions swipe cards** too (they add directly today — those channels are
-  already analyzed, so lower priority).
 - **Tune the image-moderation thresholds** (`visualCheck.ts`) from the `visual=` numbers in real logs —
   they're a first guess, and the moderation model is trained mostly on photos (cartoons may score lower).
 - **Tune pace**: watch for calm explainers rated 3 or hyper channels rated 2; add channels to
@@ -213,6 +208,12 @@ these are the known gaps):
   exact rules), so prompt tricks can't reach other families.
 
 ## Done (Oct 2026)
+
+Oct 19 (branch `channel-check-everywhere`): every way of adding a channel shows the channel check review
+(suggested-channel cards and the older AI suggestions too); suggestions use saved channel checks ("not a
+fit" → not suggested, otherwise "things to know" on the card); the Channels screen shows "⚠️ N things to
+know" / "⛔ Not a fit with current settings" from saved checks vs current settings (`getChannelFits`). No
+new AI calls.
 
 Oct 19 (branch `cooldowns`): **minimum time on a video per child** (Settings → Viewing: "Before switching
 videos, stay at least" Off / 30 s / 1 min / 2 min / Whole). Back / Android back keep the kid on the video

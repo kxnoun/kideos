@@ -144,7 +144,15 @@ Channels screen "+" (and onboarding step 3) → the parent types a URL/@handle �
    makes; what's past the child's settings; what people say + tappable sources; thumbnail findings;
    findings from its already-checked videos. Nothing is added until the parent confirms → `addChannel`.
 
-Suggested channels (swipe cards) still add directly — those channels are already analyzed.
+Every way of adding a channel goes through this review: the Channels screen, onboarding, the suggested-
+channel swipe cards ("Add to {child}'s feed") and the older AI suggestions on the Channels tab ("✓ Add" —
+confirming marks the suggestion approved).
+
+**After adding — current settings vs saved checks:** callable **`getChannelFits`** (no AI) runs
+`fitForChild` on the saved checks of the child's channels (with video floors) against their *current*
+settings. The Channels screen calls it when the tab is opened and when the list changes, and shows "⚠️ N
+things to know" / "⛔ Not a fit with current settings" under a channel (tap → the reasons). Channels
+added before checks existed have no saved check and show nothing.
 
 ### Adding a channel → analysis
 1. Parent confirms → callable **`resolveAndAddChannel`**: `channels.list` (1 unit), creates
@@ -270,7 +278,10 @@ videos as compact profiles, top topics, and a 2–3 sentence overview (the only 
 No Supadata, no per-video AI — it reuses `videoProfiles`.
 Home → "Suggested channels" → `SuggestionsScreen` → callable **`getChannelSuggestions`**: runs
 `evaluateProfile` on every catalog video against the child's answers (pure code), skips channels already
-in the child's list or dismissed. **A suggestion vouches for the channel, so the bar is higher than for
+in the child's list or dismissed. If someone has already made a **channel check** for a channel, it's used
+too (no new AI): "not a fit" for this child → not suggested (logged `channel check: not a fit (…)`);
+otherwise the card shows its "⚠️ N things to know (thumbnails + what people say)" or "✅ Thumbnails and what
+people say fit {child}'s settings". **A suggestion vouches for the channel, so the bar is higher than for
 adding one:** ≥10 checked videos (no-transcript ones are left out — unknown, not bad), ≥75% of them fit, and
 at most 2 severe videos (3+ rule it out; 1–2 show as a ⚠ warning on the card). Severe is absolute, not
 relative to the child's strictness: the top of a ladder the child hasn't allowed (strong swearing, graphic
@@ -327,7 +338,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `analyzeVideo.ts` | Per-video pipeline: `analyzeAndTagVideo`, `reapplyFiltersForChild`, `loadValueFiltersForChild`; internal `getOrCreateProfile`, `decideForChild`, `writeVerdict`, `summarizeRatings`, `getTranscriptCached` |
 | `aiAnalysis.ts` | `generateContentProfile` (profile prompt + validation; 4 stills; floors), `paceStats`, title signals, `stillImages`, `KNOWN_STIMULATION`, `swearFloor` and regexes (code-counted swearing, God's-name exclamations, `[Music]`), `LADDER_GUIDE` (the ladder definitions, shared with the channel check — sliced from the prompt between `Ladders (0 = none` and `- framing:`, keep those markers), `checkValuesRules`, `needsValuesCheck`, `hashValuesRules`, `PROFILE_VERSION`, `MIN_USABLE_PROFILE_VERSION` |
 | `visualCheck.ts` | `moderateImages` (OpenAI image moderation on the thumbnail + 3 frames, free) and `applyVisualFloors` (its scores raise sexual / nudity / violence / self-harm / junk; never lower) |
-| `channelCheck.ts` | `checkChannel` callable: shared channel check before adding (Gemini Flash-Lite: 50 thumbnails at low resolution + Google Search), floors from already-analyzed videos, per-child fit via `evaluateProfile` |
+| `channelCheck.ts` | `checkChannel` callable: shared channel check before adding (Gemini Flash-Lite: 50 thumbnails at low resolution + Google Search), floors from already-analyzed videos (`applyVideoFloors`), per-child fit via `evaluateProfile` (`fitForChild`); `getChannelFits` callable (the child's channels vs current settings, saved checks only) |
 | `paceReports.ts` | `onPaceReport`: counts parents' "Too hyper" reports into `videoProfiles/{v}.tooHyperReports` (2+ families → overstimulating) |
 | `contentFilter.ts` | `evaluateProfile(profile, answers, valuesViolation?)` → approved/hidden + plain-words reason (with the parent's limit), flags, severity — the whole matching logic, pure code (also used for channel checks); `effectiveDims` (missing dims → 0, "Too hyper" → 4), `TOO_HYPER_REPORTS` |
 | `prefs.ts` | Questionnaire: `DIMS`, `LEVEL_LABELS`, `HOLIDAYS`, `VALUE_FLAGS`, `AGE_TABLE`, `FREE_TEXT_MAX`, `defaultPrefs`, `normalizePrefs`, `describePrefs` |

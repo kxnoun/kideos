@@ -21,6 +21,7 @@ import { APP_CONFIG, OPENAI_API_KEY } from "./config";
 import { PROFILE_VERSION, MIN_USABLE_PROFILE_VERSION } from "./aiAnalysis";
 import { evaluateProfile, effectiveDims } from "./contentFilter";
 import { loadValueFiltersForChild } from "./analyzeVideo";
+import { CHECK_VERSION, applyVideoFloors, fitForChild, type ChannelReport } from "./channelCheck";
 import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
 import type { ContentProfile } from "./types";
 
@@ -260,6 +261,8 @@ export interface ChannelSuggestion {
   educational: number;
   hiddenReasons: { label: string; count: number }[]; // why the other videos wouldn't show, top 3
   ratings: { dim: Dim; maxLevel: number; count: number }[]; // what's in the videos that WOULD show
+  // From the channel's saved channel check, if anyone has checked it (thumbnails + what people say)
+  check?: { fit: "good" | "caution"; thingsToKnow: string[]; overall: ChannelReport["verdict"] };
   samples: { videoId: string; title: string; thumbnail: string }[];
 }
 
@@ -421,6 +424,7 @@ export const getChannelSuggestions = onCall(
     const skip = new Set([...whitelisted.docs, ...dismissed.docs].map((d) => d.id));
     const age = Number(childSnap.data()?.age) || prefs.ageGroup;
 
+    const entries = new Map(catalog.docs.map((d) => [d.id, d.data() as CatalogEntry]));
     const scored = catalog.docs
       .filter((d) => !skip.has(d.id))
       .map((d) => scoreChannel(d.data() as CatalogEntry, prefs));
@@ -431,8 +435,29 @@ export const getChannelSuggestions = onCall(
         : `made for ages ${s.audienceMinAge ?? 0}–${s.audienceMaxAge ?? "up"}, child is ${age}`;
       logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — ${why}`);
     }
-    const suggestions = scored
-      .filter(ok)
+
+    // Saved channel checks (only ones someone already made — no AI here): a channel that's
+    // "not a fit" for this child isn't suggested; otherwise its things-to-know go on the card
+    const passing = scored.filter(ok);
+    const checkSnaps = passing.length ? await db.getAll(...passing.map((s) => db.doc(`channelChecks/${s.channelId}`))) : [];
+    const withChecks: ChannelSuggestion[] = [];
+    passing.forEach((s, i) => {
+      const snap = checkSnaps[i];
+      if (!snap?.exists || snap.data()!.version !== CHECK_VERSION) {
+        withChecks.push(s);
+        return;
+      }
+      const { createdAt: _c, ...saved } = snap.data() as ChannelReport;
+      const report = applyVideoFloors(saved, entries.get(s.channelId)?.videos ?? []);
+      const { fit, conflicts } = fitForChild(report, prefs);
+      if (fit === "not_fit") {
+        logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — channel check: not a fit (${conflicts.join(" | ")})`);
+        return;
+      }
+      withChecks.push({ ...s, check: { fit, thingsToKnow: conflicts, overall: report.verdict } });
+    });
+
+    const suggestions = withChecks
       .map(({ severeExamples: _drop, ...s }) => s)
       .sort((a, b) => {
         const fit = b.fitting / b.analyzed - a.fitting / a.analyzed;
