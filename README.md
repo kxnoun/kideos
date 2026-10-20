@@ -61,6 +61,7 @@ apps/
     src/prefs.ts          questionnaire definitions — COPY of functions/src/prefs.ts, keep in sync
     src/components/FiltersForm.tsx   the questionnaire UI
 functions/src/            Cloud Functions (see docs/architecture.md → Backend)
+hosting/player/           the kid app's YouTube player page (Firebase Hosting — kideos-io.web.app/player/)
 firestore.rules           security rules        firestore.indexes.json   composite indexes
 tests/rules/              Firestore emulator tests for the rules (device binding, pairing, Show anyway…)
 docs/                     everything else (below)

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<!--
+  Kideos kid player page (served from Firebase Hosting: https://kideos-io.web.app/player/)
+
+  Replaces react-native-youtube-iframe's default page (iframe_v2.html on the library
+  author's GitHub Pages). Same contract as the library — it reads ?data=<JSON> (the
+  library's `safeData`), exposes a global `player`, and posts the same events to
+  window.ReactNativeWebView — with three differences:
+    1. YouTube's iframe fills the WHOLE web view (the library's page forced 16:9 of the
+       width, so Shorts in a tall box came out tiny at the top).
+    2. Privacy-enhanced embed (www.youtube-nocookie.com) — YouTube's API policy requires
+       tracking off for "Made for Kids" videos; this page has no analytics or other scripts.
+    3. Hosted by us (backlog → YouTube policy), not on a third party's site.
+  Kid app: apps/Kideos/src/screens/PlayerScreen.tsx (PLAYER_PAGE / baseUrlOverride).
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+      #player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      function post(msg) {
+        if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      }
+
+      var data = {};
+      try {
+        data = JSON.parse(new URLSearchParams(window.location.search).get("data") || "{}");
+      } catch (e) {
+        data = {};
+      }
+
+      // The library's names → YouTube's player parameters (only the ones that were set)
+      var vars = {
+        playsinline: 1,
+        rel: data.rel_s,
+        loop: data.loop_s,
+        controls: data.controls_s,
+        fs: data.preventFullScreen_s,
+        modestbranding: data.modestbranding_s,
+        cc_load_policy: data.showClosedCaptions_s,
+        cc_lang_pref: data.cc_lang_pref_s || undefined,
+        start: data.start,
+        end: data.end,
+        color: data.color,
+        hl: data.playerLang,
+        iv_load_policy: data.iv_load_policy,
+        list: data.list,
+        listType: data.listType,
+        playlist: data.playlist,
+      };
+      Object.keys(vars).forEach(function (k) {
+        if (vars[k] === undefined || vars[k] === null || vars[k] === "") delete vars[k];
+      });
+
+      var tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+
+      var player;
+      function onYouTubeIframeAPIReady() {
+        player = new YT.Player("player", {
+          host: "https://www.youtube-nocookie.com",
+          width: "100%",
+          height: "100%",
+          videoId: data.videoId_s || "",
+          playerVars: vars,
+          events: {
+            onReady: function () { post({ eventType: "playerReady" }); },
+            onStateChange: function (e) { post({ eventType: "playerStateChange", data: e.data }); },
+            onError: function (e) { post({ eventType: "playerError", data: e.data }); },
+            onPlaybackQualityChange: function (e) { post({ eventType: "playerQualityChange", data: e.data }); },
+            onPlaybackRateChange: function (e) { post({ eventType: "playbackRateChange", data: e.data }); },
+          },
+        });
+      }
+
+      function onFullScreenChange() {
+        var full = document.fullscreenElement || document.webkitFullscreenElement;
+        post({ eventType: "fullScreenChange", data: Boolean(full) });
+      }
+      document.addEventListener("fullscreenchange", onFullScreenChange);
+      document.addEventListener("webkitfullscreenchange", onFullScreenChange);
+
+      // Commands the library posts (the kid app's patch injects play / pause directly too)
+      window.addEventListener("message", function (event) {
+        try {
+          var cmd = JSON.parse(event.data);
+          if (!player) return;
+          if (cmd.eventName === "playVideo") player.playVideo();
+          if (cmd.eventName === "pauseVideo") player.pauseVideo();
+          if (cmd.eventName === "muteVideo") player.mute();
+          if (cmd.eventName === "unMuteVideo") player.unMute();
+        } catch (e) {}
+      });
+    </script>
+  </body>
+</html>

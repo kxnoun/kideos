@@ -112,8 +112,8 @@ export default function ChannelsScreen() {
 
   const showFit = (name: string, f: ChannelFit) =>
     Alert.alert(
-      f.fit === "not_fit" ? `${name}: not a fit anymore` : `${name}: things to know`,
-      `With ${selectedChild?.profile.name ?? "your child"}'s current settings:\n\n${f.conflicts.map((c) => `• ${c}`).join("\n")}\n\nVideos past the settings are hidden either way.`
+      f.fit === "not_fit" ? `${name}: doesn't match your settings anymore` : `${name}: things to know`,
+      `With ${selectedChild?.profile.name ?? "your child"}'s current settings:\n\n${f.conflicts.map((c) => `• ${c}`).join("\n")}\n\nVideos past the settings are hidden either way.\n\nKideos' own notes, from our analysis — not from YouTube.`
     );
 
   useEffect(() => {
@@ -277,7 +277,7 @@ export default function ChannelsScreen() {
             <TouchableOpacity onPress={() => showFit(item.name, fits[item.channelId])} hitSlop={6}>
               <Text style={[styles.fitBadge, fits[item.channelId].fit === "not_fit" && styles.fitBadgeBad]}>
                 {fits[item.channelId].fit === "not_fit"
-                  ? "⛔ Not a fit with current settings"
+                  ? "⛔ Doesn't match current settings"
                   : `⚠️ ${fits[item.channelId].conflicts.length} ${fits[item.channelId].conflicts.length === 1 ? "thing" : "things"} to know`}
               </Text>
             </TouchableOpacity>

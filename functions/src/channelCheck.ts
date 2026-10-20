@@ -84,7 +84,7 @@ export interface CheckChannelResponse {
   fit: "good" | "caution" | "not_fit" | null; // per child, from code
   conflicts: string[]; // what's past THIS child's settings, plain words
   findings: { what: string; basis: Basis }[]; // notable things found (level ≥ 2 or flags), for the review
-  ageNote: string; // "" or e.g. "Made for ages 13+ — Simon is 6"
+  ageNote: string; // always "" since Oct 20 (no audience-age estimates shown — YouTube API policy)
 }
 
 // ── The prompt ─────────────────────────────────────────────────
@@ -463,15 +463,9 @@ export const checkChannel = onCall(
 
     const prefs = await loadValueFiltersForChild(parentId, childId);
     const { fit, conflicts, findings } = fitForChild(report, prefs);
-    const child = (await db.doc(`users/${parentId}/children/${childId}`).get()).data();
-    const age = Number(child?.age ?? child?.profile?.age ?? prefs.ageGroup);
-    const name = String(child?.name ?? child?.profile?.name ?? "your child");
-    let ageNote = "";
-    if (report.audienceMinAge !== null && age < report.audienceMinAge) {
-      ageNote = `Suits ages ${report.audienceMinAge}+ — ${name} is ${age}`;
-    } else if (report.audienceMaxAge !== null && age > report.audienceMaxAge + 1) {
-      ageNote = `Suits ages up to ${report.audienceMaxAge} — ${name} is ${age}`;
-    }
-    return { channel, alreadyAdded, report, fit: fit === "good" && ageNote ? "caution" : fit, conflicts, findings, ageNote };
+    // No "Suits ages N+" note any more (Oct 20): YouTube's API policy forbids estimating a
+    // channel's audience. The fit is only how the content compares with the parent's settings.
+    // (The saved report still has audienceMinAge/MaxAge — suggestions use them in code only.)
+    return { channel, alreadyAdded, report, fit, conflicts, findings, ageNote: "" };
   }
 );

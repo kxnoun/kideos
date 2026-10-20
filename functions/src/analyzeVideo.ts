@@ -192,7 +192,11 @@ function writeVerdict(
   parentDecision: "approved" | "hidden" | undefined,
   batch: FirebaseFirestore.WriteBatch
 ): boolean {
-  const approved = parentDecision ? parentDecision === "approved" : decision.status === "approved";
+  // Deleted / private / embedding off on YouTube (refreshYouTubeData marks the cache) —
+  // hidden for everyone, even "Show anyway", whatever the answers say
+  const gone = stub.ytGone === true;
+  if (gone) decision = { ...decision, status: "hidden", reason: "No longer available on YouTube", flags: ["unavailable"], severity: "low" };
+  const approved = gone ? false : parentDecision ? parentDecision === "approved" : decision.status === "approved";
   const verdict: Omit<VideoVerdict, "parentDecision"> = {
     videoId,
     channelId,

@@ -87,13 +87,10 @@ analyse 500 channels with a prompt we're about to change.
 ## 2. Confirmed bugs
 
 **Fix first (found Oct 20 on the 6T):**
-- **Shorts play tiny, stuck at the top of the screen**, with a big empty space under them. Cause:
-  `react-native-youtube-iframe`'s player page always sizes YouTube's iframe as 16:9 *of its width*
-  (`.container { padding-bottom: 56.25% }` in `PlayerScripts.js`). For a Short our player box is tall and
-  narrow (9:16), so the iframe gets the box's width × 0.5625 — a small strip at the top. Fix options: give the
-  page a full-height container (load our own HTML via `useLocalHTML` / a patch to the library's HTML, which we
-  also need for hosting our own player page — see Security → kid player), or size the iframe from the box's
-  height for Shorts. Check the zoom-open thumbnail and the drag gestures on Shorts afterwards.
+- ~~**Shorts play tiny, stuck at the top of the screen**~~ — *fixed Oct 20 (branch `youtube-policy`), test on
+  the phone:* the library's player page sized YouTube's iframe as 16:9 of its width (`padding-bottom:
+  56.25%`), so a Short's tall box got a thin strip. Our own player page (`hosting/player/index.html`) fills
+  the whole box. Check the zoom-open thumbnail and the drag gestures on Shorts too.
 - **Kid pairing code expires but stays on screen** (below).
 
 - **Kid app closed by itself once** (Oct 17, after End Session, while testing remote control). Not seen
@@ -113,6 +110,45 @@ analyse 500 channels with a prompt we're about to change.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
   that part, and add a TTL/cleanup for `triggerEvents`.
 
+## 2b. YouTube API policy (reviewed Oct 20 — see the guide's "Only offer metrics available via YouTube's API")
+
+Not legal advice — Adam's reading with Claude of the Developer Policies + guide. Kideos' core (AI analysis of
+other people's videos, per-channel fit) is "derived data" from API data; disclosure and careful wording lower
+the risk, only YouTube's approval (API Compliance Audit) removes it. Realistic trigger for a review: asking
+for more than the default 10,000 quota units/day, or a complaint — and the cost is losing the API key
+overnight (every family at once), so stay audit-ready.
+
+Done (branch `youtube-policy`, Oct 20):
+1. **No "safe / suitable" claims.** Verdicts are about the parent's own settings: "✅ Matches Simon's
+   settings", "⛔ Doesn't match Simon's settings", "✓ Matches all of Simon's settings". The channel check's
+   general "Overall: well-regarded / not usually recommended for kids" line is gone. The old AI suggestions'
+   one-liner describes the channel instead of saying why it's "appropriate".
+2. **No custom scores or audience estimates on screen.** Suggestion cards no longer show "X of Y videos fit",
+   the fit bar, counts, AI topic chips or "Suits ages N+"; the channel check no longer adds a "Suits ages"
+   note (it used to turn a "good" fit into "things to know"). In words only: "Most of the long videos we
+   checked match Simon's settings · some would be hidden, mostly for: sponsor segments". *(Ages and topics
+   still steer which channels are suggested, in code — not displayed.)*
+3. **"ⓘ Kideos' own notes, from our analysis — not from YouTube"** (`components/KideosNotes.tsx`) under the
+   channel check, suggestion cards, video details, the now-watching card and the Channels screen's notes —
+   the disclosure III.E.4.h asks for.
+4. **30-day refresh** of stored YouTube data — `refreshYouTubeData` (nightly; every channel every ≤ 25 days;
+   deleted / private / embedding-off videos hidden everywhere as "No longer available on YouTube").
+5. **Our own player page** (`hosting/player/index.html` on Firebase Hosting): privacy-enhanced
+   `youtube-nocookie.com` embed (tracking off for Made for Kids videos), no third-party code — and it fixes
+   the tiny Shorts.
+
+Still open:
+- **Standard player + grown-up gate** (Next up #2) — the biggest visible one (we hide YouTube's buttons and run
+  `SWIPE_IN_PLAYER` inside its iframe).
+- **API Compliance Audit** before launch — describe it honestly as a parental-control app (what parents see,
+  that ratings are our own analysis, labelled).
+- **Wording rules for anything new** (e.g. the "what parents would love" suggestions): lead with the parent's
+  choice ("Because you picked Arabic"), label Kideos notes, never "safe / suitable / educational score /
+  autism-friendly", no percentages or ages on screen, cite YouTube's own fields as YouTube's.
+- Known, accepted: transcripts via Supadata (YouTube's terms on automated access); storing our own analysis
+  (profiles, verdicts) long-term — it's ours, but built partly from API data (titles, descriptions); the
+  suggestions catalog aggregates per channel.
+
 ## 3. Security
 
 - `pairingCodes`: expired codes are never deleted, and there's no rate limiting on creating/claiming.
@@ -130,6 +166,7 @@ analyse 500 channels with a prompt we're about to change.
   terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
   explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
   **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #2).
+  (Oct 20: the player page is now our own — `hosting/player/index.html`, privacy-enhanced embed — see 2b.)
   Since Oct 20 the player also runs `SWIPE_IN_PLAYER` (a passive touch listener inside YouTube's iframe, for
   swipe gestures — it doesn't change or block anything, but it is code inside YouTube's player) and turns
   YouTube's fullscreen button off with the **official** `fs=0` parameter (that one is allowed). Also: "Made for

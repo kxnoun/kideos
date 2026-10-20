@@ -1,4 +1,11 @@
 {
+  "hosting": {
+    "public": "hosting",
+    "ignore": ["firebase.json", "**/.*"],
+    "headers": [
+      { "source": "/player/**", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }
+    ]
+  },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"

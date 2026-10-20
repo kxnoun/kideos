@@ -170,6 +170,52 @@ export async function getVideoDetails(
   };
 }
 
+// ── videos.list for up to 50 videos — still 1 unit per call ────
+// Used by the 30-day refresh (refreshYouTubeData). Missing from the result = deleted,
+// or not visible to the API any more.
+
+export async function getVideosBatch(
+  videoIds: string[],
+  apiKey: string
+): Promise<Map<string, YouTubeVideoDetails> | null> {
+  const out = new Map<string, YouTubeVideoDetails>();
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const chunk = videoIds.slice(i, i + 50);
+    const url = new URL(`${APP_CONFIG.YOUTUBE_BASE_URL}/videos`);
+    url.searchParams.set("part", "snippet,contentDetails,status");
+    url.searchParams.set("id", chunk.join(","));
+    url.searchParams.set("maxResults", "50");
+    url.searchParams.set("key", apiKey);
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      logger.error(`[YouTube] videos.list (batch of ${chunk.length}) failed: ${res.status} ${res.statusText}`);
+      return null; // don't treat a failed call as "everything was deleted"
+    }
+    const data = (await res.json()) as {
+      items?: Array<{ id: string; snippet: YouTubeVideoSnippet; contentDetails: YouTubeVideoContentDetails; status: YouTubeVideoStatus }>;
+    };
+    for (const item of data.items ?? []) {
+      const { snippet, contentDetails, status } = item;
+      out.set(item.id, {
+        videoId: item.id,
+        title: snippet.title,
+        description: snippet.description,
+        channelId: snippet.channelId,
+        channelTitle: snippet.channelTitle,
+        tags: snippet.tags ?? [],
+        categoryId: snippet.categoryId ?? "",
+        publishedAt: snippet.publishedAt,
+        thumbnail:
+          snippet.thumbnails.high?.url ?? snippet.thumbnails.medium?.url ?? snippet.thumbnails.default?.url ?? "",
+        durationSeconds: parseDurationSeconds(contentDetails.duration),
+        madeForKids: status.madeForKids ?? false,
+        isPrivateOrRestricted: status.privacyStatus !== "public" || status.embeddable === false,
+      });
+    }
+  }
+  return out;
+}
+
 // ── Is it a Short? ─────────────────────────────────────────────
 // The Data API doesn't say. youtube.com/shorts/{id} answers 200 for a Short and
 // redirects to the normal watch page otherwise. Only videos ≤ 3 min can be Shorts.

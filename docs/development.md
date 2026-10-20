@@ -59,6 +59,7 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 | Seeding / Load more | `… --only onChannelWhitelisted \| Select-String "seedVideoMetadata"` → `N long videos + M Shorts` (or "using the mixed uploads list"); `… --only onMoreVideosRequested` → `N more long videos, M fit`; nightly top-up: `… --only refreshChannelLibraries \| Select-String "top-up"` |
 | Profile upgrades | `firebase functions:log --only reprofileOutdated \| Select-String "upgraded="` → `— done` or `— out of time` (Force run again) |
 | Transcripts | `… \| Select-String "Supadata\|transcriptCache"` — `Unexpected status 429` = rate limit **or out of credits** (Supadata uses 429 for both; the log line includes their error message) |
+| 30-day YouTube refresh | `firebase functions:log --only refreshYouTubeData` → per channel `N videos refreshed, M gone`, then `X/Y due channels refreshed … all up to date` (or "the rest tomorrow") |
 | Kid devices moving over | `firebase functions:log --only onDeviceMigration` → `moved <uid> over for <parent>/<child>` or `refused <uid>: <reason>` (`no pairing found`, `too late — pair again`…) |
 | Kid app layout / device | logcat `ReactNativeJS`: `[device] landscape only: true/false`, `[player] window WxH insets … → player WxH` (debug builds), `[kidDevice] / [child] / [deviceMigration] listener error` (usually a rules denial — is the device's `kidDevices` doc there and listing the child?) |
 | Save to a file to share | `… \| Out-File something.txt` (UTF-16) |
@@ -74,7 +75,12 @@ cd functions; npm run build; cd ..        # REQUIRED — firebase.json has no pr
 firebase deploy --only "functions:kideos-backend"   # backend (all functions)
 firebase deploy --only functions:kideos-backend:getChannelSuggestions   # one function (codebase prefix needed)
 firebase deploy --only "firestore:rules,firestore:indexes"   # when rules/indexes change
+firebase deploy --only hosting            # the kid player page (hosting/player/index.html)
 ```
+The kid app loads its player page from `https://kideos-io.web.app/player/` — deploy hosting before a kid
+app build that uses it (otherwise videos show a blank player). First time only: if the deploy says the
+Hosting site doesn't exist, open Firebase console → Hosting → **Get started** once (or `firebase init
+hosting`, keeping `hosting/` as the public folder and **not** overwriting `hosting/player/index.html`).
 **Rules + functions together when they depend on each other** — e.g. the Oct 20 device binding:
 `firebase deploy --only "functions:kideos-backend,firestore:rules"`, and only then run the new kid app
 (an old one-child device asks `onDeviceMigration` to move it over; until the function is live it waits on
@@ -176,6 +182,11 @@ re-rates every profiled video once (OpenAI only).
   home / channel page / player; chips light up instantly and scroll; "See all" slides in from the right and
   out to the right with no stutter, home keeps its scroll position; every button lights up only while
   pressed; nothing jumps sideways when switching screens.
+- **Player page / Shorts:** a Short fills the screen top to bottom (it used to be a thin strip at the top); a
+  long video still fills the width; remote pause, Hide this video, the end card and swipes still work.
+- **YouTube refresh:** Cloud Scheduler → `refreshYouTubeData` → Force run → log lists channels; a channel
+  refreshed less than 25 days ago is skipped. Make a test video private on YouTube → after a run it shows in
+  Videos → Hidden as "No longer available on YouTube" and disappears from the kid feed.
 - **Kid player gestures:** tap a tile → the thumbnail grows into the player and fades into the video; drag
   down straight / diagonally / mostly sideways → the video follows and flies off that way (feed visible
   behind); let go early → springs back; drag up → rises into "More from", let go → snaps in; drag down from

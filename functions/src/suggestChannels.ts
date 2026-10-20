@@ -97,14 +97,15 @@ async function generateSuggestionReason(
     messages: [
       {
         role: "user",
-        content: `In one sentence (max 20 words), explain why "${channelName}" is appropriate for a ${filters.ageGroup}-year-old with these preferences:\n${describePrefs(filters)}`,
+        // Describe, don't vouch: YouTube's API policy forbids claiming a channel is safe / suitable
+        content: `In one sentence (max 20 words), describe what "${channelName}"'s videos are like, in terms of these parent preferences. Describe only — never say it is safe, suitable, appropriate or recommended:\n${describePrefs(filters)}`,
       },
     ],
     max_tokens: 64,
     temperature: 0.5,
   });
 
-  return completion.choices[0]?.message?.content?.trim() ?? `Age-appropriate content for ${filters.ageGroup}-year-olds.`;
+  return completion.choices[0]?.message?.content?.trim() ?? "Check its details before adding it.";
 }
 
 // ── Core suggestion pipeline ───────────────────────────────────

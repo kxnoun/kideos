@@ -39,6 +39,7 @@ import {
 import { useStore, useSelectedChild } from "../../store/useStore";
 import { DIM_TITLES } from "./VideosScreen";
 import VideoPreview from "../../components/VideoPreview";
+import KideosNotes from "../../components/KideosNotes";
 import { LEVEL_LABELS } from "../../prefs";
 import type { Dim } from "../../types";
 import type { VideoVerdict } from "../../types";
@@ -274,7 +275,7 @@ export default function HomeScreen() {
                       <Text style={styles.nowFit}>
                         {nowVerdict.parentDecision === "approved"
                           ? "Shown because you allowed it"
-                          : `✓ Fits all of ${selectedChild.profile.name}'s settings`}
+                          : `✓ Matches all of ${selectedChild.profile.name}'s settings`}
                       </Text>
                       {nowRatings.length ? (
                         nowRatings.map(([dim, r]) => (
@@ -288,6 +289,7 @@ export default function HomeScreen() {
                       ) : (
                         <Text style={styles.nowRating}>Nothing on any of your lists</Text>
                       )}
+                      <KideosNotes />
                     </View>
                   ) : null}
 

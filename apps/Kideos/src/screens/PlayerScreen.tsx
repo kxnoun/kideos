@@ -137,7 +137,10 @@ const HIDE_IN_PLAYER = `(function () {
 
 // Backup at the web view level: YouTube pages never open (in the app, the browser or
 // the YouTube app); anything else — i.e. an ad's own link — opens as it normally would.
-const PLAYER_PAGE = "https://lonelycpp.github.io/react-native-youtube-iframe/iframe_v2.html";
+// Our own player page (hosting/player/index.html, Firebase Hosting) instead of the library's
+// on its author's GitHub Pages: YouTube's iframe fills the whole box (Shorts used to be a tiny
+// strip at the top), privacy-enhanced embed (youtube-nocookie.com), no third-party code.
+const PLAYER_PAGE = "https://kideos-io.web.app/player/";
 const YOUTUBE_PAGE = /^https?:\/\/((www|m)\.)?(youtube\.com|youtu\.be)\/(?!embed\/)/i;
 
 function allowLoad(req: ShouldStartLoadRequest): boolean {
@@ -587,6 +590,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
             videoId={video.videoId}
             play={playing}
             initialPlayerParams={{ preventFullScreen: true }}
+            baseUrlOverride={PLAYER_PAGE}
             onPlaybackRateChange={(data: string) => {
               if (typeof data === "string" && data.startsWith(SWIPE_PREFIX)) onSwipe(data.slice(SWIPE_PREFIX.length));
             }}

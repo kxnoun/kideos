@@ -10,11 +10,13 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, Linking, ActivityIndicator } from "react-native";
 import type { CheckChannelResult } from "../services/firebase";
+import KideosNotes from "./KideosNotes";
 
-// The big badge is for THIS child (worked out from the saved channel profile + their settings)
-// Calm yellow for "things to know" (e.g. a sponsor); red only for "not a fit".
+// The big badge is about THIS child's settings (worked out from the saved channel profile).
+// YouTube's policy: never say a channel is "safe / suitable / recommended" — only whether it
+// matches the parent's own settings. Calm yellow for "things to know"; red only for a mismatch.
 const FIT = {
-  good: { label: (n: string, _c: number) => `✅ Fits ${n}'s settings`, color: "#2E7D32", bg: "#E8F5E9", boxBg: "#E8F5E9", boxText: "#1B5E20" },
+  good: { label: (n: string, _c: number) => `✅ Matches ${n}'s settings`, color: "#2E7D32", bg: "#E8F5E9", boxBg: "#E8F5E9", boxText: "#1B5E20" },
   caution: {
     label: (n: string, c: number) => `⚠️ ${c} ${c === 1 ? "thing" : "things"} to know for ${n}`,
     color: "#8A5A00",
@@ -22,14 +24,8 @@ const FIT = {
     boxBg: "#FFF6E0",
     boxText: "#6B4600",
   },
-  not_fit: { label: (n: string, _c: number) => `⛔ Not a fit for ${n}`, color: "#C62828", bg: "#FDECEA", boxBg: "#FDECEA", boxText: "#7A1E1E" },
+  not_fit: { label: (n: string, _c: number) => `⛔ Doesn't match ${n}'s settings`, color: "#C62828", bg: "#FDECEA", boxBg: "#FDECEA", boxText: "#7A1E1E" },
   unchecked: { label: (_n: string, _c: number) => "We couldn't check this channel", color: "#555", bg: "#F0F0F5", boxBg: "#F0F0F5", boxText: "#444" },
-} as const;
-// The AI's general opinion, shown as one smaller line
-const OVERALL = {
-  good: "Overall: generally well-regarded for its audience",
-  caution: "Overall: fine for some ages, with some concerns",
-  not_recommended: "Overall: not usually recommended for kids",
 } as const;
 
 interface Props {
@@ -41,11 +37,14 @@ interface Props {
 }
 
 export default function ChannelReview({ result, childName, confirming, onConfirm, onCancel }: Props) {
-  const { channel, report, fit, conflicts, findings, ageNote } = result;
+  const { channel, report, conflicts, findings } = result;
+  // "things to know" only when there's something to list (older saved checks could be
+  // "caution" for an AI-guessed audience age alone — never shown: policy, no audience estimates)
+  const fit = result.fit === "caution" && conflicts.length === 0 ? "good" : result.fit;
   const badge = FIT[fit ?? "unchecked"];
   const thumbFindings = findings.filter((f) => f.basis === "thumbnails" || f.basis === "both");
   const videoFindings = findings.filter((f) => f.basis === "videos");
-  const count = conflicts.length + (ageNote ? 1 : 0);
+  const count = conflicts.length;
   const strong = !report || fit === "not_fit"; // red "Add anyway" only here
 
   return (
@@ -61,7 +60,6 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
 
         <View style={[styles.verdict, { backgroundColor: badge.bg }]}>
           <Text style={[styles.verdictText, { color: badge.color }]}>{badge.label(childName, count)}</Text>
-          {report ? <Text style={styles.overall}>{OVERALL[report.verdict]}</Text> : null}
         </View>
 
         {!report ? (
@@ -72,12 +70,11 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
           <>
             {report.summary ? <Text style={styles.text}>{report.summary}</Text> : null}
 
-            {conflicts.length || ageNote ? (
+            {conflicts.length ? (
               <View style={[styles.conflictBox, { backgroundColor: badge.boxBg }]}>
                 <Text style={[styles.conflictTitle, { color: badge.color }]}>
-                  {fit === "not_fit" ? `Conflicts with ${childName}'s settings` : `Past ${childName}'s settings`}
+                  {fit === "not_fit" ? `Doesn't match ${childName}'s settings` : `Past ${childName}'s settings`}
                 </Text>
-                {ageNote ? <Text style={[styles.conflict, { color: badge.boxText }]}>• {ageNote}</Text> : null}
                 {conflicts.map((c, i) => (
                   <Text key={i} style={[styles.conflict, { color: badge.boxText }]}>
                     • {c}
@@ -121,6 +118,7 @@ export default function ChannelReview({ result, childName, confirming, onConfirm
               </>
             ) : null}
 
+            <KideosNotes />
             <Text style={styles.note}>
               {report.wellKnown ? "" : "We can't verify small channels fully yet. "}
               Every video is still checked one by one after you add it — anything past {childName}'s limits stays

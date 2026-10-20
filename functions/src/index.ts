@@ -57,6 +57,11 @@ export {
   deleteChildData,
 } from "./scheduledJobs";
 
+// ── YouTube data refresh ───────────────────────────────────────
+// refreshYouTubeData: nightly — re-fetches stored YouTube data (titles, thumbnails, channel
+// names…) at least every 25 days, as YouTube's API policy requires; hides deleted videos
+export { refreshYouTubeData } from "./refreshYouTubeData";
+
 // ── Kid devices ────────────────────────────────────────────────
 // onDeviceMigration: a kid device paired before Oct 20, 2026 asks once → kidDevices doc
 export { onDeviceMigration } from "./kidDevices";
