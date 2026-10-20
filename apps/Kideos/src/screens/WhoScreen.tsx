@@ -66,7 +66,7 @@ export default function WhoScreen({ kids, locked, onChoose }: Props) {
             style={styles.tileWrap}
             highlight={false}
             onPressIn={() => setPressed(k.id)}
-            onPressOut={() => setTimeout(() => setPressed((p) => (p === k.id ? null : p)), 140)}
+            onPressOut={() => setPressed(null)}
             onPress={() => (k.pinHash ? setPinFor(k) : onChoose(k.id))}
             accessibilityLabel={`${k.name}${k.pinHash ? ", needs a PIN" : ""}${locked[k.id] ? ", time's up" : ""}`}
           >

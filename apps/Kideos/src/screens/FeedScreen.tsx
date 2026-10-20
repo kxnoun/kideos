@@ -28,7 +28,7 @@
 //   3. Group in memory: New / Shorts / per channel
 // ─────────────────────────────────────────────────────────────
 
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef, useImperativeHandle, forwardRef, memo } from "react";
 import {
   Animated,
   BackHandler,
@@ -357,20 +357,21 @@ function BigHome({
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const sectionY = useRef<Record<string, number>>({});
-  const [active, setActive] = useState<string | undefined>(shelves[0]?.key);
-  const activeRef = useRef(active);
-  const setActiveKey = (key: string | undefined) => {
+  // The lit chip lives in ChipBar's own state: changing it redraws only the chips,
+  // not every shelf (that redraw was what made the highlight lag)
+  const chips = useRef<ChipBarHandle>(null);
+  const activeRef = useRef<string | undefined>(shelves[0]?.key);
+  const setActiveKey = useCallback((key: string | undefined) => {
     if (key === activeRef.current) return;
     activeRef.current = key;
-    setActive(key);
-  };
+    chips.current?.setActive(key);
+  }, []);
   // A chip was tapped: that chip stays lit while the list scrolls there (instead of
   // every shelf on the way lighting up), until the kid scrolls by hand
   const jumpedTo = useRef<string | null>(null);
   const viewportH = useRef(0);
   const contentH = useRef(0);
-  const chipBar = useRef<ScrollView>(null);
-  const chipX = useRef<Record<string, number>>({});
+
 
   // Where a section's top lands just under the pinned bar
   const targetY = useCallback(
@@ -391,21 +392,20 @@ function BigHome({
     setActiveKey(current);
   };
 
-  // Keep the lit chip in view in the chip bar
-  useEffect(() => {
-    const x = active ? chipX.current[active] : undefined;
-    if (x !== undefined) chipBar.current?.scrollTo({ x: Math.max(0, x - margin - 48), animated: true });
-  }, [active, margin]);
+
 
   const headerY = scrollY.interpolate({ inputRange: [0, greetH], outputRange: [0, -greetH], extrapolate: "clamp" });
   const greetOpacity = scrollY.interpolate({ inputRange: [0, greetH * 0.7], outputRange: [1, 0], extrapolate: "clamp" });
   const lineOpacity = scrollY.interpolate({ inputRange: [greetH * 0.7, greetH], outputRange: [0, 1], extrapolate: "clamp" });
 
-  const jump = (key: string, index: number) => {
-    jumpedTo.current = key;
-    setActiveKey(key); // lights up right away
-    scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
-  };
+  const jump = useCallback(
+    (key: string, index: number) => {
+      jumpedTo.current = key;
+      setActiveKey(key); // lights up right away
+      scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
+    },
+    [setActiveKey, targetY]
+  );
 
   return (
     <View style={{ flex: 1, paddingLeft: insets.left, paddingRight: insets.right }}>
@@ -520,39 +520,68 @@ function BigHome({
             {profile.name ? `Hi ${profile.name} 👋` : "Hi there 👋"}
           </Text>
         </Animated.View>
-        <ScrollView
-          ref={chipBar}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ height: BAR_H, flexGrow: 0 }}
-          contentContainerStyle={{ paddingHorizontal: margin, gap: 10, alignItems: "center" }}
-        >
-          {shelves.map((s, i) => {
-            const on = s.key === active;
-            return (
-              <Tap
-                key={s.key}
-                style={[styles.chip, on && styles.chipOn]}
-                onLayout={(e: LayoutChangeEvent) => {
-                  chipX.current[s.key] = e.nativeEvent.layout.x;
-                }}
-                onPress={() => jump(s.key, i)}
-                accessibilityLabel={s.label}
-                accessibilityState={{ selected: on }}
-              >
-                {s.thumb ? <Image source={{ uri: s.thumb }} style={styles.chipAvatar} /> : <Text style={styles.chipEmoji}>{s.emoji}</Text>}
-                <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
-                  {s.label}
-                </Text>
-              </Tap>
-            );
-          })}
-        </ScrollView>
+        <ChipBar ref={chips} shelves={shelves} margin={margin} initial={shelves[0]?.key} onJump={jump} />
         <Animated.View style={[styles.headerLine, { opacity: lineOpacity }]} />
       </Animated.View>
     </View>
   );
 }
+
+// ── The chip bar (big mode) ──────────────────────────────────
+// Owns which chip is lit, so lighting one redraws just the chips. Keeps the lit
+// chip in view.
+
+interface ChipBarHandle {
+  setActive: (key: string | undefined) => void;
+}
+
+const ChipBar = memo(
+  forwardRef<
+    ChipBarHandle,
+    { shelves: Shelf[]; margin: number; initial: string | undefined; onJump: (key: string, index: number) => void }
+  >(function ChipBar({ shelves, margin, initial, onJump }, ref) {
+    const [active, setActive] = useState(initial);
+    const bar = useRef<ScrollView>(null);
+    const chipX = useRef<Record<string, number>>({});
+    useImperativeHandle(ref, () => ({ setActive }), []);
+
+    useEffect(() => {
+      const x = active ? chipX.current[active] : undefined;
+      if (x !== undefined) bar.current?.scrollTo({ x: Math.max(0, x - margin - 48), animated: true });
+    }, [active, margin]);
+
+    return (
+      <ScrollView
+        ref={bar}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ height: BAR_H, flexGrow: 0 }}
+        contentContainerStyle={{ paddingHorizontal: margin, gap: 10, alignItems: "center" }}
+      >
+        {shelves.map((s, i) => {
+          const on = s.key === active;
+          return (
+            <Tap
+              key={s.key}
+              style={[styles.chip, on && styles.chipOn]}
+              onLayout={(e: LayoutChangeEvent) => {
+                chipX.current[s.key] = e.nativeEvent.layout.x;
+              }}
+              onPress={() => onJump(s.key, i)}
+              accessibilityLabel={s.label}
+              accessibilityState={{ selected: on }}
+            >
+              {s.thumb ? <Image source={{ uri: s.thumb }} style={styles.chipAvatar} /> : <Text style={styles.chipEmoji}>{s.emoji}</Text>}
+              <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+                {s.label}
+              </Text>
+            </Tap>
+          );
+        })}
+      </ScrollView>
+    );
+  })
+);
 
 // ── Channel page (big mode "See all") ────────────────────────
 

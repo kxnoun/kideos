@@ -1,6 +1,6 @@
 // Kideos Kid App — Tap: every tappable thing in the kid app.
 // Feedback on press-IN (kids lift slowly or slide off): a gentle squish plus a light
-// "lit up" wash over the button (shown at least ~140 ms so even a quick tap is seen).
+// "lit up" wash over the button while the finger is on it.
 // Generous hit area. No long-press / double-tap anywhere. With Reduce Motion on, no
 // squish — the light still shows.
 // highlight={false} where a wash would look wrong (thumbnails, the round channel
@@ -42,7 +42,6 @@ export function useReduceMotion(): boolean {
 }
 
 export const LIT = "rgba(255, 255, 255, 0.2)"; // the pressed wash
-const LIT_MIN_MS = 140;
 
 interface Props extends Omit<PressableProps, "style" | "children"> {
   style?: StyleProp<ViewStyle>; // the squishing box
@@ -66,25 +65,18 @@ export default function Tap({
   const scale = useRef(new Animated.Value(1)).current;
   const reduce = useReduceMotion();
   const [lit, setLit] = useState(false);
-  const litTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (litTimer.current) clearTimeout(litTimer.current);
-  }, []);
 
   const to = (v: number) =>
     Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: v === 1 ? 8 : 0 }).start();
 
   const pressIn = (e: GestureResponderEvent) => {
     if (!reduce) to(scaleTo);
-    if (highlight) {
-      if (litTimer.current) clearTimeout(litTimer.current);
-      setLit(true);
-    }
+    if (highlight) setLit(true);
     onPressIn?.(e);
   };
   const pressOut = (e: GestureResponderEvent) => {
     if (!reduce) to(1);
-    if (highlight) litTimer.current = setTimeout(() => setLit(false), LIT_MIN_MS);
+    if (highlight) setLit(false);
     onPressOut?.(e);
   };
 
