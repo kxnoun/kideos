@@ -45,8 +45,20 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   app reads or writes under a child must be allowed by `isKid`. Run `tests/rules/` after rule changes.
 - **`apps/Kideos/src/pin.ts` is copied to `apps/KideosParent/src/pin.ts`** — change both (identical).
 - **Kid app: every screen `<StatusBar hidden />`** — mixing hidden/visible makes the layout jump sideways.
+- **Kid app: never rebuild a screen to show another on top of it** — the feed stays mounted under "See all"
+  and under the player; layers over it need explicit `zIndex` + `elevation` (Android otherwise draws the
+  feed's chip bar on top). Keep `VideoTile` / `BigHome` / `LittleHome` / `ChipBar` memoised and the shelf
+  list in `useMemo` — redrawing every row made taps lag ~1 s on the 6T.
+- **Kid app motion goes through `MOTION`** (theme.ts — quick, ease-out only). PanResponder resets `dx/dy` to
+  0 at grant: decide a drag's direction in `onMoveShouldSetPanResponder`, not in `onPanResponderGrant`.
+- **Kid app state is per child** on a shared device: `@kideos_unfinished:{childId}`, `@kideos_watched:{childId}`,
+  `playSignal` per child. "When to ask Who's watching?" (`gate.ts`) is in memory on purpose (a full restart
+  must ask). Treat a missing `kidDevices` doc as "unpaired" only when the server confirms it (`fromCache`).
+- **Deploy rules + functions together** when they depend on each other (device binding:
+  `firebase deploy --only "functions:kideos-backend,firestore:rules"`) before running a new app build.
 - **Kid app UI: use `src/theme.ts`** (colours, fonts, `useLayout` sizes, little/big mode) and
-  `components/Tap` / `VideoTile` — no hard-coded colours, `Dimensions.get` or `TouchableOpacity`. Never white
+  `components/Tap` / `VideoTile` / `BackButton` — no hard-coded colours, `Dimensions.get` (except the one
+  rotation check in App.tsx) or `TouchableOpacity`. Never white
   text on Sunset Orange (use Ink). Design rules: docs/kid-app-design.md.
 - **The kid app patches two libraries** (`apps/Kideos/patches/`, applied by `patch-package` on
   `npm install`): `react-native-webview` (scripts in YouTube's iframe on Android; fullscreen → landscape)
@@ -56,6 +68,8 @@ deploy), `docs/backlog.md` (what's next / known bugs). Keep those docs updated w
   standard player + a grown-up gate before links (backlog → Next up). Don't block or interfere with
   **ads** (ad links stay clickable), and never claim videos are "ad-free" (API policy: no monetization
   estimates).
+- **Kid app native code** (`MainActivity.kt`, `KideosWindowModule.kt`, fonts) needs a Gradle rebuild; JS
+  changes don't. Judge smoothness on a release build (`gradlew app:installRelease`), not debug.
 - Android on Windows: two-terminal build (Metro `--port 8082`/`8083` + `gradlew app:installDebug
   -PreactNativeDevServerPort=…`), never `react-native run-android`. Physical phone needs `adb reverse`.
 - App logs are in `adb logcat -s ReactNativeJS`, **not** the Metro terminal (RN ≥ 0.77).

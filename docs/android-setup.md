@@ -121,7 +121,10 @@ Then launch the app on the emulator:
 & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" shell am start -n com.kideos.app/.MainActivity
 ```
 
-The app shows a **pairing screen** with a 6-character code. A parent enters this code in the KideosParent app (Home → pair a device) to link the two.
+The app shows a **pairing screen** with a 6-character code. A parent enters this code in the KideosParent app (Home → + Pair Device, ticking which children use this device) to link the two.
+
+The kid app has its own native code (full screen + landscape lock: `MainActivity.kt`, `KideosWindowModule.kt`)
+and bundled fonts — rerun the Gradle install whenever those change; JS changes only need Metro.
 
 ### Running on a physical phone (USB)
 

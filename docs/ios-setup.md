@@ -76,6 +76,10 @@ npm install
 # 2. Install iOS native dependencies (~3 min first time — downloads prebuilt binaries)
 cd ios && pod install && cd ..
 
+# 2b. Once: add the kid app's fonts (Fredoka, Nunito — assets/fonts) to the Xcode project + Info.plist
+#     (react-native.config.js lists them). Without this iOS shows the system font.
+npx react-native-asset
+
 # 3. Start Metro bundler (keep this terminal open)
 npm start
 
@@ -83,7 +87,11 @@ npm start
 npx react-native run-ios --simulator "iPhone 16 Pro"
 ```
 
-The app shows a **pairing screen** with a 6-character code. A parent enters this code in the KideosParent app to link the two.
+The app shows a **pairing screen** with a 6-character code. A parent enters it in the KideosParent app (Home → + Pair Device, ticking which children use this device) to link the two.
+
+> Not done on iOS yet (Android only so far): the landscape lock for little mode / long videos and the hidden
+> status bar + home indicator (`src/device.ts` is a no-op on iOS), and a real-iPad check of the player's
+> drag gestures. See [backlog.md](backlog.md) → Next up → Kid app on iOS / iPad.
 
 ---
 

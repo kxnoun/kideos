@@ -2,8 +2,16 @@
 
 What's next, in rough priority order. Update this file as things land.
 
-## 0. Next up (agreed Oct 17–19 — rough order, reorder freely)
+## 0. Next up (agreed Oct 17–20 — rough order, reorder freely)
 
+0. **Parent app UI redesign** (agreed Oct 20 — next). Same care as the kid app (research → tokens → build →
+   test on the phone). Already known to fix on the way:
+   - **Edit a child** (name, age, avatar) — today the age is only set at creation (changing it means editing
+     Firestore). Changing the age should offer to update the content settings to the new age's defaults
+     (it also switches the kid app between little ≤ 4 and big 5+ immediately).
+   - **Setting a PIN** doesn't say you'll type it twice (it silently asks again) — show "Type it again" as a
+     clear second step, with the digits as boxes.
+   - Settings → Devices: rename a device; show when it was paired; a clearer "Ask Who's watching?" control.
 1. **Compilations switch** — waiting for the sister's examples of the compilations she means (Ms Rachel's
    "+ MORE Nursery Rhymes" ones are fine). Likely reupload channels stitching others' clips ("BEST Peppa Pig
    moments 3 HOURS"). Needs a profile field → one `PROFILE_VERSION` bump.
@@ -28,6 +36,15 @@ Smaller follow-ups:
   they're a first guess, and the moderation model is trained mostly on photos (cartoons may score lower).
 - **Tune pace**: watch for calm explainers rated 3 or hyper channels rated 2; add channels to
   `KNOWN_STIMULATION` only for well-known, consistent styles.
+- **Kid app on iOS / iPad** (only tested on Android so far): link the fonts (`npx react-native-asset` on a
+  Mac), landscape lock + hidden status bar / home indicator (AppDelegate `supportedInterfaceOrientations`,
+  `prefersStatusBarHidden`, `prefersHomeIndicatorAutoHidden`), and check the drag gestures over WKWebView
+  (the PanResponder may not get touches from YouTube's player there — `SWIPE_IN_PLAYER` is the backup).
+- **Kid app release build on the 6T** — judge smoothness there, not in debug (debug is several times
+  slower). If anything still stutters: React Native's Hermes profiler, then `FlashList` for the rows.
+- **Remove the device move-over after Dec 31, 2026**: `onDeviceMigration` + `deviceMigrations` rule +
+  `requestDeviceMigration` / the legacy-session branch in the kid app's `App.tsx` + `adoptLegacyWatched`;
+  delete the `deviceMigrations` docs and old devices' `@kideos_unfinished` (single key) leftovers.
 
 ## 1. Check the AI against people (labeling) — *on the backburner, do before real families use it*
 
@@ -78,6 +95,9 @@ analyse 500 channels with a prompt we're about to change.
   nightly by `reprofileOutdated` (cached transcripts only).
 - ~~Verdicts for removed channels show in the Videos screen~~ — fixed Oct 19 (the screen only shows
   channels still on the list); deleting them later is in Next up → smaller follow-ups.
+- **Kid pairing code expires but stays on screen.** `PairingScreen` makes one code (valid 15 min) and never
+  replaces it, so after 15 minutes the parent gets "This code has expired". Regenerate it when it expires
+  (and on "tap to get a new code").
 - **Weekly digest push** would need an FCM token, which the app never registers — fine for now (no
   notifications by design), but decide when fixing the digest.
 - **`cleanupExpiredData`** still deletes the legacy analysis cache (`collectionGroup("results")`) — remove
@@ -99,7 +119,10 @@ analyse 500 channels with a prompt we're about to change.
   (controls, fullscreen, skip ad, title) is YouTube's as normal. **Changing the player is against YouTube's
   terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
   explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
-  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #2). Also: "Made for
+  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #2).
+  Since Oct 20 the player also runs `SWIPE_IN_PLAYER` (a passive touch listener inside YouTube's iframe, for
+  swipe gestures — it doesn't change or block anything, but it is code inside YouTube's player) and turns
+  YouTube's fullscreen button off with the **official** `fs=0` parameter (that one is allowed). Also: "Made for
   Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
   library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
   The title, channel name and channel picture are untappable; YouTube links never open (web view level
@@ -109,12 +132,10 @@ analyse 500 channels with a prompt we're about to change.
 ## 4. Missing features (from the May review, still open)
 
 - Free vs Premium gating in the UI (digest, remote pause/stop, AI suggestions are Premium per spec).
-- *Backburner:* landscape-only kid app for younger kids (YouTube Kids was landscape-only on phones until
-  it added portrait in Dec 2024). Also: Shorts get rotated to landscape in fullscreen — keep them upright.
 - *Backburner:* the player's settings (gear) menu — "Stats for nerds" fills the screen and kids tap
   everything. Hide or disable it (or just that item), or make it a parent setting.
-- Parent app UI redesign (kid app done Oct 20 — [kid-app-design.md](kid-app-design.md); its "later" list:
-  TV focus states, a mascot, sounds, Continue watching, iOS font linking).
+- Kid app "later" list ([kid-app-design.md](kid-app-design.md) → Not yet): TV focus states, a mascot,
+  sounds / haptics, a "Continue watching" shelf.
 - *Looked into, parked (Oct 17–18):* **YouTube Premium (no ads) in the kid app** — the sister's top ask.
   What we found:
   - Premium only applies where the viewer's browser is signed in to a Premium Google account. Our player
@@ -137,7 +158,6 @@ analyse 500 channels with a prompt we're about to change.
     Vimeo (the kids' channels families use aren't there). Possible later: a "send this list to YouTube
     Kids" helper for Premium families who prefer YouTube Kids' "approved content only" mode (ad-free with
     Premium, but no remote control, history or ratings).
-- Player: "watch something else?" at the end, progress/duration, an action on the "time's up" screen.
 - Digest: watch time by channel.
 - Loading skeletons (ChannelsScreen).
 
@@ -179,12 +199,17 @@ analyse 500 channels with a prompt we're about to change.
   (`CACHE_HIT_TARGET_MS`, `PIPELINE_TIMEOUT_MS`, `PRE_ANALYSIS_BATCH_SIZE`).
 - Legacy `flaggedContent` docs and `@react-native-firebase/messaging` are no longer used — delete the
   collection data and consider dropping the dependency.
+- `apps/Kideos/src/pin.ts` is duplicated in `apps/KideosParent/src/pin.ts` (like `prefs.ts`).
+- `KideosWindowModule` is an old-style native module (runs through React Native's interop layer on the New
+  Architecture) — fine for now; convert to a TurboModule if the interop layer is ever dropped.
+- The kid player logs its size (`[player] window … → player …`) in debug builds — remove once the layout is
+  settled on tablets.
 
 ## 7. Compliance before launch (not legal advice — get it checked)
 
 COPPA's amended rule is in force since Apr 22, 2026:
 - a written, published **data retention policy** (watch history 90 days, verdicts, profiles…);
-- a written **security program** (device binding is part of "reasonable security");
+- a written **security program** (device binding — done Oct 20 — is part of "reasonable security");
 - a **privacy notice** naming the third parties that receive data (OpenAI, Google/Gemini, Supadata,
   YouTube);
 - **verifiable parental consent** at parent sign-up; parents can delete their data (within 30 days);
@@ -206,8 +231,40 @@ these are the known gaps):
 
 ## Done (Oct 2026)
 
-Oct 20 (branch `kid-feed-layout`): **kid feed laid out like YouTube Kids** — ✨ New row, ⚡ Shorts row (only if
-any), one row per channel, tap a channel → all its videos; live, no refresh.
+Oct 20 (branch `multi-kid`): **several kids on one device + device binding + a smooth kid app**
+- **Pairing to the family:** the parent picks which children use a device (checkboxes) and can name it;
+  `users/{p}/kidDevices/{deviceUid}`; Settings → **Devices** (who uses it, "Ask Who's watching?" every time /
+  1 / 5 / 10 / 20 / 30 min, Unpair → the device returns to pairing at once).
+- **"Who's watching?"** in the kid app: avatar tiles, optional **4-digit PIN per child** (hash only; 5 wrong
+  → 30 s wait), asked after a full restart and after being away longer than the setting; avatar on the feed,
+  Time's up and the empty feed switch profile. Per child: layout, videos, rules, owed video, ✓s, End Session.
+- **Device binding** in the rules (`isKid` reads `kidDevices`); rules tests rewritten (siblings a device isn't
+  paired to, unpairing, move-over requests). Old one-child pairings move over by themselves
+  (`onDeviceMigration`, until Dec 31). Deleting a child removes it from every device.
+- **Feel:** every button lights up while pressed; the chip bar lights the tapped chip instantly (it used to
+  redraw every row); "See all" slides in/out over a home screen that stays alive; the player opens on top of
+  the feed (Back is instant); "Who's watching?" slides down; a "Hi Simon!" card waits for the feed's videos;
+  status bar hidden on every screen (fixed sideways layout jumps); moves are quick with an ease-out.
+- **Player:** the tapped thumbnail zooms into the player and stays until the video plays; drag down in any
+  downward direction → the video follows the finger and flies off; drag up → it rises into "More from";
+  owed minimum time → it only stretches.
+- Fixes: a kid with no channels was stuck (no way back to the picker); the chip bar showed through the
+  player and the picker on Android; drag-up was read as drag-down (PanResponder resets `dx/dy` at grant).
+
+Oct 20 (branch `kid-feed-layout`, merged as #11): **kid app redesign**
+- Research-based design system (`theme.ts`): Twilight purple, Sunset Orange actions (ink text), Sunny Yellow
+  focus, Fredoka + Nunito (bundled, OFL), sizes from the window (`useLayout`). Design doc:
+  [kid-app-design.md](kid-app-design.md).
+- **Little mode (≤ 4)**: channel bubbles + one sideways strip, landscape only; **big mode (5+)**: YouTube
+  Kids-style shelves (New / Shorts / per channel), collapsing "Hi Simon" header with a pinned chip bar,
+  "See all" channel pages, end cap.
+- **Full screen** (status + navigation bars hidden, `KideosWindowModule`), watched ✓ stickers, Time's up
+  with offline activities, pairing code tiles, friendly notices instead of system alerts.
+- **Player**: full screen from the tap, long videos locked to landscape, YouTube's fullscreen button off
+  (official `fs=0`), back button in the black space beside the video (never on it), end card (Watch again /
+  My videos / 3 more), swipe down / up gestures, no autoplay.
+- First: **kid feed laid out like YouTube Kids** — ✨ New row, ⚡ Shorts row (only if any), one row per
+  channel, tap a channel → all its videos; live, no refresh.
 
 Oct 20 (same branch): **Load more limits** — 20 videos per tap, only while the child has < 20 shown from
 the channel and YouTube has more, once per channel per day, 10 per family per day. **Ages = who a channel
@@ -280,6 +337,5 @@ Oct 17 (merged as `videos-and-suggestions`):
 - **Gambling ladder** (profile v4) and **`reprofileOutdated`** (upgrades old profiles from cached
   transcripts; first run: 149 videos, no Supadata).
 - Deleting a child is recursive; fixed parent onboarding looping back to "Who is this for?" after Done.
-- Device binding built, then reverted (see Security) — so a kid device still doesn't notice its child was
-  deleted until it's re-paired. *(Fixed Oct 20: binding is back; deleting a child removes it from devices.)*
-- **Several kids on one device** (Oct 20): Who's watching?, PINs, Settings → Devices, per-child state.
+- Device binding built, then reverted the same day (an unrelated onboarding bug made it look broken).
+  *(Back for good Oct 20 — see the `multi-kid` entry.)*
