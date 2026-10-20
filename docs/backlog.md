@@ -75,6 +75,10 @@ What's next, in rough priority order. Update this file as things land.
   reached by ≥2 checked videos raises the channel's rating — IShowSpeed's search said "mild swearing").
   Review sheet: calm yellow "⚠️ N things to know for <child>" with a normal Add button; red + "Add anyway"
   only for ⛔ Not a fit.
+- Backlog (Oct 19): **clean up a removed channel's results** — removing a channel keeps its
+  `videoVerdicts` (hidden in the parent app since Oct 19, never in the kid feed). Delete them ~1 month
+  after removal if the channel wasn't re-added (re-adding within that time keeps the parent's
+  Hide / Show anyway choices).
 - Backlog (Oct 19): **channel conflicts after filter changes** — a ⚠️ badge on the Channels screen next to
   channels whose saved check conflicts with the child's CURRENT settings (code only, from
   `channelChecks/{id}` concerns; no AI).

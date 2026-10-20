@@ -26,6 +26,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList, VideoVerdict, Dim } from "../../types";
 import {
   subscribeToVerdicts,
+  subscribeToWhitelistedChannels,
   setShowAnyway,
   hideVideo,
   hideVideos,
@@ -81,7 +82,8 @@ function RatingChips({ v }: { v: VideoVerdict }) {
 export default function VideosScreen({ route, navigation }: Props) {
   const { childId, childName } = route.params;
   const user = useStore((s) => s.user);
-  const [verdicts, setVerdicts] = useState<VideoVerdict[]>([]);
+  const [allVerdicts, setVerdicts] = useState<VideoVerdict[]>([]);
+  const [channelIds, setChannelIds] = useState<Set<string> | null>(null);
   const [tab, setTab] = useState<"shown" | "hidden">("shown");
   const [confirming, setConfirming] = useState<VideoVerdict | null>(null);
   const [details, setDetails] = useState<VideoVerdict | null>(null); // "learn more" sheet
@@ -91,9 +93,21 @@ export default function VideosScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (!user) return;
-    return subscribeToVerdicts(user.uid, childId, setVerdicts);
+    const unsubV = subscribeToVerdicts(user.uid, childId, setVerdicts);
+    const unsubC = subscribeToWhitelistedChannels(user.uid, childId, (chs) =>
+      setChannelIds(new Set(chs.map((c) => c.channelId)))
+    );
+    return () => {
+      unsubV();
+      unsubC();
+    };
   }, [user, childId]);
 
+  // Only channels still on the list (a removed channel's results stay in the database, unseen)
+  const verdicts = useMemo(
+    () => (channelIds ? allVerdicts.filter((v) => channelIds.has(v.channelId)) : []),
+    [allVerdicts, channelIds]
+  );
   const shown = useMemo(() => verdicts.filter((v) => v.approved), [verdicts]);
   const hidden = useMemo(() => verdicts.filter((v) => !v.approved), [verdicts]);
   const list = tab === "shown" ? shown : hidden;
