@@ -31,10 +31,10 @@ export interface ApprovedVideo {
   durationSeconds: number | null;
 }
 
-// Parent's viewing rules (child doc → viewing). breakSeconds: 0 / 30 / 60 / 120.
+// Parent's viewing rules (child doc → viewing): stay at least this long on a video
+// before switching — 0 (off) / 30 / 60 / 120 seconds, or -1 = the whole video.
 export interface ViewingRules {
-  breakSeconds: number;
-  mustFinish: boolean;
+  minWatchSeconds: number;
 }
 
 export type PlaySignalAction = "play" | "pause" | "stop";

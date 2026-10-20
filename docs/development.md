@@ -143,11 +143,11 @@ re-rates every profiled video once (OpenAI only).
   Digital Circus / Murder Drones), a small Gacha Life storytelling channel, Poppy Playtime fan animations,
   Skibidi Toilet, Markiplier (swearing not visible in thumbnails). Same channel on an older child should
   give a different badge from the same saved report (log: `Cached:`).
-- **Cooldowns:** Settings → child → Viewing → break 30 s + must finish on. Kid phone: open a video, tap
-  Back → "Finish this one first! m:ss left"; Android back → same; drag to the end → "Nice try 😄" and it
-  jumps back; close and reopen the app → the same video reopens where it was; parent Home → Hide this video
-  → it closes with no break. Let a short video finish → "Take a breather" countdown → feed. Turn must
-  finish off → Back works at once.
+- **Minimum watch time:** Settings → child → Viewing → 30 s. Kid phone: open a video, tap Back right away
+  → "Watch a little more! 0:2x left"; Android back → same; pause for 30 s → Back works (pauses count);
+  drag to the end early → "Nice try 😄" and it jumps back; close the app at 10 s and reopen → the same video
+  reopens; parent Home → Hide this video → it closes. "Whole" → Back says "Finish this one first!" until
+  ~90% has played. Off → Back works at once.
 - **Pace / junk / images:** CoComelon on a ≤6 child → mostly Hidden ("High energy — your limit: Lively");
   Ms Rachel → Shown (stimulation 1–2); a video's details show "· Made for kids"; no-caption videos show
   the "No captions — rated from…" line; "Too hyper" moves a video to Hidden and adds a

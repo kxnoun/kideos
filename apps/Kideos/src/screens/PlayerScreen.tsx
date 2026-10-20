@@ -16,11 +16,12 @@
 //   on Android that needs patches/react-native-webview+13.16.1.patch).
 //   ⚠️ Changing the YouTube player is against YouTube's terms — decide before launch
 //   (docs/backlog.md → kid player).
-// - "Must finish each video" (parent's viewing rules): Back / Android back show
-//   "Finish this one first! m:ss left" until ~90% has actually played (seeking
-//   doesn't count; skipping to the end → "Nice try" and back to where they were).
-//   Progress is saved, so closing the app reopens the same video. A parent's Hide /
-//   End Session always gets the kid out.
+// - "Before switching videos, stay at least" (parent's viewing rules, src/viewing.ts):
+//   until it's up, Back / Android back keep the kid on the video with a banner.
+//   Timed (30 s / 1 / 2 min): counts from when the video first starts playing —
+//   pausing counts. The whole video: ~90% actually played (seeking doesn't count;
+//   skipping to the end → "Nice try" and back to where they were). Saved, so
+//   closing the app reopens it. A parent's Hide / End Session always gets the kid out.
 // ─────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
@@ -48,7 +49,7 @@ import {
   logWatchSessionEnd,
 } from "../services/firebase";
 import type { ApprovedVideo, ChildSession } from "../types";
-import { FINISHED_SHARE, formatLeft, saveUnfinished, type Unfinished } from "../viewing";
+import { FINISHED_SHARE, WHOLE_VIDEO, formatLeft, saveUnfinished, type Unfinished } from "../viewing";
 
 // done = watched or left normally; removed = a parent hid it; error = it won't play here
 export type ExitReason = "done" | "removed" | "error";
@@ -127,29 +128,42 @@ const PLAYER_HEIGHT = width * 0.5625; // 16:9
 interface Props {
   video: ApprovedVideo;
   session: ChildSession;
-  mustFinish: boolean;
-  resume: Unfinished | null; // pick up an unfinished video where it was
+  minWatchSeconds: number; // 0 = off, -1 = the whole video
+  resume: Unfinished | null; // pick up an owed video where it was
   onBack: (reason?: ExitReason) => void;
 }
 
-export default function PlayerScreen({ video, session, mustFinish, resume, onBack }: Props) {
+export default function PlayerScreen({ video, session, minWatchSeconds, resume, onBack }: Props) {
   const { parentId, childId } = session;
   const [playing, setPlaying] = useState(true); // kept in step with the real player (onChangeState)
   const sessionIdRef = useRef<string | null>(null);
   const startTimeRef = useRef<number>(Date.now());
 
-  // ── Must finish: count real play time ──
+  // ── Minimum time on this video ──
+  const whole = minWatchSeconds === WHOLE_VIDEO;
+  const ruleOn = minWatchSeconds !== 0;
   const playerRef = useRef<YoutubeIframeRef>(null);
   const isPlayingRef = useRef(false);
   const playedRef = useRef(resume?.played ?? 0); // seconds actually played
   const lastPosRef = useRef(resume?.position ?? 0); // last position reached by playing (not seeking)
   const durationRef = useRef(video.durationSeconds ?? 0);
+  const startedAtRef = useRef<number | null>(resume?.startedAt ?? null); // first started playing (ms)
   const [message, setMessage] = useState("");
   const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const leftToFinish = () => Math.max(0, durationRef.current * FINISHED_SHARE - playedRef.current);
-  const finished = () => !durationRef.current || leftToFinish() <= 0; // unknown length → never block
-  const blocked = () => mustFinish && !finished();
+  // Seconds still owed (0 = free to go)
+  const owed = (): number => {
+    if (!ruleOn) return 0;
+    if (whole) {
+      if (!durationRef.current) return 0; // unknown length → never block
+      return Math.max(0, durationRef.current * FINISHED_SHARE - playedRef.current);
+    }
+    if (startedAtRef.current === null) return 0; // hasn't started playing yet
+    return Math.max(0, minWatchSeconds - (Date.now() - startedAtRef.current) / 1000);
+  };
+  const blocked = () => owed() > 0;
+  const save = () =>
+    saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current, startedAt: startedAtRef.current });
 
   const flash = useCallback((text: string) => {
     setMessage(text);
@@ -166,30 +180,22 @@ export default function PlayerScreen({ video, session, mustFinish, resume, onBac
       if (typeof pos === "number" && pos >= lastPosRef.current - 1 && pos <= lastPosRef.current + 3) {
         lastPosRef.current = pos;
       }
-      if (mustFinish && !finished() && playedRef.current % 5 === 0) {
-        saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current });
-      }
+      if (blocked() && playedRef.current % 5 === 0) save();
     }, 1000);
     return () => clearInterval(tick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mustFinish, video]);
-
-  // Remember it right away, so closing the app in the first seconds still reopens it
-  useEffect(() => {
-    if (mustFinish && !finished()) saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mustFinish, video]);
+  }, [minWatchSeconds, video]);
 
   // Leaving is only blocked while "must finish" applies
   const tryLeave = useCallback(() => {
     if (blocked()) {
-      flash(`Finish this one first! ${formatLeft(leftToFinish())} left`);
+      flash(whole ? `Finish this one first! ${formatLeft(owed())} left` : `Watch a little more! ${formatLeft(owed())} left`);
       return;
     }
     setPlaying(false);
     onBack("done");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onBack, flash, mustFinish]);
+  }, [onBack, flash, minWatchSeconds]);
 
   // Android back button: same as ← Back (instead of closing the app)
   useEffect(() => {
@@ -275,10 +281,17 @@ export default function PlayerScreen({ video, session, mustFinish, resume, onBac
           }}
           onChangeState={(state: string) => {
             isPlayingRef.current = state === "playing";
+            if (state === "playing" && startedAtRef.current === null) {
+              startedAtRef.current = Date.now(); // the minimum time counts from here
+              if (ruleOn) save(); // so closing the app right away still reopens it
+            }
             if (state === "ended") {
-              if (blocked()) {
+              // Ended for real (most of it played — e.g. a short video) always lets them go;
+              // dragged to the end while still owed → back to where they really were
+              const reallyWatched = playedRef.current >= durationRef.current * FINISHED_SHARE;
+              if (blocked() && !reallyWatched) {
                 // Skipped to the end without watching — back to where they really were
-                flash(`Nice try 😄 ${formatLeft(leftToFinish())} left`);
+                flash(`Nice try 😄 ${formatLeft(owed())} left`);
                 playerRef.current?.seekTo(lastPosRef.current, true);
                 setPlaying(true);
                 return;

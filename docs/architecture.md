@@ -215,20 +215,22 @@ Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe
 - If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`), the player closes it with
   "This video can't play here — pick another one!".
 
-**Viewing rules (cooldowns)** — parent app Settings → a child → **Viewing** → saved on the child doc as
-`viewing: { breakSeconds: 0 | 30 | 60 | 120, mustFinish }` (the kid app may read the child doc;
-`subscribeToViewingRules`). In the kid app (`App.tsx`, `src/viewing.ts`):
-- **Break between videos:** leaving a video normally (it ended, or Back when allowed) starts a break —
-  `BreakScreen`, a calm "Take a breather 🌿 Next video in 0:30" with nothing to tap, then the feed. The end
-  time is kept in AsyncStorage, so closing the app doesn't skip it. No break after a parent's Hide or a
-  video that won't play.
-- **Must finish each video:** `PlayerScreen` counts seconds actually played (1 s ticks while playing and the
-  app is in front; seeking doesn't count). Until ~90% of the length has played (`FINISHED_SHARE`), ← Back
-  and Android's back button show "Finish this one first! m:ss left"; skipping to the end shows "Nice try 😄
-  m:ss left" and jumps back to the furthest point reached by playing. Progress is saved to AsyncStorage
-  (on open and every 5 s), so closing the app reopens the same video where it was. A parent's **Hide this
-  video** or **End Session** always gets the kid out (and clears it); turning the rule off releases it.
-  Unknown length → never blocked. Android back now returns to the feed instead of closing the app.
+**Viewing rules** — parent app Settings → a child → **Viewing** → "Before switching videos, stay at
+least": Off / 30 s / 1 min / 2 min / Whole, saved on the child doc as `viewing.minWatchSeconds` (0 / 30 / 60 /
+120, −1 = whole video; the kid app may read the child doc — `subscribeToViewingRules`). In the kid app
+(`PlayerScreen`, `src/viewing.ts`): until the time is up, ← Back and Android's back button keep the kid on
+the video with a banner — "Watch a little more! 0:12 left" (timed) or "Finish this one first! 2:41 left"
+(whole video). No waiting screens.
+- **Timed:** counts from when the video first starts playing, by the clock — pausing counts, and so does
+  time with the app closed (a kid who watched 5 s and comes back 10 min later can leave).
+- **Whole video:** ~90% of the length actually played (`FINISHED_SHARE`; 1 s ticks while playing and the
+  app is in front; seeking doesn't count). Unknown length → never blocked.
+- Dragging to the end while time is still owed → "Nice try 😄" and back to the furthest point reached by
+  playing; a video that really ends (most of it played — e.g. a short one) always lets them go.
+- The owed video is saved to AsyncStorage (when it starts playing and every 5 s), so closing the app
+  reopens it if time is still owed. A parent's **Hide this video** or **End Session** always gets the kid
+  out (and clears it); turning the rule off releases it. Android back now returns to the feed instead of
+  closing the app.
 
 Remote control: parent → `currentSession/parentCommand` (`pause` / `play` / `stop`) →
 **`handleParentCommand`** → `currentSession/playSignal`. The kid player reacts only to commands sent while
@@ -290,7 +292,7 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | Path | Contents | Written by | Read by |
 |---|---|---|---|
 | `users/{p}` | parent profile (email, createdAt) | parent app | parent |
-| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing` rules: `breakSeconds`, `mustFinish`) | parent app | parent, signed-in kid devices |
+| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing.minWatchSeconds`) | parent app | parent, signed-in kid devices |
 | `…/children/{c}/dismissedSuggestions/{ch}` | "Not for us" on a suggested channel | parent | parent |
 | `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | parent, functions |
 | `…/children/{c}/whitelistedChannels/{ch}` | name, thumbnail, `seedingStatus` pending/ready/error, `videoCount` | functions (create), parent (delete) | parent, kid |
@@ -340,9 +342,8 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 
 ## Apps
 
-**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Break / Time's
-up), `src/viewing.ts` (viewing rules, break end time + unfinished video in AsyncStorage),
-`screens/BreakScreen.tsx`,
+**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Time's up;
+reopens a video still owed), `src/viewing.ts` (viewing rules, the owed video in AsyncStorage),
 `hooks/useSession.ts` (paired session in AsyncStorage), `screens/PairingScreen.tsx`,
 `screens/FeedScreen.tsx` (grid, channel names, remote stop), `screens/PlayerScreen.tsx`,
 `services/firebase.ts` (`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`,

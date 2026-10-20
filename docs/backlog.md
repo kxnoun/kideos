@@ -214,11 +214,13 @@ these are the known gaps):
 
 ## Done (Oct 2026)
 
-Oct 19 (branch `cooldowns`): **viewing rules per child** (Settings → Viewing): a break between videos
-(off / 30 s / 1 min / 2 min — "Take a breather 🌿" countdown, survives closing the app) and **must finish
-each video** (Back / Android back show "Finish this one first! m:ss left" until ~90% has actually
-played; skipping to the end → "Nice try 😄"; reopens after a restart; Hide / End Session always get the kid
-out). Stored on the child doc; Android back now returns to the feed instead of closing the app.
+Oct 19 (branch `cooldowns`): **minimum time on a video per child** (Settings → Viewing: "Before switching
+videos, stay at least" Off / 30 s / 1 min / 2 min / Whole). Back / Android back keep the kid on the video
+with "Watch a little more! 0:12 left"; timed = from when it starts playing (pauses count), whole = ~90%
+actually played; dragging to the end → "Nice try 😄"; reopens after a restart if still owed; Hide / End
+Session always get the kid out. Stored on the child doc; Android back now returns to the feed instead of
+closing the app. (A "Take a breather" break screen was built first and dropped — Adam wanted a minimum
+watch time, not a wait.)
 
 Oct 18–19 (branch `pace-and-stimulation`, includes `parent-video-preview` and `embed-blocked-videos`):
 - **Parent app: tap a video's thumbnail to watch it** (now-watching card + video details).

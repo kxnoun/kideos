@@ -1,44 +1,44 @@
 // ─────────────────────────────────────────────────────────────
-// Kideos Kid App — viewing rules (cooldowns), set per child by the parent
+// Kideos Kid App — viewing rules, set per child by the parent
 //
-// Stored on the child doc (users/{p}/children/{c}.viewing), which a paired kid
-// device can read. Kept on this device (AsyncStorage) so they survive the app
-// being closed:
-//   - breakUntil: when the current break ends (ms)
-//   - unfinished: the video the kid must finish, and where they were
+// "Before switching videos, stay at least": off / 30 s / 1 min / 2 min / the whole
+// video. Stored on the child doc (users/{p}/children/{c}.viewing.minWatchSeconds;
+// -1 = the whole video), which a paired kid device can read.
+//   - Timed: counts from when the video first starts playing, wall-clock — pausing
+//     counts, and so does time with the app closed.
+//   - Whole video: ~90% actually played (pausing / seeking don't count).
+// The video still being "owed" is kept on this device (AsyncStorage), so closing
+// the app reopens it.
 // ─────────────────────────────────────────────────────────────
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ApprovedVideo, ViewingRules } from "./types";
 
-export const NO_RULES: ViewingRules = { breakSeconds: 0, mustFinish: false };
-export const FINISHED_SHARE = 0.9; // this much of the video actually played = finished
+export const WHOLE_VIDEO = -1;
+export const NO_RULES: ViewingRules = { minWatchSeconds: 0 };
+export const FINISHED_SHARE = 0.9; // "whole video": this much actually played = finished
 
-const BREAK_KEY = "@kideos_break_until";
 const UNFINISHED_KEY = "@kideos_unfinished";
 
 export interface Unfinished {
   video: ApprovedVideo;
   position: number; // seconds into the video
   played: number; // seconds actually played
+  startedAt: number | null; // when it first started playing (ms)
 }
 
 export function normalizeRules(raw: unknown): ViewingRules {
-  const r = (raw ?? {}) as Partial<ViewingRules>;
-  const breakSeconds = [0, 30, 60, 120].includes(Number(r.breakSeconds)) ? Number(r.breakSeconds) : 0;
-  return { breakSeconds, mustFinish: Boolean(r.mustFinish) };
+  const r = (raw ?? {}) as { minWatchSeconds?: unknown; mustFinish?: unknown };
+  const n = Number(r.minWatchSeconds);
+  if ([0, 30, 60, 120, WHOLE_VIDEO].includes(n)) return { minWatchSeconds: n };
+  return { minWatchSeconds: r.mustFinish ? WHOLE_VIDEO : 0 }; // first version of this setting
 }
 
-export async function getBreakUntil(): Promise<number> {
-  try {
-    return Number(await AsyncStorage.getItem(BREAK_KEY)) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-export async function setBreakUntil(ms: number): Promise<void> {
-  await AsyncStorage.setItem(BREAK_KEY, String(ms)).catch(() => {});
+// Still has to stay on this video?
+export function stillOwed(u: Unfinished, rules: ViewingRules, now = Date.now()): boolean {
+  if (rules.minWatchSeconds === 0) return false;
+  if (rules.minWatchSeconds === WHOLE_VIDEO) return true; // the player checks the exact amount
+  return u.startedAt !== null && now - u.startedAt < rules.minWatchSeconds * 1000;
 }
 
 export async function getUnfinished(): Promise<Unfinished | null> {

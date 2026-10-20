@@ -3,7 +3,7 @@
 //
 // - Child profile management (view / add / delete)
 // - Content filter editing per child
-// - Viewing rules per child (break between videos, must finish each video)
+// - Viewing rules per child (minimum time on a video before switching)
 // - Data & Privacy: delete child watch history
 // - Sign out
 // ─────────────────────────────────────────────────────────────
@@ -20,7 +20,6 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
-  Switch,
 } from "react-native";
 import type { ValueFilters, ViewingRules } from "../../types";
 import {
@@ -31,11 +30,12 @@ import {
   updateChild,
 } from "../../services/firebase";
 
-const BREAKS: { value: number; label: string }[] = [
+const MIN_WATCH: { value: number; label: string }[] = [
   { value: 0, label: "Off" },
-  { value: 30, label: "30 sec" },
+  { value: 30, label: "30 s" },
   { value: 60, label: "1 min" },
   { value: 120, label: "2 min" },
+  { value: -1, label: "Whole" },
 ];
 import { useStore } from "../../store/useStore";
 import FiltersForm from "../../components/FiltersForm";
@@ -55,13 +55,16 @@ export default function SettingsScreen() {
   const [savingFilters, setSavingFilters] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [viewingChildId, setViewingChildId] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<ViewingRules>({ breakSeconds: 0, mustFinish: false });
+  const [viewing, setViewing] = useState<ViewingRules>({ minWatchSeconds: 0 });
   const [savingViewing, setSavingViewing] = useState(false);
 
   const openViewing = useCallback(
     (childId: string) => {
-      const v = children.find((c) => c.id === childId)?.profile.viewing;
-      setViewing({ breakSeconds: v?.breakSeconds ?? 0, mustFinish: Boolean(v?.mustFinish) });
+      const v = children.find((c) => c.id === childId)?.profile.viewing as
+        | (ViewingRules & { mustFinish?: boolean })
+        | undefined;
+      const n = Number(v?.minWatchSeconds);
+      setViewing({ minWatchSeconds: [0, 30, 60, 120, -1].includes(n) ? n : v?.mustFinish ? -1 : 0 });
       setViewingChildId(childId);
     },
     [children]
@@ -240,37 +243,29 @@ export default function SettingsScreen() {
           </View>
           <ScrollView contentContainerStyle={styles.modalContent}>
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Break between videos</Text>
+              <Text style={styles.fieldLabel}>Before switching videos, stay at least</Text>
               <View style={styles.segment}>
-                {BREAKS.map((b) => (
+                {MIN_WATCH.map((m) => (
                   <TouchableOpacity
-                    key={b.value}
-                    style={[styles.segmentBtn, viewing.breakSeconds === b.value && styles.segmentBtnActive]}
-                    onPress={() => setViewing({ ...viewing, breakSeconds: b.value })}
+                    key={m.value}
+                    style={[styles.segmentBtn, viewing.minWatchSeconds === m.value && styles.segmentBtnActive]}
+                    onPress={() => setViewing({ minWatchSeconds: m.value })}
                   >
-                    <Text style={[styles.segmentText, viewing.breakSeconds === b.value && styles.segmentTextActive]}>
-                      {b.label}
+                    <Text style={[styles.segmentText, viewing.minWatchSeconds === m.value && styles.segmentTextActive]}>
+                      {m.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
               <Text style={styles.hint}>
-                After each video, {viewingChildName} sees a calm “Take a breather” screen with a countdown before the
-                videos come back.
-              </Text>
-            </View>
-            <View style={styles.field}>
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Must finish each video</Text>
-                <Switch
-                  value={viewing.mustFinish}
-                  onValueChange={(mustFinish) => setViewing({ ...viewing, mustFinish })}
-                  trackColor={{ true: "#6C63FF" }}
-                />
-              </View>
-              <Text style={styles.hint}>
-                {viewingChildName} can't leave a video until most of it has actually played — skipping ahead doesn't
-                count. If you need to get them out, use Hide this video or End Session on Home.
+                {viewing.minWatchSeconds === 0
+                  ? `${viewingChildName} can switch videos any time.`
+                  : viewing.minWatchSeconds === -1
+                  ? `${viewingChildName} can't leave a video until most of it has actually played — skipping ahead doesn't count.`
+                  : `Counts from when the video starts playing — pausing counts too. Until then, Back keeps ${viewingChildName} on the video with a “Watch a little more!” message.`}
+                {viewing.minWatchSeconds !== 0
+                  ? " To get them out sooner, use Hide this video or End Session on Home."
+                  : ""}
               </Text>
             </View>
           </ScrollView>
