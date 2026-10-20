@@ -16,6 +16,13 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 - `adb` lives at `"$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"`. Re-run `adb reverse` after every
   reconnect, or the app shows "Unable to load script".
 - JS-only changes: Metro reloads, or press `r`. Only rebuild with Gradle after native/dependency changes.
+  **Native code in the kid app** (needs a Gradle rebuild when it changes): `MainActivity.kt` (hides the
+  system bars), `KideosWindowModule.kt` + its line in `MainApplication.kt` (landscape lock), the fonts, and
+  the webview patch. If a long video doesn't turn the phone sideways, logcat shows
+  `[device] KideosWindow native module missing` → the app was built before the module existed; rebuild.
+- **Judge smoothness on a release build** — debug builds are several times slower on the 6T. The kid app's
+  release build is signed with the debug keystore, so it installs straight away:
+  `.\gradlew app:installRelease` (in `apps\Kideosndroid`; JS is bundled, no Metro needed).
 - Fonts (kid app: Fredoka + Nunito in `apps/Kideos/assets/fonts`) are native assets: Android reads them from
   `android/app/src/main/assets/fonts` (rebuild with Gradle after adding one); iOS needs
   `npx react-native-asset` once on a Mac. Name font files by their PostScript name.
@@ -27,8 +34,14 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
   device to its own Metro port.
 - After an edit that adds/removes hooks or state, fully restart the app ("Should have a queue" = hot reload
   confusion, not a bug).
-- Reset the kid app's pairing: `adb shell pm clear com.kideos.app`, then pair again from the parent app
-  (this also unpairs it).
+- Reset the kid app's pairing: **parent app → Settings → Devices → Unpair** (the kid app goes back to its
+  pairing screen by itself). `adb shell pm clear com.kideos.app` also works, but the device gets a new
+  anonymous identity, so its old entry stays in Settings → Devices — unpair that one too.
+- **Test the little layout** (or any age): the parent app can't edit a child's age yet — Firebase console →
+  Firestore → `users/{you}/children/{child}` → `age` (≤ 4 = little, landscape; 5+ = big). The kid app
+  switches live. This only changes the layout, not the content settings.
+- **Test several kids on one device:** Settings → Devices → tap a second child on the device → the kid app
+  shows "Who's watching?". Set "Ask Who's watching?" to 1 min to test the timing quickly.
 
 ## Logs
 
@@ -46,6 +59,8 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 | Seeding / Load more | `… --only onChannelWhitelisted \| Select-String "seedVideoMetadata"` → `N long videos + M Shorts` (or "using the mixed uploads list"); `… --only onMoreVideosRequested` → `N more long videos, M fit`; nightly top-up: `… --only refreshChannelLibraries \| Select-String "top-up"` |
 | Profile upgrades | `firebase functions:log --only reprofileOutdated \| Select-String "upgraded="` → `— done` or `— out of time` (Force run again) |
 | Transcripts | `… \| Select-String "Supadata\|transcriptCache"` — `Unexpected status 429` = rate limit **or out of credits** (Supadata uses 429 for both; the log line includes their error message) |
+| Kid devices moving over | `firebase functions:log --only onDeviceMigration` → `moved <uid> over for <parent>/<child>` or `refused <uid>: <reason>` (`no pairing found`, `too late — pair again`…) |
+| Kid app layout / device | logcat `ReactNativeJS`: `[device] landscape only: true/false`, `[player] window WxH insets … → player WxH` (debug builds), `[kidDevice] / [child] / [deviceMigration] listener error` (usually a rules denial — is the device's `kidDevices` doc there and listing the child?) |
 | Save to a file to share | `… \| Out-File something.txt` (UTF-16) |
 
 The "This method is deprecated … namespaced API" warnings are React Native Firebase 22 nagging about the
@@ -60,6 +75,10 @@ firebase deploy --only "functions:kideos-backend"   # backend (all functions)
 firebase deploy --only functions:kideos-backend:getChannelSuggestions   # one function (codebase prefix needed)
 firebase deploy --only "firestore:rules,firestore:indexes"   # when rules/indexes change
 ```
+**Rules + functions together when they depend on each other** — e.g. the Oct 20 device binding:
+`firebase deploy --only "functions:kideos-backend,firestore:rules"`, and only then run the new kid app
+(an old one-child device asks `onDeviceMigration` to move it over; until the function is live it waits on
+"Loading").
 New composite indexes take a few minutes to build; queries that need them fail until then.
 
 **Wait ~1 minute after "Deploy complete" before testing.** Google switches traffic to the new version a
@@ -130,12 +149,10 @@ re-rates every profiled video once (OpenAI only).
 
 - **Type-check all three packages** (the main safety net):
   `node node_modules/typescript/bin/tsc --noEmit -p .` in `functions/`, `apps/Kideos`, `apps/KideosParent`.
-  Known pre-existing error: `apps/Kideos/src/screens/PlayerScreen.tsx(111)` implicit `any`.
 - The backend logic was verified with throwaway mock harnesses (fake Firestore / Supadata / OpenAI
   counting every call). They aren't in the repo yet — adding a real test suite is in the backlog.
-- **Firestore rules:** `tests/rules/` — real emulator tests (paired vs unpaired devices, Show anyway,
-  pairing). ⚠️ They describe the device-binding rules, which were reverted — the binding cases fail
-  until binding returns. Run on your machine (needs Java 21: in PowerShell first
+- **Firestore rules:** `tests/rules/` — real emulator tests (paired vs unpaired devices, siblings a device
+  isn't paired to, Show anyway, pairing, moving old devices over). Run on your machine (needs Java 21: in PowerShell first
   `$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; $env:Path = "$env:JAVA_HOME\bin;$env:Path"`):
   `cd tests\rules; npm install; cd ..\..; firebase emulators:exec --only firestore --project demo-kideos "node tests/rules/rules.test.mjs"`.
   Run them after any change to `firestore.rules`.
@@ -155,6 +172,21 @@ re-rates every profiled video once (OpenAI only).
   drag to the end early → "Nice try 😄" and it jumps back; close the app at 10 s and reopen → the same video
   reopens; parent Home → Hide this video → it closes. "Whole" → Back says "Finish this one first!" until
   ~90% has played. Off → Back works at once.
+- **Kid app — layouts and motion** (big mode on Simon; little mode via `age` ≤ 4 in Firestore): rotate on
+  home / channel page / player; chips light up instantly and scroll; "See all" slides in from the right and
+  out to the right with no stutter, home keeps its scroll position; every button lights up only while
+  pressed; nothing jumps sideways when switching screens.
+- **Kid player gestures:** tap a tile → the thumbnail grows into the player and fades into the video; drag
+  down straight / diagonally / mostly sideways → the video follows and flies off that way (feed visible
+  behind); let go early → springs back; drag up → rises into "More from", let go → snaps in; drag down from
+  there → back to full; tap to pause and drag the seek bar → still YouTube's; with a 30 s minimum → drag
+  down only stretches and says "Watch a little more!"; end of a video → end card.
+- **Several kids:** two children on the device → "Who's watching?" → pick → "Hi Simon!" slides away onto a
+  full feed; set a PIN (Settings → child → Viewing → Profile PIN) → wrong PIN shakes, 5 wrong → 30 s wait;
+  avatar switches profile (slides down); 1-min ask-again → leave the app 1+ min → picker; within the minute →
+  same child; swipe the app away (full restart) → picker; End Session for one child → 🌙 on their tile, the
+  sibling can still watch; a child with no channels → "Who's watching?" button on the empty feed; Unpair →
+  pairing screen.
 - **Pace / junk / images:** CoComelon on a ≤6 child → mostly Hidden ("High energy — your limit: Lively");
   Ms Rachel → Shown (stimulation 1–2); a video's details show "· Made for kids"; no-caption videos show
   the "No captions — rated from…" line; "Too hyper" moves a video to Hidden and adds a

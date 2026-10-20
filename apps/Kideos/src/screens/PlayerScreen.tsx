@@ -14,8 +14,11 @@
 //   phone in landscape). Nothing is drawn on top of it: a quiet round back button sits
 //   in the middle of the black space beside it (or above it on 4:3 tablets) — only if
 //   there's room; otherwise swipe down / Android back.
-// - Swipe DOWN on the video → it drops away and the feed comes back (bounces back
-//   with "Watch a little more!" while the minimum time is owed).
+// - Opening: the tapped thumbnail grows out of its tile into the player and stays as
+//   the picture until the video really plays, then fades into it (seamless open).
+// - Drag DOWN → the video follows the finger, shrinking, and the feed shows through
+//   behind it; let go far enough → it drops away, otherwise it springs back (only
+//   stretches a little, then "Watch a little more!", while the minimum time is owed).
 // - Swipe UP → the video shrinks up and "More from <channel>" slides in under it
 //   (it moves out of the way — no overlay). Swipe down (anywhere) / the button /
 //   Android back → full again.
@@ -50,6 +53,7 @@ import {
   AppState,
   BackHandler,
   FlatList,
+  Image,
   Linking,
   PanResponder,
   ScrollView,
@@ -70,9 +74,9 @@ import {
   logWatchSessionStart,
   logWatchSessionEnd,
 } from "../services/firebase";
-import type { ApprovedVideo, ChildSession } from "../types";
+import type { ApprovedVideo, ChildSession, TileRect } from "../types";
 import { FINISHED_SHARE, WHOLE_VIDEO, formatLeft, saveUnfinished, type Unfinished } from "../viewing";
-import { colors, fonts, radius, useLayout } from "../theme";
+import { colors, fonts, MOTION, radius, useLayout } from "../theme";
 import { markWatched, useWatched } from "../watched";
 import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
@@ -192,11 +196,12 @@ interface Props {
   minWatchSeconds: number; // 0 = off, -1 = the whole video
   resume: Unfinished | null; // pick up an owed video where it was
   upNext: ApprovedVideo[]; // up to 3 more from the same channel (end card / swipe up)
+  from?: TileRect | null; // the tapped thumbnail — the player zooms out of it (null = from the centre)
   onPlay: (video: ApprovedVideo) => void; // picked one of upNext
   onBack: (reason?: ExitReason) => void;
 }
 
-export default function PlayerScreen({ video, session, minWatchSeconds, resume, upNext, onPlay, onBack }: Props) {
+export default function PlayerScreen({ video, session, minWatchSeconds, resume, upNext, from, onPlay, onBack }: Props) {
   const { parentId, childId } = session;
   const layout = useLayout();
   const insets = useSafeAreaInsets();
@@ -221,14 +226,34 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Animations (native driver) ──
-  const enter = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current; // 0 → 1 on open
-  const drop = useRef(new Animated.Value(0)).current; // px down: swipe-down exit / bounce
+  const open = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current; // 0 → 1: zooming out of the tile
+  // Dragging the video away (any downward direction): where it is, and how far gone (0–1)
+  const dragX = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const away = useRef(new Animated.Value(0)).current; // shrinks / fades / shows the feed
+  // Geometry the gesture handler needs (set during render)
+  const geo = useRef({ playerY: 0, playerH: 0, playerX: 0, playerW: 0, moreY: -1 });
+  const thumb = useRef(new Animated.Value(1)).current; // the thumbnail over the player until it plays
+  const drop = useRef(new Animated.Value(0)).current; // px down: "not yet" bounce
   const more = useRef(new Animated.Value(0)).current; // 0 full, 1 shrunk up with the row below
   const leavingRef = useRef(false);
+  const lastSwipeAt = useRef(0);
 
   useEffect(() => {
-    Animated.timing(enter, { toValue: 1, duration: 260, useNativeDriver: true }).start();
-  }, [enter]);
+    Animated.timing(open, { toValue: 1, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start();
+  }, [open]);
+
+  // The thumbnail fades into the video once it really plays (or soon after it's ready / at worst 5 s)
+  const revealed = useRef(false);
+  const reveal = useCallback(() => {
+    if (revealed.current) return;
+    revealed.current = true;
+    Animated.timing(thumb, { toValue: 0, duration: 180, easing: MOTION.easing, useNativeDriver: true }).start();
+  }, [thumb]);
+  useEffect(() => {
+    const t = setTimeout(reveal, 5000);
+    return () => clearTimeout(t);
+  }, [reveal]);
 
   // Seconds still owed (0 = free to go)
   const owed = (): number => {
@@ -242,7 +267,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   };
   const blocked = () => owed() > 0;
   const save = () =>
-    saveUnfinished({ video, position: lastPosRef.current, played: playedRef.current, startedAt: startedAtRef.current });
+    saveUnfinished(childId, { video, position: lastPosRef.current, played: playedRef.current, startedAt: startedAtRef.current });
 
   const flash = useCallback((text: string) => {
     setMessage(text);
@@ -277,11 +302,18 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
     ]).start();
   };
 
-  // Back to the feed: the video drops away (only once the minimum time is up)
-  const leave = () => {
+  const toward = (v: Animated.Value, to: number, ms: number = MOTION.slideOut) =>
+    Animated.timing(v, { toValue: to, duration: ms, easing: MOTION.easing, useNativeDriver: true });
+  const springBack = () => Animated.parallel([toward(dragX, 0), toward(dragY, 0), toward(away, 0)]).start();
+
+  // Back to the feed: the video carries on the way the finger was going (straight down
+  // for ← / Android back), shrinking and fading while the feed shows through — only
+  // once the minimum time is up
+  const leave = (ux = 0, uy = 1) => {
     if (leavingRef.current) return;
     if (blocked()) {
       flash(stillHereMessage());
+      springBack();
       bounce();
       return;
     }
@@ -291,16 +323,37 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
       onBack("done");
       return;
     }
-    Animated.timing(drop, { toValue: layout.height * 0.6, duration: 220, useNativeDriver: true }).start(() => onBack("done"));
+    const D = Math.max(layout.width, layout.height) * 0.9;
+    Animated.parallel([toward(dragX, ux * D), toward(dragY, uy * D), toward(away, 1)]).start(() => onBack("done"));
+  };
+
+  // Finger let go
+  const release = (dx: number, dy: number, vx: number, vy: number, mode: "down" | "up" | "more") => {
+    lastSwipeAt.current = Date.now(); // the web view's report of this same swipe is ignored
+    if (mode !== "down") {
+      // Dragging the video up into "More from" (or back down out of it): finish whichever way it was heading
+      const opening = mode === "up" ? dy < -40 || vy < -0.5 : !(dy > 40 || vy > 0.5);
+      (opening ? openMore : closeMore)();
+      return;
+    }
+    const dist = Math.hypot(dx, dy);
+    const speed = Math.hypot(vx, vy);
+    if (dy > 0 && (dist > Math.max(80, layout.height * 0.18) || (speed > 0.8 && dist > 30))) {
+      leave(dist ? dx / dist : 0, dist ? dy / dist : 1);
+      return;
+    }
+    springBack();
   };
 
   const openMore = () => {
     if (!upNext.length || ended) return;
     setShowMore(true);
-    Animated.spring(more, { toValue: 1, useNativeDriver: true, bounciness: 4 }).start();
+    toward(more, 1, MOTION.slide).start(); // from wherever the finger left it
   };
   const closeMore = () => {
-    Animated.timing(more, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShowMore(false));
+    Animated.timing(more, { toValue: 0, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(() =>
+      setShowMore(false)
+    );
   };
 
   const tryPlay = (next: ApprovedVideo) => {
@@ -318,10 +371,9 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   };
 
   // Latest handlers for things called from outside React's render (web view, back button)
-  const handlers = useRef({ leave, openMore, closeMore, showMore });
-  handlers.current = { leave, openMore, closeMore, showMore };
+  const handlers = useRef({ leave, openMore, closeMore, showMore, release, blocked, ended, upNext });
+  handlers.current = { leave, openMore, closeMore, showMore, release, blocked, ended, upNext };
 
-  const lastSwipeAt = useRef(0);
   const onSwipe = useCallback((dir: string) => {
     const now = Date.now();
     if (now - lastSwipeAt.current < 600) return; // seen by both the web view and the PanResponder
@@ -331,17 +383,63 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
     if (dir === "down") (h.showMore ? h.closeMore : h.leave)();
   }, []);
 
-  // Swipes anywhere outside the video (the black space, the "More from" row)
+  // Drags anywhere — on the video too (the finger's touch is taken from the web view once
+  // it's clearly a drag; taps still reach YouTube). Down in ANY downward direction (even
+  // mostly sideways) → the video follows the finger and flies off that way; up → it rises
+  // (slower than the finger) into "More from". Drags starting on YouTube's control bar
+  // (bottom of the video — the seek bar) only count when they're straight up/down.
+  const mode = useRef<"down" | "up" | "more">("down");
   const pan = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 14 && Math.abs(g.dy) > 2 * Math.abs(g.dx),
-        onPanResponderRelease: (_e, g) => {
-          if (Math.abs(g.dy) > 40) onSwipe(g.dy > 0 ? "down" : "up");
+        onMoveShouldSetPanResponder: (_e, g) => {
+          const h = handlers.current;
+          if (h.ended || leavingRef.current) return false;
+          // The direction is decided HERE: at grant the responder resets dx/dy to 0
+          const vertical = Math.abs(g.dy) > 10 && Math.abs(g.dy) > 2 * Math.abs(g.dx);
+          if (h.showMore) {
+            mode.current = "more";
+            return vertical; // the row scrolls sideways
+          }
+          const { playerX, playerY, playerW, playerH } = geo.current;
+          const onControls =
+            g.y0 > playerY + playerH * 0.78 && g.y0 < playerY + playerH && g.x0 > playerX && g.x0 < playerX + playerW;
+          const up = h.upNext.length > 0 && -g.dy > 10 && -g.dy > Math.abs(g.dx);
+          const down = onControls ? vertical && g.dy > 0 : g.dy > 8 && g.dy >= 0.2 * Math.abs(g.dx);
+          if (up && (!onControls || vertical)) {
+            mode.current = "up";
+            return true;
+          }
+          if (down) {
+            mode.current = "down";
+            return true;
+          }
+          return false;
         },
-        onPanResponderTerminationRequest: () => true,
+        onPanResponderGrant: () => {
+          if (mode.current === "up") setShowMore(true); // the row comes in with the video
+        },
+        onPanResponderMove: (_e, g) => {
+          const h = handlers.current;
+          if (leavingRef.current) return;
+          const reach = Math.abs(geo.current.moreY) || 1;
+          if (mode.current === "up") {
+            more.setValue(Math.min(1, Math.max(0, (-g.dy * 0.6) / reach)));
+          } else if (mode.current === "more") {
+            more.setValue(Math.min(1, Math.max(0, 1 - (g.dy * 0.6) / reach)));
+          } else {
+            const k = h.blocked() ? 0.25 : 1; // owed: only stretches
+            dragX.setValue(g.dx * k);
+            dragY.setValue(g.dy * k);
+            away.setValue(Math.min(1, (Math.hypot(g.dx, Math.max(g.dy, 0)) * k) / (layout.height || 1)));
+          }
+        },
+        onPanResponderRelease: (_e, g) => handlers.current.release(g.dx, g.dy, g.vx, g.vy, mode.current),
+        onPanResponderTerminate: () => handlers.current.release(0, 0, 0, 0, mode.current),
+        onPanResponderTerminationRequest: () => false,
       }),
-    [onSwipe]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dragX, dragY, away, more]
   );
 
   // Android back: closes "More from" first, then like ← (instead of closing the app)
@@ -435,26 +533,53 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
   const moreScale = Math.min(0.62, Math.max(0.3, (H - rowBlock - 24) / playerH));
   const moreY = 12 + (playerH * moreScale) / 2 - H / 2; // centre → near the top
 
+  // Dragged away: follows the finger, smaller and fading the further it goes; the black
+  // behind fades so the feed shows through
   const playerTransform = [
-    { translateY: Animated.add(drop, more.interpolate({ inputRange: [0, 1], outputRange: [0, moreY] })) },
+    { translateX: dragX },
+    { translateY: Animated.add(Animated.add(drop, dragY), more.interpolate({ inputRange: [0, 1], outputRange: [0, moreY] })) },
     {
       scale: Animated.multiply(
-        enter.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }),
-        more.interpolate({ inputRange: [0, 1], outputRange: [1, moreScale] })
+        more.interpolate({ inputRange: [0, 1], outputRange: [1, moreScale] }),
+        away.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] })
       ),
     },
   ];
-  const playerOpacity = Animated.multiply(
-    enter,
-    drop.interpolate({ inputRange: [0, Math.max(1, H * 0.6)], outputRange: [1, 0], extrapolate: "clamp" })
-  );
+  const playerOpacity = away.interpolate({ inputRange: [0, 0.45, 0.8], outputRange: [1, 1, 0], extrapolate: "clamp" });
+  const backdrop = Animated.multiply(open, away.interpolate({ inputRange: [0, 0.7], outputRange: [1, 0], extrapolate: "clamp" }));
+  const chrome = away.interpolate({ inputRange: [0, 0.15], outputRange: [1, 0], extrapolate: "clamp" });
+
+  // Opening: the thumbnail starts on its tile and grows into the player's place
+  const playerX = insets.left + (W - playerW) / 2;
+  const playerY = insets.top + (H - playerH) / 2;
+  geo.current = { playerX, playerY, playerW, playerH, moreY };
+  const zoom = from
+    ? {
+        dx: from.x + from.w / 2 - (playerX + playerW / 2),
+        dy: from.y + from.h / 2 - (playerY + playerH / 2),
+        s: Math.max(0.1, from.w / playerW),
+      }
+    : { dx: 0, dy: 0, s: 0.85 };
+  const thumbStyle = {
+    opacity: from ? thumb : Animated.multiply(thumb, open),
+    transform: [
+      { translateX: open.interpolate({ inputRange: [0, 1], outputRange: [zoom.dx, 0] }) },
+      { translateY: open.interpolate({ inputRange: [0, 1], outputRange: [zoom.dy, 0] }) },
+      { scale: open.interpolate({ inputRange: [0, 1], outputRange: [zoom.s, 1] }) },
+    ],
+  };
+  // The player itself appears once the thumbnail is in place (it's still loading anyway)
+  const webOpacity = open.interpolate({ inputRange: [0, 0.98, 1], outputRange: [0, 0, 1] });
+  const thumbUri = video.isShort ? video.thumbnail : `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`;
 
   return (
     <View style={styles.screen} {...pan.panHandlers}>
       <StatusBar hidden />
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdrop }]} />
 
       <View style={[styles.stage, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]}>
         <Animated.View style={{ width: playerW, height: playerH, opacity: playerOpacity, transform: playerTransform }}>
+          <Animated.View style={{ opacity: webOpacity }}>
           <YoutubePlayer
             ref={playerRef}
             width={playerW}
@@ -473,6 +598,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
               if (err === "embed_not_allowed" || err === "video_not_found") onBack("error");
             }}
             onReady={() => {
+              setTimeout(reveal, 1500); // in case it doesn't start playing by itself
               playerRef.current?.getDuration().then((d) => {
                 if (d > 0) durationRef.current = d;
               });
@@ -480,6 +606,7 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
             }}
             onChangeState={(state: string) => {
               isPlayingRef.current = state === "playing";
+              if (state === "playing") reveal();
               if (state === "playing" && startedAtRef.current === null) {
                 startedAtRef.current = Date.now(); // the minimum time counts from here
                 if (ruleOn) save(); // so closing the app right away still reopens it
@@ -519,20 +646,26 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
               onOpenWindow, // handling new windows ourselves = Android no longer sends them to the browser
             }}
           />
+          </Animated.View>
+          {/* never takes touches — even see-through, it would block YouTube's controls */}
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, thumbStyle]}>
+            <Image source={{ uri: thumbUri }} resizeMode="cover" style={StyleSheet.absoluteFill} />
+          </Animated.View>
         </Animated.View>
       </View>
 
       {/* Back: centred in the black space beside / above the video — never on top of it.
           With "More from" open, top-left (the row takes the bottom). */}
       {backFits || showMore ? (
+        <Animated.View style={[styles.backWrap, backPosition, { opacity: chrome }]}>
         <BackButton
           size={backSize}
           variant="quiet"
           direction={showMore ? "down" : "left"}
           onPress={() => (showMore ? closeMore() : leave())}
           label={showMore ? "Back to the video" : "Back to my videos"}
-          outerStyle={[styles.backWrap, backPosition]}
         />
+        </Animated.View>
       ) : null}
 
       {/* Swiped up: more from this channel, under the shrunk video */}
@@ -629,7 +762,8 @@ function endTileW(layout: ReturnType<typeof useLayout>, usableW: number): number
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#000" },
+  screen: { flex: 1 }, // see-through: the black is `backdrop`, which fades to show the feed
+  backdrop: { backgroundColor: "#000" },
   stage: { position: "absolute", alignItems: "center", justifyContent: "center" },
   backWrap: { position: "absolute", zIndex: 3 },
   moreRow: { position: "absolute" },

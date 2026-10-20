@@ -1,7 +1,63 @@
 // Kideos Kid App — Firebase service helpers
 
 import firestore from "@react-native-firebase/firestore";
-import type { WhitelistedChannel, ApprovedVideo, PlaySignal } from "../types";
+import type { WhitelistedChannel, ApprovedVideo, PlaySignal, KidDevice } from "../types";
+
+const DEFAULT_ASK_WHO_MINUTES = 5;
+
+// ── This device (users/{p}/kidDevices/{uid}): which children use it ──
+// null = the doc is gone (unpaired by the parent) — only reported once the server
+// confirms it, never from an empty local cache at start-up.
+
+export function subscribeToKidDevice(
+  parentId: string,
+  deviceUid: string,
+  onUpdate: (device: KidDevice | null) => void
+): () => void {
+  return firestore()
+    .doc(`users/${parentId}/kidDevices/${deviceUid}`)
+    .onSnapshot(
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (!snap.exists()) {
+          if (!snap.metadata.fromCache) onUpdate(null);
+          return;
+        }
+        const data = snap.data() ?? {};
+        onUpdate({
+          childIds: Array.isArray(data.childIds) ? data.childIds.filter((c: unknown) => typeof c === "string") : [],
+          askWhoAfterMinutes:
+            typeof data.askWhoAfterMinutes === "number" ? data.askWhoAfterMinutes : DEFAULT_ASK_WHO_MINUTES,
+        });
+      },
+      (err) => console.warn("[kidDevice] listener error:", err)
+    );
+}
+
+// ── Devices paired before Oct 20, 2026: ask once to be moved over ──
+// onDeviceMigration (functions/src/kidDevices.ts) checks it and writes the kidDevices doc.
+
+export async function requestDeviceMigration(deviceUid: string, parentId: string, childId: string): Promise<void> {
+  const ref = firestore().doc(`deviceMigrations/${deviceUid}`);
+  const existing = await ref.get().catch(() => null);
+  if (existing?.exists()) return; // already asked
+  await ref.set({ parentId, childId, createdAt: firestore.FieldValue.serverTimestamp() });
+}
+
+export function subscribeToMigration(
+  deviceUid: string,
+  onStatus: (status: "done" | "refused" | null) => void
+): () => void {
+  return firestore()
+    .doc(`deviceMigrations/${deviceUid}`)
+    .onSnapshot(
+      (snap) => {
+        const status = snap.exists() ? snap.data()?.status : null;
+        onStatus(status === "done" || status === "refused" ? status : null);
+      },
+      (err) => console.warn("[deviceMigration] listener error:", err)
+    );
+}
 
 // ── Get whitelisted channels for a child ──────────────────────
 

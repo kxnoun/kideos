@@ -21,10 +21,11 @@ questionnaire and profiles look this way see [questionnaire-research.md](questio
    YouTube Data API     Supadata (transcripts)   OpenAI GPT-4o-mini     Gemini Flash-Lite
                                                  (profiles + free       (channel check:
                                                   image moderation)      thumbnails + search)
-                                                                    ┌────────────────────┐
-                    reads approved verdicts, playSignal;            │  Kideos (kid app)  │
-                    writes nowPlaying, watchHistory  ◄────────────► │  anonymous auth    │
-                                                                    └────────────────────┘
+                                                                    ┌──────────────────────┐
+     reads its kidDevices doc → its children's docs, approved       │  Kideos (kid app)    │
+     verdicts, whitelist, playSignal; writes nowPlaying,  ◄───────► │  anonymous auth,     │
+     watchHistory (only for the children it's paired to)            │  one device ↔ kids   │
+                                                                    └──────────────────────┘
 ```
 
 ## Core idea: profile once, filter per child
@@ -104,14 +105,50 @@ Age defaults: `AGE_TABLE` in `prefs.ts`. Old (v1) saved filters are converted by
 otherwise → tabs (Home, Channels, Digest, Settings). Store flags `inOnboarding` / `childrenLoaded` prevent
 mid-onboarding stack swaps and onboarding flashes.
 
-### Pairing the kid's device
-Kid app signs in anonymously (it waits for auth before rendering anything — Firestore listeners started
-earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars) including its
-→ parent enters the code on Home → `claimPairingCode` marks it claimed with `parentId`/`childId` → kid app
-sees the update and saves the session in AsyncStorage (`useSession`). To unpair: clear app data
-(`adb shell pm clear com.kideos.app`) and pair again.
-⚠️ Kid paths in the rules allow **any signed-in device** (`isKid()` = signed in). Device binding
-(`kidDeviceUids`) was built on Oct 17 and reverted the same day — see backlog → Security.
+### Pairing the kid's device — one device, several kids (Oct 20)
+A device is paired to the **family**; `users/{p}/kidDevices/{deviceUid}` (doc id = the kid app's anonymous
+UID) says which children use it: `{ name, childIds, askWhoAfterMinutes, pairedAt }`.
+1. Kid app signs in anonymously (it waits for auth before rendering anything — Firestore listeners started
+   earlier are denied and never retry) → `PairingScreen` writes `pairingCodes/{code}` (6 chars) with its
+   `deviceUid` and `deviceName` (e.g. "OnePlus A6013").
+2. Parent: Home → **+ Pair Device** → code, **who will use this device** (checkboxes) and an optional name →
+   `claimPairingCode` claims the code (`parentId`, `childIds`) and writes the `kidDevices` doc in one batch.
+3. Kid app sees the claim, saves `{parentId, paired, version: 2}` (AsyncStorage, `useSession`), then reads
+   its `kidDevices` doc and each child's doc live.
+
+**Who's watching?** (kid app `WhoScreen`, only when 2+ children use the device; one child → picked
+automatically, no picker):
+- Big avatar tiles; 🔒 = profile PIN, 🌙 = that child's session was ended. A child with a **profile PIN**
+  (parent: Settings → child → Viewing → Profile PIN; only a SHA-256 `pinHash = sha256("kideos-pin:" +
+  childId + ":" + pin)` is stored on the child doc — `src/pin.ts`, identical copy in both apps) types it on
+  a number pad. 5 wrong tries → 30 s wait (in memory). A sibling lock, not security: the device can read
+  the hash and 4 digits can be brute-forced.
+- **When it asks again** (`src/gate.ts`, kept in memory, not storage): after a **full restart** always (the
+  process was killed / the phone rebooted); and when the app comes back after being away (Home, Back out,
+  screen off) for ≥ `askWhoAfterMinutes` — parent: Settings → Devices → Ask "Who's watching?": **Every time /
+  1 / 5 / 10 / 20 / 30 min**, default **5** (Netflix / Disney+ ask on every launch; a shared kids' tablet
+  changes hands constantly, so 5 min balances PIN-typing against a sibling inheriting someone's profile).
+  Closing and reopening within the time keeps the same child; the screen can be rebuilt on reopen, the gate
+  survives as long as the process does.
+- **Switching on purpose:** the avatar on the feed, the "Who's watching?" button on Time's up and on the
+  empty feed → the picker slides down; picking → a "Hi Simon!" card until that child's feed has its videos.
+- **Per child on the device:** layout (age), videos, viewing rules, owed video
+  (`@kideos_unfinished:{childId}`), ✓s (`@kideos_watched:{childId}`), End Session (`playSignal` per child).
+- A device whose `childIds` is empty shows "Almost ready! A grown-up is choosing who uses this device."
+
+**Device binding (rules):** `isKid(p, c)` = the caller's `kidDevices/{uid}` exists and lists `c`. Kid devices
+can read only their own children (child doc, whitelist, verdicts, session) and write `nowPlaying` / watch
+sessions for them. **Settings → Devices** (parent): change who uses each device, the ask-again time, or
+**Unpair** (deletes the doc → the device loses access at once and returns to its pairing screen — the kid
+app only treats a missing doc as "unpaired" once the server confirms it, never from an empty cache at
+start-up). A device needs at least one child (removing the last → "unpair it instead").
+Deleting a child removes it from every device (`deleteChildData` → `removeChildFromDevices`).
+
+**Devices paired before Oct 20, 2026** (one saved `{parentId, childId}`, no `kidDevices` doc): the new kid app
+writes `deviceMigrations/{uid}` once; **`onDeviceMigration`** (`kidDevices.ts`) moves it over if that parent
+claimed a pairing code for that child (accepted until Dec 31, 2026), else `status: "refused"` → pair again.
+The new device doc is named "Kid device" with `movedOver: true`; the old device's ✓ list is adopted by that
+child. Deploy order: functions + rules **before** the new kid app runs (otherwise it waits on "Loading").
 
 ### Checking a channel before adding it
 Channels screen "+" (and onboarding step 3) → the parent types a URL/@handle → **Check & Add** → callable
@@ -212,58 +249,69 @@ summary, "No captions — rated from the title, description and a few still imag
 only allow those two fields and require `approved` to match.
 
 ### Watching + remote control
-Kid feed (`FeedScreen`): `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first,
-filtered to currently whitelisted channels; channel names filled from the whitelist), grouped into **⭐ New**
-(latest long videos across channels), **⚡ Shorts** (tall tiles; only if the child has any — none with "No
-Shorts"; uses the verdict's `isShort`) and **one shelf per channel** (channels with the newest video first).
-Two layouts by the child's age (live from the child doc; design: [kid-app-design.md](kid-app-design.md)):
-**little (≤ 4)** — landscape only, channel bubbles on top swap one sideways film strip, no vertical
-scrolling; **big (5+)** —
-shelves (New 15 / Shorts 20 / 12 per channel + "See all" → channel page grid) under a collapsing header
-whose chip bar stays pinned. Sizes come from the window (`theme.ts` → `useLayout`), so tablets, rotation
-and split screen work. Watched videos get a ✓ (`src/watched.ts`, on this device: ~90% played or ended).
-Everything is live — no refresh needed.
+**Who's on the device.** `App.tsx` reads `users/{p}/kidDevices/{its UID}` → each listed child's doc (name,
+age, avatar, `pinHash`, `viewing`) live → "Who's watching?" when 2+ children (see
+[Pairing](#pairing-the-kids-device--one-device-several-kids-oct-20)) → the picked child's `ChildSession`
+goes to the feed and player. Everything below is per child.
 
-Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe`):
-- Inside YouTube's iframe, `HIDE_IN_PLAYER` hides the share button, the YouTube logo / "Watch on YouTube"
-  and "More videos", and makes the title / channel name / channel picture untappable. ⚠️ Against YouTube's
-  terms — decide before launch (backlog → kid player). On Android this needs
+**Kid feed (`FeedScreen`)** — `subscribeToWhitelistedChannels` (`seedingStatus == "ready"`) → then
+`subscribeToApprovedVideos` (the child's verdicts, `approved == true`, newest first, limit 500, filtered to
+currently whitelisted channels; channel names filled from the whitelist). Nothing is drawn until both first
+snapshots arrive; then `onReady` (App's "Hi Simon!" card waits for it). Grouped in memory into **⭐ New**
+(latest long videos), **⚡ Shorts** (verdict `isShort`; none with "No Shorts") and **one shelf per channel**
+(channel with the newest video first). Everything is live — new videos appear, hidden ones disappear.
+Two layouts by age (`modeForAge`: **little ≤ 4** — landscape only, channel bubbles swap one sideways strip;
+**big 5+** — shelves under a collapsing header with a pinned chip bar, "See all" → a channel page sliding in
+over the home screen). Watched ✓ per child on the device (`watched.ts`: ~90% played or ended). Layout,
+motion and every size: [kid-app-design.md](kid-app-design.md).
+
+**Player** (`PlayerScreen.tsx`, `react-native-youtube-iframe`) — opened **on top of the feed**, which stays
+alive underneath (Back is instant, same scroll position):
+- **Full screen** from the first tap: the tapped thumbnail zooms out of its tile into the player and stays
+  until the video plays; long videos lock to landscape (`device.ts`); YouTube's own fullscreen button is off
+  (official `fs=0` / `preventFullScreen`). Nothing is drawn over the playing video; a quiet back button sits
+  in the black space beside/above it when there's room.
+- **Gestures** (PanResponder over the screen; backup `SWIPE_IN_PLAYER` inside YouTube's iframe, reported via
+  the library's `onPlaybackRateChange` as `kideos:swipe:*`): drag down in any downward direction → the video
+  follows the finger and flies off; drag up → it rises into "More from <channel>" (3 videos). Drags starting
+  on YouTube's control bar only count when straight up/down (seek bar).
+- **End card** when a video ends: Watch again / My videos / up to 3 more from the same channel (`pickNext`:
+  older first, unwatched first). No autoplay.
+- Inside YouTube's iframe, `HIDE_IN_PLAYER` hides the share button, the YouTube logo / "Watch on YouTube" and
+  "More videos", and makes the title / channel name / channel picture untappable. ⚠️ Against YouTube's terms
+  — decide before launch (backlog → kid player). On Android this needs
   `patches/react-native-webview+13.16.1.patch` (document-start scripts in all frames; fullscreen →
   landscape). Web-view-level backup: YouTube pages never open; ad links open as normal.
 - `patches/react-native-youtube-iframe+2.4.1.patch`: play / pause are injected directly (the library's
   postMessage never reached the page on Android, so remote pause didn't work).
 - Writes `currentSession/nowPlaying` (+ `paused`, updated on play/pause) and a `watchHistory` session
-  (`expiresAt` +90 days); closes the video if its verdict stops being approved ("Hide this video").
-- If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`), the player closes it and
-  the feed shows "That video can't play here. Pick another one!" (Hide → "A grown-up took that video away").
-- Full screen from the first tap (long videos lock to landscape); the ← sits in the black space beside or
-  above the video, never on it. Swipe down → back to the feed (bounces while time is owed); swipe up →
-  the video shrinks up with "More from <channel>" underneath (`SWIPE_IN_PLAYER`, a passive touch listener
-  in YouTube's iframe, reported via `onPlaybackRateChange`). When a video ends: an end card — Watch again / My videos / up to 3 more from the same channel (App.tsx
-  `pickNext`: older first, unwatched first). No autoplay.
+  (`expiresAt` +90 days) for the child watching; closes the video if its verdict stops being approved
+  ("Hide this video") → the feed shows "A grown-up took that video away. Pick another one!".
+- If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`) it closes → "That video can't
+  play here. Pick another one!".
 
 **Viewing rules** — parent app Settings → a child → **Viewing** → "Before switching videos, stay at
 least": Off / 30 s / 1 min / 2 min / Whole, saved on the child doc as `viewing.minWatchSeconds` (0 / 30 / 60 /
-120, −1 = whole video; the kid app may read the child doc — `subscribeToChild`, which also gives it the
-child's name / avatar / age). In the kid app
-(`PlayerScreen`, `src/viewing.ts`): until the time is up, ← Back and Android's back button keep the kid on
-the video with a banner — "Watch a little more! 0:12 left" (timed) or "Finish this one first! 2:41 left"
-(whole video). No waiting screens.
+120, −1 = whole video), read by the kid app with the rest of the child doc (`subscribeToChild`). In the kid
+app (`PlayerScreen`, `src/viewing.ts`): until the time is up, the back button, drag down, More from and
+Android back keep the kid on the video — drag down only stretches, then "Watch a little more! 0:12 left"
+(timed) or "Finish this one first! 2:41 left" (whole video). No waiting screens.
 - **Timed:** counts from when the video first starts playing, by the clock — pausing counts, and so does
   time with the app closed (a kid who watched 5 s and comes back 10 min later can leave).
 - **Whole video:** ~90% of the length actually played (`FINISHED_SHARE`; 1 s ticks while playing and the
   app is in front; seeking doesn't count). Unknown length → never blocked.
-- Dragging to the end while time is still owed → "Nice try 😄" and back to the furthest point reached by
-  playing; a video that really ends (most of it played — e.g. a short one) always lets them go.
-- The owed video is saved to AsyncStorage (when it starts playing and every 5 s), so closing the app
-  reopens it if time is still owed. A parent's **Hide this video** or **End Session** always gets the kid
-  out (and clears it); turning the rule off releases it. Android back now returns to the feed instead of
-  closing the app.
+- Dragging the seek bar to the end while time is still owed → "Nice try 😄" and back to the furthest point
+  reached by playing; a video that really ends (most of it played — e.g. a short one) always lets them go.
+- The owed video is saved **per child** (`@kideos_unfinished:{childId}`, when it starts playing and every
+  5 s), so closing the app — or switching profile — reopens it when that child is picked again, if time is
+  still owed. A parent's **Hide this video** or **End Session** always gets the kid out (and clears it);
+  turning the rule off releases it.
 
-Remote control: parent → `currentSession/parentCommand` (`pause` / `play` / `stop`) →
+**Remote control** (per child): parent → `currentSession/parentCommand` (`pause` / `play` / `stop`) →
 **`handleParentCommand`** → `currentSession/playSignal`. The kid player reacts only to commands sent while
-the video is open (the first snapshot is the last command, maybe old). `stop` locks the **whole** kid app
-on "Time's up" (App.tsx, survives restarts) until the parent sends `play` ("Let them watch again").
+the video is open (the first snapshot is the last command, maybe old). `stop` locks **that child** on
+"Time's up" (App.tsx, survives restarts) until the parent sends `play` ("Let them watch again"); on a shared
+device a sibling can still pick their own profile ("Who's watching?" button; 🌙 on the locked child's tile).
 
 Parent Home → "{child}'s Screen": ▶ Now watching / ⏸ Paused (tap the thumbnail to watch the same video
 on the parent's phone), a Pause/Resume toggle, End Session, the video's summary (2 lines, more/less — read
@@ -343,7 +391,8 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | Path | Contents | Written by | Read by |
 |---|---|---|---|
 | `users/{p}` | parent profile (email, createdAt) | parent app | parent |
-| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing.minWatchSeconds`) | parent app | parent, signed-in kid devices |
+| `users/{p}/children/{c}` | child profile (name, age, avatar, mode, `viewing.minWatchSeconds`, `pinHash`) | parent app | parent, kid devices paired to this child |
+| `users/{p}/kidDevices/{deviceUid}` | a kid device: `name`, `childIds`, `askWhoAfterMinutes`, `pairedAt`, `movedOver` | parent app (pair / Settings → Devices), `onDeviceMigration` | parent, that device |
 | `…/children/{c}/dismissedSuggestions/{ch}` | "Not for us" on a suggested channel | parent | parent |
 | `…/children/{c}/valueFilters/current` | questionnaire answers (`version: 2`, see `prefs.ts`) | parent app | parent, functions |
 | `…/children/{c}/whitelistedChannels/{ch}` | name, thumbnail, `seedingStatus` pending/ready/error, `videoCount` | functions (create), parent (delete) | parent, kid |
@@ -353,7 +402,8 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `…/children/{c}/currentSession/nowPlaying·parentCommand·playSignal` | live session (`nowPlaying.paused`) + remote control (`pause`/`play`/`stop`; last `stop` = kid app locked) | kid / parent / function | both |
 | `…/children/{c}/suggestions/{id}` | AI channel suggestions + `parentResponse` | functions | parent |
 | `…/children/{c}/digests/{week}` | weekly digest | functions | *(parent reads the wrong path — backlog)* |
-| `pairingCodes/{code}` | pairing handshake: `claimed`, `parentId`, `childId` | kid (create), parent (claim) | anyone |
+| `pairingCodes/{code}` | pairing handshake: `deviceUid`, `deviceName`, `claimed`, `parentId`, `childIds` (old codes: `childId`) | kid (create, own UID), parent (claim as themselves) | signed-in users |
+| `deviceMigrations/{deviceUid}` | an old one-child device asking to be moved over (`parentId`, `childId`) + `status` | kid (create, own UID), `onDeviceMigration` | that device |
 | `channelLibraryCache/{ch}` (+ `/videos/{v}`) | shared channel metadata, `longSeededAt` / `longPageToken` / `longExhausted` (long-video seeding); video stubs with `kind` (long / short; absent = mixed list) (`approved` field is legacy) | functions | kid (metadata), functions |
 | `channelCatalog/{ch}` | shared channel profile for suggestions (compact video profiles, overview, topics) | functions | functions only |
 | `channelChecks/{ch}` | channel check made once before the first add (`CHECK_VERSION`): verdict, reputation + sources, audience age, full channel profile (every rating with evidence and source) | functions | functions only (returned via `checkChannel`) |
@@ -363,8 +413,8 @@ suggestions; they apply once the channel is added. Channels added before this fe
 | `triggerEvents/{eventId}` | dedupe markers for at-least-once triggers | functions | functions only |
 | `videoAnalysisCache/…` | **legacy** (pre-profile verdict cache), unused — safe to delete | — | — |
 
-Rules: `firestore.rules`. Kid devices (any signed-in device — binding reverted) can read a child's whitelist,
-verdicts and session, write `nowPlaying` and watch sessions; parents own
+Rules: `firestore.rules` (tests: `tests/rules/`). Kid devices can read only the children their `kidDevices`
+doc lists (child doc, whitelist, verdicts, session) and write `nowPlaying` and watch sessions for them; parents own
 everything under `users/{their uid}`; server-only collections are default-deny. Indexes: `firestore.indexes.json` (notably
 `videoVerdicts: approved ASC, publishedAt DESC` for the kid feed).
 
@@ -388,21 +438,34 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 | `channelCatalog.ts` | Suggested channels: `buildCatalogEntry` (shared channel profile from analyzed videos — also the source of the channel check's video floors), `scoreChannel`, `getChannelSuggestions` callable |
 | `suggestChannels.ts` | `suggestChannels` callable + `weeklyChannelSuggestions` (older AI-from-description suggestions, still shown on the Channels tab) |
 | `reprofile.ts` | `reprofileOutdated` (nightly 04:00 UTC, or Force run in Cloud Scheduler): old-version profiles → current, cached transcripts only |
-| `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` |
+| `scheduledJobs.ts` | `cleanupExpiredData`, `generateWeeklyDigest`, `handleParentCommand`, `deleteChildData` (also removes the child from every kid device) |
+| `kidDevices.ts` | `onDeviceMigration` (moves devices paired before Oct 20, 2026 over to `kidDevices`), `removeChildFromDevices` |
 | `types.ts` | Firestore types (`ContentProfile`, `VideoVerdict`, `ValueFilters`, …) |
 
 ## Apps
 
-**Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Time's up;
-reopens a video still owed), `src/viewing.ts` (viewing rules, the owed video in AsyncStorage),
-`hooks/useSession.ts` (paired session in AsyncStorage), `theme.ts` (colours, fonts, `useLayout`, little/big
-mode), `watched.ts` (✓ stickers), `components/Tap.tsx` (press feedback) · `VideoTile.tsx`,
-`screens/PairingScreen.tsx`, `screens/FeedScreen.tsx` (little: bubbles + strip; big: shelves, collapsing
-header, channel pages), `screens/PlayerScreen.tsx` (end card), `services/firebase.ts`
-(`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`, `subscribeToChild`, `subscribeToPlaySignal`,
-`writeNowPlaying`, watch sessions), `device.ts` (landscape lock + hidden system bars, Android native module
-`KideosWindowModule.kt`; `MainActivity` hides the bars). Fonts (Fredoka, Nunito) in `assets/fonts` + Android
-`android/app/src/main/assets/fonts`. Design notes: [kid-app-design.md](kid-app-design.md).
+**Kid app (`apps/Kideos`)** — design: [kid-app-design.md](kid-app-design.md).
+- `App.tsx` — anonymous auth gate → Pairing / move-over (old one-child pairings) / Almost ready / Who's
+  watching / Feed with the Player on top / Time's up; layers: `WhoLayer` (slides down), `Curtain` ("Hi
+  Simon!" until the feed is ready); landscape lock; picker timing (`gate.ts`); per-child End Session;
+  reopens a video still owed; `pickNext` (up next).
+- `screens/` — `PairingScreen` (code with `deviceUid` + `deviceName`), `WhoScreen` (profile tiles + PIN pad),
+  `FeedScreen` (little: bubbles + strip; big: shelves, collapsing header, `ChipBar`, channel page; empty
+  state; `onReady`), `PlayerScreen` (zoom-open, gestures, More from, end card, viewing rules, nowPlaying /
+  watch history, Hide / can't-play).
+- `components/` — `Tap` (squish + wash), `VideoTile` (memoised; measures itself), `BackButton`.
+- `theme.ts` (tokens, `MOTION`, `useLayout`, `modeForAge`), `viewing.ts` (rules, owed video per child),
+  `watched.ts` (✓ per child, legacy list adopted on move-over), `gate.ts` (when to ask "Who's watching?"),
+  `pin.ts` (PIN hash — **copied in the parent app**), `device.ts` (landscape lock + hidden bars),
+  `hooks/useSession.ts` (saved session: `{parentId, paired, version: 2}` or an old one-child session).
+- `services/firebase.ts` — `subscribeToKidDevice` (missing doc reported only once the server confirms it),
+  `requestDeviceMigration` / `subscribeToMigration`, `subscribeToChild`, `subscribeToWhitelistedChannels`,
+  `subscribeToApprovedVideos`, `subscribeToPlaySignal`, `subscribeToVideoAllowed`, `writeNowPlaying` /
+  `setNowPlayingPaused` / `clearNowPlaying`, `logWatchSessionStart` / `End`.
+- Native (Android): `MainActivity.kt` (hides the system bars on focus), `KideosWindowModule.kt` +
+  registration in `MainApplication.kt`; fonts (Fredoka, Nunito) in `assets/fonts` and
+  `android/app/src/main/assets/fonts`; `react-native.config.js` lists the fonts for iOS linking. Patches:
+  `patches/` (webview, youtube-iframe).
 
 **Parent app (`apps/KideosParent`)** — `App.tsx` (routing), `hooks/useAuth.ts`, `store/useStore.ts`
 (Zustand; `useSelectedChild()` is a hook), `components/FiltersForm.tsx` (questionnaire), `prefs.ts` (copy),
@@ -411,11 +474,16 @@ screens: `auth/AuthScreen`, `onboarding/CreateChild · SetFilters · AddChannels
 `main/Home` (now watching, remote control, Hide / Too hyper, link to Videos, pairing), `main/VideosScreen`
 (Shown / Hidden + reasons, details with watch, Hide, Too hyper, Show anyway),
 `main/SuggestionsScreen` (suggested-channel cards: swipe left "Not for us", swipe right "maybe later",
-tap "Add to {child}'s feed"), `main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire, viewing rules, data deletion, sign out). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
+tap "Add to {child}'s feed"), `main/Channels`, `main/Digest`, `main/Settings` (children, questionnaire,
+viewing rules + **profile PIN** per child, **Devices** — who uses each kid device, "Ask Who's watching?"
+timing, Unpair — data deletion, sign out). Home's **+ Pair Device** sheet: code, which children use the
+device (checkboxes), optional name. `pin.ts` (hash — copy of the kid app's). `services/firebase.ts`: auth (`signInWithGoogle`, `signOut` also
 signs out of Google), children, `saveValueFilters` / `getValueFilters` (raw → `normalizePrefs`), channels
 (`checkChannel` → review, `addChannel` → `resolveAndAddChannel`, `removeChannel`), `subscribeToVerdicts`,
 `setShowAnyway`, `hideVideo` / `hideVideos`, `reportTooHyper`, `getVideoSummary`,
-`getChannelSuggestions`, `dismissSuggestion`, `parseCustomRules`, `claimPairingCode`, `sendPlaySignal`,
+`getChannelSuggestions`, `dismissSuggestion`, `parseCustomRules`, `claimPairingCode` (code + `kidDevices`
+doc in one batch), `subscribeToKidDevices`, `updateKidDevice`, `unpairKidDevice`, `setChildPinHash`,
+`sendPlaySignal`,
 subscriptions,
 `callFunction` helper for callables.
 

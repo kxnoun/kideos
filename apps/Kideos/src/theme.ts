@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useMemo } from "react";
-import { useWindowDimensions } from "react-native";
+import { Easing, useWindowDimensions } from "react-native";
 
 export const colors = {
   bg: "#1E1442", // Night Grape — white text 17:1
@@ -147,3 +147,7 @@ export const type = {
 } as const;
 
 export const radius = { tile: 20, card: 24, pill: 999 } as const;
+
+// Screen moves: quick, starting at full speed and easing out only at the end (snappy).
+// Ease-in at the start felt heavy (slow, fast, slow); linear felt mechanical.
+export const MOTION = { easing: Easing.out(Easing.cubic), slide: 180, slideOut: 160, zoom: 150 } as const;

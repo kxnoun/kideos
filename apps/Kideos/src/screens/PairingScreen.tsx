@@ -6,22 +6,33 @@
 // in the Kideos for Parents app to link the devices.
 //
 // Pairing flow:
-//   1. This screen writes { code, createdAt, claimed: false }
-//      to Firestore at pairingCodes/{code}
-//   2. Parent app finds the document by code, writes
-//      { parentId, childId } back to it
-//   3. This screen detects the update and saves the session
+//   1. This screen writes { code, deviceUid (this device's anonymous UID), deviceName,
+//      createdAt, claimed: false } to pairingCodes/{code}
+//   2. Parent app finds the document by code, picks which children will use this
+//      device, writes { parentId, childIds } back to it and creates
+//      users/{parentId}/kidDevices/{deviceUid}
+//   3. This screen detects the update and saves the session (the family);
+//      App.tsx then reads the kidDevices doc for the children
 // ─────────────────────────────────────────────────────────────
 
 import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, StatusBar } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, StatusBar, Platform } from "react-native";
+import auth from "@react-native-firebase/auth";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import firestore from "@react-native-firebase/firestore";
 import { colors, fonts, useLayout } from "../theme";
-import type { ChildSession } from "../types";
+import type { DeviceSession } from "../types";
 
 interface Props {
-  onPaired: (session: ChildSession) => void;
+  onPaired: (session: DeviceSession) => void;
+}
+
+// Shown in the parent app's device list until they rename it
+function deviceName(): string {
+  if (Platform.OS === "ios") return Platform.isPad ? "iPad" : "iPhone";
+  const c = Platform.constants as { Brand?: string; Model?: string };
+  const brand = c.Brand ? c.Brand.charAt(0).toUpperCase() + c.Brand.slice(1) : "";
+  return [brand, c.Model].filter(Boolean).join(" ") || "Android device";
 }
 
 function generateCode(): string {
@@ -47,6 +58,8 @@ export default function PairingScreen({ onPaired }: Props) {
       .doc(`pairingCodes/${newCode}`)
       .set({
         code: newCode,
+        deviceUid: auth().currentUser?.uid ?? "",
+        deviceName: deviceName(),
         createdAt: firestore.FieldValue.serverTimestamp(),
         claimed: false,
         expiresAt: firestore.Timestamp.fromDate(
@@ -59,16 +72,10 @@ export default function PairingScreen({ onPaired }: Props) {
       .doc(`pairingCodes/${newCode}`)
       .onSnapshot((snap) => {
         const data = snap.data();
-        if (data?.claimed && data?.parentId && data?.childId) {
+        if (data?.claimed && data?.parentId) {
           setStatus("paired");
           unsub();
-          onPaired({
-            parentId: data.parentId,
-            childId: data.childId,
-            childName: data.childName ?? "Kid",
-            childAge: data.childAge ?? 7,
-            paired: true,
-          });
+          onPaired({ parentId: data.parentId, paired: true, version: 2 });
         }
       });
 
@@ -88,7 +95,7 @@ export default function PairingScreen({ onPaired }: Props) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingHorizontal: layout.margin }]}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+      <StatusBar hidden />
       <Text style={styles.logo}>Kideos</Text>
 
       {status === "generating" && <ActivityIndicator size="large" color={colors.brandOnDark} />}

@@ -57,5 +57,9 @@ export {
   deleteChildData,
 } from "./scheduledJobs";
 
+// ── Kid devices ────────────────────────────────────────────────
+// onDeviceMigration: a kid device paired before Oct 20, 2026 asks once → kidDevices doc
+export { onDeviceMigration } from "./kidDevices";
+
 // Note: analyzeAndTagVideo (analyzeVideo.ts) is INTERNAL — not a deployed Cloud Function.
 // It runs inside onChannelWhitelisted / refreshChannelLibraries. The kid app only reads Firestore.

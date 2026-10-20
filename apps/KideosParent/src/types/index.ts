@@ -25,6 +25,20 @@ export interface ChildProfile {
   avatar: string;
   mode: ChildMode;
   viewing?: ViewingRules;
+  pinHash?: string; // optional 4-digit profile PIN (src/pin.ts) — the kid app asks for it
+}
+
+// A kid device (users/{p}/kidDevices/{deviceUid}): which children may use it.
+// More than one child → the kid app shows "Who's watching?".
+export interface KidDevice {
+  id: string; // the device's anonymous UID
+  name: string;
+  childIds: string[];
+  // Ask "Who's watching?" again after the app has been away this many minutes
+  // (0 = every time it's opened). Always asked after a full restart.
+  askWhoAfterMinutes: number;
+  pairedAt?: Timestamp;
+  movedOver?: boolean; // paired before Oct 20, 2026 and moved over automatically
 }
 
 export interface WhitelistedChannel {

@@ -60,7 +60,8 @@ export default function HomeScreen() {
   // Pairing modal
   const [pairingVisible, setPairingVisible] = useState(false);
   const [pairCode, setPairCode] = useState("");
-  const [pairChildId, setPairChildId] = useState(selectedChildId ?? "");
+  const [pairChildIds, setPairChildIds] = useState<string[]>(selectedChildId ? [selectedChildId] : []);
+  const [pairName, setPairName] = useState("");
   const [pairing, setPairing] = useState(false);
 
   const parentId = user?.uid;
@@ -113,32 +114,32 @@ export default function HomeScreen() {
       Alert.alert("Add a child first", "Go to Settings → Add Another Child, then pair their device.");
       return;
     }
-    if (!parentId || !pairCode.trim() || !pairChildId) {
-      Alert.alert("Enter a code and select a child.");
+    const picked = children.filter((c) => pairChildIds.includes(c.id));
+    if (!parentId || !pairCode.trim() || picked.length === 0) {
+      Alert.alert("Enter a code and pick who will use this device.");
       return;
     }
-    const child = children.find((c) => c.id === pairChildId);
-    if (!child) return;
 
     setPairing(true);
     try {
-      await claimPairingCode(
-        pairCode,
-        parentId,
-        pairChildId,
-        child.profile.name,
-        child.profile.age
-      );
+      await claimPairingCode(pairCode, parentId, picked.map((c) => c.id), pairName);
       setPairingVisible(false);
       setPairCode("");
-      Alert.alert("Paired!", `${child.profile.name}'s device is now connected.`);
+      setPairName("");
+      const names = picked.map((c) => c.profile.name).join(" and ");
+      Alert.alert(
+        "Paired!",
+        picked.length > 1
+          ? `${names} can use this device — it will ask "Who's watching?". Change it any time in Settings → Devices.`
+          : `${names}'s device is now connected. Add more kids to it in Settings → Devices.`
+      );
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Pairing failed.";
       Alert.alert("Pairing Failed", msg);
     } finally {
       setPairing(false);
     }
-  }, [parentId, pairCode, pairChildId, children]);
+  }, [parentId, pairCode, pairChildIds, pairName, children]);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -160,7 +161,8 @@ export default function HomeScreen() {
           <TouchableOpacity
             style={styles.pairBtn}
             onPress={() => {
-              setPairChildId(selectedChildId ?? children[0]?.id ?? "");
+              const first = selectedChildId ?? children[0]?.id;
+              setPairChildIds(first ? [first] : []);
               setPairingVisible(true);
             }}
           >
@@ -426,25 +428,38 @@ export default function HomeScreen() {
 
             {children.length > 1 && (
               <>
-                <Text style={styles.label}>Link to child</Text>
-                {children.map((c) => (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[
-                      styles.childOption,
-                      pairChildId === c.id && styles.childOptionActive,
-                    ]}
-                    onPress={() => setPairChildId(c.id)}
-                  >
-                    <Text style={styles.childOptionAvatar}>{c.profile.avatar}</Text>
-                    <Text style={styles.childOptionName}>{c.profile.name}</Text>
-                    {pairChildId === c.id && (
-                      <Text style={styles.childOptionCheck}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
+                <Text style={styles.label}>Who will use this device?</Text>
+                {children.map((c) => {
+                  const on = pairChildIds.includes(c.id);
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[styles.childOption, on && styles.childOptionActive]}
+                      onPress={() =>
+                        setPairChildIds((ids) => (on ? ids.filter((id) => id !== c.id) : [...ids, c.id]))
+                      }
+                    >
+                      <Text style={styles.childOptionAvatar}>{c.profile.avatar}</Text>
+                      <Text style={styles.childOptionName}>{c.profile.name}</Text>
+                      {on && <Text style={styles.childOptionCheck}>✓</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
+                <Text style={styles.pairHint}>
+                  Pick more than one for a shared tablet — it will ask "Who's watching?".
+                </Text>
               </>
             )}
+
+            <Text style={styles.label}>Device name (optional)</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={pairName}
+              onChangeText={setPairName}
+              placeholder="e.g. Living room tablet"
+              placeholderTextColor="#aaa"
+              maxLength={40}
+            />
 
             <TouchableOpacity
               style={[styles.pairConfirmBtn, pairing && styles.btnDisabled]}
@@ -627,6 +642,17 @@ const styles = StyleSheet.create({
   childOptionAvatar: { fontSize: 24 },
   childOptionName: { flex: 1, fontSize: 16, fontWeight: "600", color: "#1A1A2E" },
   childOptionCheck: { fontSize: 18, color: "#6C63FF" },
+  pairHint: { fontSize: 13, color: "#888", lineHeight: 18, marginTop: 2, marginBottom: 16 },
+  nameInput: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E8E8F0",
+    padding: 14,
+    fontSize: 16,
+    color: "#1A1A2E",
+    marginBottom: 20,
+  },
   pairConfirmBtn: {
     backgroundColor: "#6C63FF",
     borderRadius: 14,

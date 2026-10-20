@@ -2,17 +2,17 @@
 // Rounded 20 pt corners, optional channel badge (bottom-left), length (bottom-right,
 // big-kid mode only) and a mint ✓ sticker once watched.
 
-import React from "react";
+import React, { memo, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import Tap from "./Tap";
 import { colors, fonts, radius } from "../theme";
-import type { ApprovedVideo } from "../types";
+import type { ApprovedVideo, TileRect } from "../types";
 
 interface Props {
   video: ApprovedVideo;
   width: number;
   height: number; // thumbnail height (16:9, or tall for Shorts)
-  onPress: (v: ApprovedVideo) => void;
+  onPress: (v: ApprovedVideo, from?: TileRect) => void; // from = where the thumbnail is (the player zooms out of it)
   watched?: boolean;
   channelThumb?: string; // shows the channel badge
   showDuration?: boolean;
@@ -35,7 +35,8 @@ function thumbFor(video: ApprovedVideo, width: number): string {
   return video.thumbnail;
 }
 
-export default function VideoTile({
+// memo: rows redraw often (scrolling, ✓ changes) — a tile redraws only if its own props change
+export default memo(function VideoTile({
   video,
   width,
   height,
@@ -48,13 +49,22 @@ export default function VideoTile({
 }: Props) {
   const duration = showDuration && !video.isShort ? formatDuration(video.durationSeconds) : "";
   const badge = Math.max(26, Math.round(width * 0.13));
+  const thumbRef = useRef<View>(null);
+  const press = () => {
+    if (!thumbRef.current) {
+      onPress(video);
+      return;
+    }
+    thumbRef.current.measureInWindow((x, y, w, h) => onPress(video, w > 0 ? { x, y, w, h } : undefined));
+  };
   return (
     <Tap
       style={{ width }}
-      onPress={() => onPress(video)}
+      highlight={false}
+      onPress={press}
       accessibilityLabel={`${video.title}${video.channelName ? `, ${video.channelName}` : ""}${watched ? ", watched" : ""}`}
     >
-      <View style={[styles.thumbWrap, { width, height }]}>
+      <View ref={thumbRef} collapsable={false} style={[styles.thumbWrap, { width, height }]}>
         <Image source={{ uri: thumbFor(video, width) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         {channelThumb ? (
           <Image
@@ -82,7 +92,7 @@ export default function VideoTile({
       </Text>
     </Tap>
   );
-}
+});
 
 const styles = StyleSheet.create({
   thumbWrap: { borderRadius: radius.tile, overflow: "hidden", backgroundColor: colors.surface },

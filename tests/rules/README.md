@@ -1,11 +1,8 @@
 # Firestore rules tests
 
-> ⚠️ These tests describe the **device-binding** version of the rules (commit bdf672f). Binding was
-> reverted on Oct 17, so the binding cases fail against today's `firestore.rules`. Bring them back together
-> with binding (backlog → Security), or update them if binding is dropped.
-
 Checks `firestore.rules` against the real Firestore emulator: paired vs unpaired kid devices, parents,
-"Show anyway", pairing codes.
+"Show anyway", pairing codes, kid devices (`kidDevices` — which children a device may use) and moving
+over devices paired before Oct 20, 2026 (`deviceMigrations`).
 
 ```powershell
 cd tests\rules

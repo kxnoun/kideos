@@ -13,11 +13,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == parentId;
     }
 
-    // A kid device paired to this child. Pairing adds the device's anonymous UID
-    // to the child's `kidDeviceUids` (claimPairingCode in the parent app).
-    // Any signed-in kid device (pairing is enforced by the app, not the rules)
+    // A kid device paired to this child: users/{parentId}/kidDevices/{the device's
+    // anonymous UID} lists the children it may use (`childIds`). Written by the parent
+    // app when pairing (claimPairingCode) or by onDeviceMigration for devices paired
+    // before Oct 20, 2026.
     function isKid(parentId, childId) {
-      return isSignedIn();
+      let device = /databases/$(database)/documents/users/$(parentId)/kidDevices/$(request.auth.uid);
+      return isSignedIn() && exists(device) && childId in get(device).data.get("childIds", []);
     }
 
     // ── Parent profile ────────────────────────────────────────
@@ -27,6 +29,14 @@ service cloud.firestore {
 
       match /devices/{doc} {
         allow read, write: if isParent(parentId);
+      }
+
+      // Kid devices of this family (doc id = the device's anonymous UID): which
+      // children may use it + "ask who's watching" timing. The parent manages them
+      // (pair, change kids, unpair = delete); the device reads its own.
+      match /kidDevices/{deviceUid} {
+        allow read: if isParent(parentId) || (isSignedIn() && request.auth.uid == deviceUid);
+        allow write: if isParent(parentId);
       }
 
       // Weekly digests live at parent level (not child level)
@@ -39,8 +49,8 @@ service cloud.firestore {
       // ── Child profiles ───────────────────────────────────────
 
       match /children/{childId} {
-        // Parent manages child profiles; a paired kid device may read its own child
-        allow read: if isParent(parentId) || isSignedIn();
+        // Parent manages child profiles; a kid device paired to this child may read it
+        allow read: if isParent(parentId) || isKid(parentId, childId);
         allow write: if isParent(parentId);
 
         // Content filter settings — path: valueFilters/current
@@ -123,16 +133,31 @@ service cloud.firestore {
     }
 
     // ── Pairing codes ─────────────────────────────────────────
-    // Kid app (signed in anonymously) creates the code with its own UID; the
-    // parent claims it once, writing their own UID, and adds that device UID to
-    // the child's kidDeviceUids.
+    // The kid app (signed in anonymously) creates the code with its own UID; the
+    // parent claims it once with their own UID (and writes kidDevices/{deviceUid}).
     match /pairingCodes/{code} {
-      allow create: if true;     // kid writes before it has auth
-      allow read:   if true;     // parent reads to verify code
+      allow create: if isSignedIn()
+        && request.resource.data.deviceUid == request.auth.uid
+        && request.resource.data.claimed == false;
+      allow read: if isSignedIn();
       allow update: if isSignedIn()
+        && resource.data.claimed == false                 // one-time claim
         && request.resource.data.claimed == true
-        && resource.data.claimed == false;   // one-time claim
+        && request.resource.data.parentId == request.auth.uid
+        && request.resource.data.deviceUid == resource.data.deviceUid;
       allow delete: if false;
+    }
+
+    // ── Moving over devices paired before Oct 20, 2026 ────────
+    // The kid app asks once ({parentId, childId} from its old session);
+    // onDeviceMigration checks it and writes kidDevices/{uid} + a status here.
+    match /deviceMigrations/{deviceUid} {
+      allow create: if isSignedIn() && request.auth.uid == deviceUid
+        && request.resource.data.keys().hasOnly(["parentId", "childId", "createdAt"])
+        && request.resource.data.parentId is string
+        && request.resource.data.childId is string;
+      allow read: if isSignedIn() && request.auth.uid == deviceUid;
+      allow update, delete: if false;
     }
 
     // ── Channel library cache ─────────────────────────────────

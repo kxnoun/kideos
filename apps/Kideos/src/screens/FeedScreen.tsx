@@ -18,6 +18,9 @@
 // Sizes come from the window (useLayout), so phone / tablet / rotation / split screen
 // all lay out properly.
 //
+// On a device more than one child uses, the child's avatar (little: the rounded square
+// on the left; big: next to "Hi Simon") goes back to "Who's watching?" (onSwitchProfile).
+//
 // Data flow:
 //   1. Subscribe to whitelisted channels
 //   2. Subscribe to this child's videoVerdicts where approved == true,
@@ -25,7 +28,7 @@
 //   3. Group in memory: New / Shorts / per channel
 // ─────────────────────────────────────────────────────────────
 
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef, useImperativeHandle, forwardRef, memo } from "react";
 import {
   Animated,
   BackHandler,
@@ -42,12 +45,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { subscribeToWhitelistedChannels, subscribeToApprovedVideos } from "../services/firebase";
-import { colors, fonts, modeForAge, radius, type as typo, useLayout, type Layout } from "../theme";
+import { colors, fonts, modeForAge, MOTION, radius, type as typo, useLayout, type Layout } from "../theme";
 import { useWatched } from "../watched";
-import Tap from "../components/Tap";
+import Tap, { useReduceMotion } from "../components/Tap";
 import VideoTile from "../components/VideoTile";
 import BackButton from "../components/BackButton";
-import type { ApprovedVideo, ChildSession, KidProfile, WhitelistedChannel } from "../types";
+import type { ApprovedVideo, ChildSession, KidProfile, TileRect, WhitelistedChannel } from "../types";
 
 const NEW_COUNT = 15;
 const LITTLE_NEW_COUNT = 30;
@@ -58,7 +61,9 @@ interface Props {
   session: ChildSession;
   profile: KidProfile;
   // pool = the videos "up next" can come from (same channel, same kind)
-  onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[]) => void;
+  onVideoPress: (video: ApprovedVideo, pool: ApprovedVideo[], from?: TileRect) => void;
+  onSwitchProfile?: () => void; // only on devices with 2+ children
+  onReady?: () => void; // the first channels + videos have arrived (App's "Hi Simon!" card waits for it)
 }
 
 interface Shelf {
@@ -72,17 +77,25 @@ interface Shelf {
   channelId?: string;
 }
 
-export default function FeedScreen({ session, profile, onVideoPress }: Props) {
+export default function FeedScreen({ session, profile, onVideoPress, onSwitchProfile, onReady }: Props) {
   const [channels, setChannels] = useState<WhitelistedChannel[]>([]);
   const [videos, setVideos] = useState<ApprovedVideo[]>([]);
+  // Nothing is drawn until the first channels + videos arrive (no "Getting ready" flash)
+  const [channelsLoaded, setChannelsLoaded] = useState(false);
+  const [videosFor, setVideosFor] = useState<string | null>(null);
   const [openChannelId, setOpenChannelId] = useState<string | null>(null);
+  const openChannelIdRef = useRef(openChannelId);
+  openChannelIdRef.current = openChannelId;
   const layout = useLayout();
   const mode = modeForAge(profile.age);
 
   const { parentId, childId } = session;
 
   useEffect(() => {
-    return subscribeToWhitelistedChannels(parentId, childId, setChannels);
+    return subscribeToWhitelistedChannels(parentId, childId, (list) => {
+      setChannels(list);
+      setChannelsLoaded(true);
+    });
   }, [parentId, childId]);
 
   // Stable key — only changes when the actual channel IDs change
@@ -90,8 +103,16 @@ export default function FeedScreen({ session, profile, onVideoPress }: Props) {
 
   useEffect(() => {
     const channelIds = channelIdsKey ? channelIdsKey.split(",") : [];
-    return subscribeToApprovedVideos(parentId, childId, channelIds, setVideos);
-  }, [parentId, childId, channelIdsKey]);
+    if (!channelsLoaded) return;
+    return subscribeToApprovedVideos(parentId, childId, channelIds, (list) => {
+      setVideos(list);
+      setVideosFor(channelIdsKey);
+    });
+  }, [parentId, childId, channelIdsKey, channelsLoaded]);
+  const ready = channelsLoaded && videosFor === channelIdsKey;
+  useEffect(() => {
+    if (ready) onReady?.();
+  }, [ready, onReady]);
 
   // Video docs don't store channel names — fill them from the whitelist
   const channelById = useMemo(() => new Map(channels.map((c) => [c.channelId, c])), [channels]);
@@ -118,77 +139,88 @@ export default function FeedScreen({ session, profile, onVideoPress }: Props) {
   }, [longVideos, channelById]);
 
   const play = useCallback(
-    (v: ApprovedVideo) =>
+    (v: ApprovedVideo, from?: TileRect) =>
       onVideoPress(
         v,
-        named.filter((o) => o.channelId === v.channelId && Boolean(o.isShort) === Boolean(v.isShort))
+        named.filter((o) => o.channelId === v.channelId && Boolean(o.isShort) === Boolean(v.isShort)),
+        from
       ),
     [named, onVideoPress]
   );
 
-  // Android back on a channel page → home (not out of the app)
-  useEffect(() => {
-    if (!openChannelId) return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      setOpenChannelId(null);
-      return true;
-    });
-    return () => sub.remove();
-  }, [openChannelId]);
+  // Built once per data change — not on every redraw (opening a channel page used to
+  // rebuild them, which redrew every row)
+  const shelves = useMemo<Shelf[]>(() => {
+    const newShelf: Shelf = {
+      key: "new",
+      label: "New",
+      emoji: "⭐",
+      color: colors.brand,
+      videos: longVideos.slice(0, mode === "little" ? LITTLE_NEW_COUNT : NEW_COUNT),
+    };
+    const shortsShelf: Shelf = { key: "shorts", label: "Shorts", emoji: "⚡", color: colors.action, videos: shorts, tall: true };
+    return [newShelf, shortsShelf, ...channelShelves].filter((s) => s.videos.length > 0);
+  }, [longVideos, shorts, channelShelves, mode]);
 
-  const statusBar = <StatusBar barStyle="light-content" backgroundColor={colors.bg} />;
+  const channelVideos = useMemo(
+    () => (openChannelId ? named.filter((v) => v.channelId === openChannelId) : []),
+    [named, openChannelId]
+  );
+  // Called when the slide-out has finished: the page is off-screen, so throwing its grid
+  // away can wait a moment (doing it right away made the end of the slide stutter)
+  const closeChannel = useCallback(() => {
+    const closed = openChannelIdRef.current;
+    setTimeout(() => setOpenChannelId((id) => (id === closed ? null : id)), 300);
+  }, []);
+
+  const statusBar = <StatusBar hidden />;
+
+  if (!ready) return <View style={styles.screen} />;
 
   if (named.length === 0) {
     return (
       <View style={styles.screen}>
         {statusBar}
-        <Empty waitingForChannels={channels.length === 0} layout={layout} />
+        <Empty waitingForChannels={channels.length === 0} layout={layout} onSwitchProfile={onSwitchProfile} />
       </View>
     );
   }
-
-  if (openChannelId) {
-    const channel = channelById.get(openChannelId);
-    return (
-      <View style={styles.screen}>
-        {statusBar}
-        <ChannelPage
-          channel={channel}
-          videos={named.filter((v) => v.channelId === openChannelId)}
-          layout={layout}
-          showDuration={mode === "big"}
-          onBack={() => setOpenChannelId(null)}
-          onPlay={play}
-        />
-      </View>
-    );
-  }
-
-  const newShelf: Shelf = {
-    key: "new",
-    label: "New",
-    emoji: "⭐",
-    color: colors.brand,
-    videos: longVideos.slice(0, mode === "little" ? LITTLE_NEW_COUNT : NEW_COUNT),
-  };
-  const shortsShelf: Shelf = { key: "shorts", label: "Shorts", emoji: "⚡", color: colors.action, videos: shorts, tall: true };
-  const shelves = [newShelf, shortsShelf, ...channelShelves].filter((s) => s.videos.length > 0);
 
   return (
     <View style={styles.screen}>
       {statusBar}
       {mode === "little" ? (
-        <LittleHome shelves={shelves} profile={profile} layout={layout} channelById={channelById} onPlay={play} />
+        <LittleHomeMemo
+          shelves={shelves}
+          profile={profile}
+          layout={layout}
+          channelById={channelById}
+          onPlay={play}
+          onSwitchProfile={onSwitchProfile}
+        />
       ) : (
-        <BigHome
+        <BigHomeMemo
           shelves={shelves}
           profile={profile}
           layout={layout}
           channelById={channelById}
           onPlay={play}
           onOpenChannel={setOpenChannelId}
+          onSwitchProfile={onSwitchProfile}
         />
       )}
+      {/* "See all": slides in over the home screen, which stays as it was underneath */}
+      {openChannelId ? (
+        <ChannelPage
+          key={openChannelId}
+          channel={channelById.get(openChannelId)}
+          videos={channelVideos}
+          layout={layout}
+          showDuration={mode === "big"}
+          onBack={closeChannel}
+          onPlay={play}
+        />
+      ) : null}
     </View>
   );
 }
@@ -201,12 +233,14 @@ function LittleHome({
   layout,
   channelById,
   onPlay,
+  onSwitchProfile,
 }: {
   shelves: Shelf[];
   profile: KidProfile;
   layout: Layout;
   channelById: Map<string, WhitelistedChannel>;
-  onPlay: (v: ApprovedVideo) => void;
+  onPlay: (v: ApprovedVideo, from?: TileRect) => void;
+  onSwitchProfile?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();
@@ -227,9 +261,23 @@ function LittleHome({
   return (
     <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View style={styles.band}>
-        {/* Who's watching — a picture, not a button */}
-        <View style={[styles.me, { paddingLeft: margin, height: bubble }]} accessible accessibilityLabel={profile.name}>
-          <Text style={{ fontSize: Math.round(bubble * 0.55) }}>{profile.avatar || "🙂"}</Text>
+        {/* Who's watching — just a picture; on a shared device a rounded square (not a
+            round bubble) that goes back to "Who's watching?" */}
+        <View style={[styles.me, { paddingLeft: margin, height: bubble }]}>
+          {onSwitchProfile ? (
+            <Tap
+              highlight={false}
+              style={[styles.meSwitch, { width: bubble * 0.82, height: bubble * 0.82 }]}
+              onPress={onSwitchProfile}
+              accessibilityLabel={`${profile.name} — switch who's watching`}
+            >
+              <Text style={{ fontSize: Math.round(bubble * 0.46) }}>{profile.avatar || "🙂"}</Text>
+            </Tap>
+          ) : (
+            <Text style={{ fontSize: Math.round(bubble * 0.55) }} accessibilityLabel={profile.name}>
+              {profile.avatar || "🙂"}
+            </Text>
+          )}
           <View style={[styles.meDivider, { height: bubble * 0.7 }]} />
         </View>
         <ScrollView
@@ -257,6 +305,9 @@ function LittleHome({
           contentContainerStyle={{ paddingHorizontal: margin, gap }}
           snapToInterval={tileW + gap}
           decelerationRate="fast"
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={5}
           renderItem={({ item }) => (
             <VideoTile
               video={item}
@@ -276,7 +327,7 @@ function LittleHome({
 
 function Bubble({ shelf, size, selected, onPress }: { shelf: Shelf; size: number; selected: boolean; onPress: () => void }) {
   return (
-    <Tap onPress={onPress} style={{ width: size + 12, alignItems: "center" }} accessibilityLabel={shelf.label} accessibilityState={{ selected }}>
+    <Tap onPress={onPress} highlight={false} style={{ width: size + 12, alignItems: "center" }} accessibilityLabel={shelf.label} accessibilityState={{ selected }}>
       <View
         style={[
           styles.bubble,
@@ -308,25 +359,42 @@ function BigHome({
   channelById,
   onPlay,
   onOpenChannel,
+  onSwitchProfile,
 }: {
   shelves: Shelf[];
   profile: KidProfile;
   layout: Layout;
   channelById: Map<string, WhitelistedChannel>;
-  onPlay: (v: ApprovedVideo) => void;
+  onPlay: (v: ApprovedVideo, from?: TileRect) => void;
   onOpenChannel: (channelId: string) => void;
+  onSwitchProfile?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();
   const { margin, gap, rowTileW, rowTileH, shortTileW, shortTileH, scale } = layout;
-  const greetH = layout.phone ? 48 : 60;
+  // Breathing room above "Hi Simon" and between it and the chip bar
+  const greetH = layout.phone ? 72 : 88;
+  const avatar = layout.phone ? 52 : 60;
   const topPad = insets.top + greetH + BAR_H + 8;
 
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const sectionY = useRef<Record<string, number>>({});
-  const [active, setActive] = useState(shelves[0]?.key);
-  const activeRef = useRef(active);
+  // The lit chip lives in ChipBar's own state: changing it redraws only the chips,
+  // not every shelf (that redraw was what made the highlight lag)
+  const chips = useRef<ChipBarHandle>(null);
+  const activeRef = useRef<string | undefined>(shelves[0]?.key);
+  const setActiveKey = useCallback((key: string | undefined) => {
+    if (key === activeRef.current) return;
+    activeRef.current = key;
+    chips.current?.setActive(key);
+  }, []);
+  // A chip was tapped: that chip stays lit while the list scrolls there (instead of
+  // every shelf on the way lighting up), until the kid scrolls by hand
+  const jumpedTo = useRef<string | null>(null);
+  const viewportH = useRef(0);
+  const contentH = useRef(0);
+
 
   // Where a section's top lands just under the pinned bar
   const targetY = useCallback(
@@ -336,22 +404,31 @@ function BigHome({
 
   // Highlight the chip for the shelf currently under the bar
   const onScrollJS = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (jumpedTo.current) return;
     const value = e.nativeEvent.contentOffset.y;
     let current = shelves[0]?.key;
     shelves.forEach((s, i) => {
       if (sectionY.current[s.key] !== undefined && targetY(s.key, i) <= value + 12) current = s.key;
     });
-    if (current !== activeRef.current) {
-      activeRef.current = current;
-      setActive(current);
-    }
+    // At the very bottom the last shelves can't reach the bar — the last one counts
+    if (contentH.current && value >= contentH.current - viewportH.current - 8) current = shelves[shelves.length - 1]?.key;
+    setActiveKey(current);
   };
+
+
 
   const headerY = scrollY.interpolate({ inputRange: [0, greetH], outputRange: [0, -greetH], extrapolate: "clamp" });
   const greetOpacity = scrollY.interpolate({ inputRange: [0, greetH * 0.7], outputRange: [1, 0], extrapolate: "clamp" });
   const lineOpacity = scrollY.interpolate({ inputRange: [greetH * 0.7, greetH], outputRange: [0, 1], extrapolate: "clamp" });
 
-  const jump = (key: string, index: number) => scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
+  const jump = useCallback(
+    (key: string, index: number) => {
+      jumpedTo.current = key;
+      setActiveKey(key); // lights up right away
+      scrollRef.current?.scrollTo({ y: targetY(key, index), animated: true });
+    },
+    [setActiveKey, targetY]
+  );
 
   return (
     <View style={{ flex: 1, paddingLeft: insets.left, paddingRight: insets.right }}>
@@ -360,6 +437,15 @@ function BigHome({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: topPad, paddingBottom: insets.bottom + 32 }}
         scrollEventThrottle={16}
+        onScrollBeginDrag={() => {
+          jumpedTo.current = null; // scrolling by hand again
+        }}
+        onLayout={(e: LayoutChangeEvent) => {
+          viewportH.current = e.nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_w: number, h: number) => {
+          contentH.current = h;
+        }}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
           listener: onScrollJS,
@@ -393,6 +479,10 @@ function BigHome({
               data={s.channelId ? s.videos.slice(0, PER_CHANNEL_ROW) : s.videos}
               keyExtractor={(v) => v.videoId}
               showsHorizontalScrollIndicator={false}
+              // only what fits on screen first; the rest as they scroll
+              initialNumToRender={Math.ceil(layout.width / ((s.tall ? shortTileW : rowTileW) + gap)) + 1}
+              maxToRenderPerBatch={4}
+              windowSize={3}
               contentContainerStyle={{ paddingHorizontal: margin, gap }}
               renderItem={({ item }) => (
                 <VideoTile
@@ -436,42 +526,89 @@ function BigHome({
         style={[styles.header, { paddingTop: insets.top, height: insets.top + greetH + BAR_H, transform: [{ translateY: headerY }] }]}
       >
         <Animated.View style={[styles.greetRow, { height: greetH, paddingHorizontal: margin, opacity: greetOpacity }]}>
-          <View style={styles.greetAvatar}>
-            <Text style={{ fontSize: 22 }}>{profile.avatar || "🙂"}</Text>
-          </View>
+          {onSwitchProfile ? (
+            <Tap
+              highlight={false}
+              style={[styles.greetAvatar, { width: avatar, height: avatar, borderRadius: avatar / 2 }]}
+              onPress={onSwitchProfile}
+              accessibilityLabel={`${profile.name} — switch who's watching`}
+            >
+              <Text style={{ fontSize: Math.round(avatar * 0.55) }}>{profile.avatar || "🙂"}</Text>
+              <View style={styles.switchBadge}>
+                <Text style={styles.switchBadgeText}>⇄</Text>
+              </View>
+            </Tap>
+          ) : (
+            <View style={[styles.greetAvatar, { width: avatar, height: avatar, borderRadius: avatar / 2 }]}>
+              <Text style={{ fontSize: Math.round(avatar * 0.55) }}>{profile.avatar || "🙂"}</Text>
+            </View>
+          )}
           <Text style={[typo.greeting, styles.greetText, { fontSize: layout.phone ? 26 : 32 }]} numberOfLines={1}>
             {profile.name ? `Hi ${profile.name} 👋` : "Hi there 👋"}
           </Text>
         </Animated.View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ height: BAR_H, flexGrow: 0 }}
-          contentContainerStyle={{ paddingHorizontal: margin, gap: 10, alignItems: "center" }}
-        >
-          {shelves.map((s, i) => {
-            const on = s.key === active;
-            return (
-              <Tap
-                key={s.key}
-                style={[styles.chip, on && styles.chipOn]}
-                onPress={() => jump(s.key, i)}
-                accessibilityLabel={s.label}
-                accessibilityState={{ selected: on }}
-              >
-                {s.thumb ? <Image source={{ uri: s.thumb }} style={styles.chipAvatar} /> : <Text style={styles.chipEmoji}>{s.emoji}</Text>}
-                <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
-                  {s.label}
-                </Text>
-              </Tap>
-            );
-          })}
-        </ScrollView>
+        <ChipBar ref={chips} shelves={shelves} margin={margin} initial={shelves[0]?.key} onJump={jump} />
         <Animated.View style={[styles.headerLine, { opacity: lineOpacity }]} />
       </Animated.View>
     </View>
   );
 }
+
+// ── The chip bar (big mode) ──────────────────────────────────
+// Owns which chip is lit, so lighting one redraws just the chips. Keeps the lit
+// chip in view.
+
+interface ChipBarHandle {
+  setActive: (key: string | undefined) => void;
+}
+
+const ChipBar = memo(
+  forwardRef<
+    ChipBarHandle,
+    { shelves: Shelf[]; margin: number; initial: string | undefined; onJump: (key: string, index: number) => void }
+  >(function ChipBar({ shelves, margin, initial, onJump }, ref) {
+    const [active, setActive] = useState(initial);
+    const bar = useRef<ScrollView>(null);
+    const chipX = useRef<Record<string, number>>({});
+    useImperativeHandle(ref, () => ({ setActive }), []);
+
+    useEffect(() => {
+      const x = active ? chipX.current[active] : undefined;
+      if (x !== undefined) bar.current?.scrollTo({ x: Math.max(0, x - margin - 48), animated: true });
+    }, [active, margin]);
+
+    return (
+      <ScrollView
+        ref={bar}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ height: BAR_H, flexGrow: 0 }}
+        contentContainerStyle={{ paddingHorizontal: margin, gap: 10, alignItems: "center" }}
+      >
+        {shelves.map((s, i) => {
+          const on = s.key === active;
+          return (
+            <Tap
+              key={s.key}
+              style={[styles.chip, on && styles.chipOn]}
+              onLayout={(e: LayoutChangeEvent) => {
+                chipX.current[s.key] = e.nativeEvent.layout.x;
+              }}
+              onPress={() => onJump(s.key, i)}
+              accessibilityLabel={s.label}
+              accessibilityState={{ selected: on }}
+            >
+              {s.thumb ? <Image source={{ uri: s.thumb }} style={styles.chipAvatar} /> : <Text style={styles.chipEmoji}>{s.emoji}</Text>}
+              <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+                {s.label}
+              </Text>
+            </Tap>
+          );
+        })}
+      </ScrollView>
+    );
+  })
+);
 
 // ── Channel page (big mode "See all") ────────────────────────
 
@@ -488,24 +625,77 @@ function ChannelPage({
   layout: Layout;
   showDuration: boolean;
   onBack: () => void;
-  onPlay: (v: ApprovedVideo) => void;
+  onPlay: (v: ApprovedVideo, from?: TileRect) => void;
 }) {
   const insets = useSafeAreaInsets();
   const watched = useWatched();
+  const reduceMotion = useReduceMotion();
   const { margin, gap, gridColumns, gridTileW, gridTileH, touch, scale } = layout;
 
+  // Slides in from the right; the grid fills in once it's there (so the slide starts at once)
+  const x = useRef(new Animated.Value(reduceMotion ? 0 : layout.width)).current;
+  const [ready, setReady] = useState(reduceMotion);
+  const closing = useRef(false);
+  useEffect(() => {
+    if (reduceMotion) return;
+    Animated.timing(x, { toValue: 0, duration: MOTION.slide, easing: MOTION.easing, useNativeDriver: true }).start(
+      () => setReady(true)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const close = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    if (reduceMotion) {
+      onBack();
+      return;
+    }
+    Animated.timing(x, { toValue: layout.width, duration: MOTION.slideOut, easing: MOTION.easing, useNativeDriver: true }).start(
+      () => onBack()
+    );
+  }, [onBack, reduceMotion, x, layout.width]);
+
+  // Android back → home (not out of the app). Registered once: a video opened from
+  // here registers after it, so Back closes the video first.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      closeRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
-    <View style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <Animated.View
+      style={[
+        StyleSheet.absoluteFill,
+        styles.page,
+        { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, transform: [{ translateX: x }] },
+      ]}
+    >
       <View style={[styles.pageHeader, { paddingHorizontal: margin }]}>
-        <BackButton size={touch} onPress={onBack} label="Back" outerStyle={{ marginRight: 14 }} />
+        <BackButton size={touch} onPress={close} label="Back" outerStyle={{ marginRight: 14 }} />
         {channel?.thumbnail ? <Image source={{ uri: channel.thumbnail }} style={styles.pageAvatar} /> : null}
         <Text style={[typo.greeting, styles.pageTitle, { fontSize: 30 * scale }]} numberOfLines={1}>
           {channel?.name ?? ""}
         </Text>
       </View>
+      {!ready ? (
+        // Placeholders in the grid's shape while it slides in
+        <View style={[styles.skeleton, { paddingHorizontal: margin, gap }]}>
+          {Array.from({ length: gridColumns * 2 }, (_, i) => (
+            <View key={i} style={[styles.skeletonTile, { width: gridTileW, height: gridTileH }]} />
+          ))}
+        </View>
+      ) : (
       <FlatList
         key={`grid-${gridColumns}`} // column count changes with rotation
         data={videos}
+        initialNumToRender={gridColumns * 3}
+        maxToRenderPerBatch={gridColumns * 2}
+        windowSize={5}
         keyExtractor={(v) => v.videoId}
         numColumns={gridColumns}
         contentContainerStyle={{ paddingHorizontal: margin, paddingBottom: insets.bottom + 32, gap: gap + 4 }}
@@ -523,13 +713,27 @@ function ChannelPage({
           />
         )}
       />
-    </View>
+      )}
+    </Animated.View>
   );
 }
 
+// Redraw only when their own props change (opening "See all" doesn't touch them)
+const LittleHomeMemo = memo(LittleHome);
+const BigHomeMemo = memo(BigHome);
+
 // ── Nothing to show yet ──────────────────────────────────────
 
-function Empty({ waitingForChannels, layout }: { waitingForChannels: boolean; layout: Layout }) {
+// Nothing to watch yet — on a shared device, a way back to "Who's watching?" (a sibling may have videos)
+function Empty({
+  waitingForChannels,
+  layout,
+  onSwitchProfile,
+}: {
+  waitingForChannels: boolean;
+  layout: Layout;
+  onSwitchProfile?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.empty, { paddingTop: insets.top, paddingHorizontal: layout.margin * 2 }]}>
@@ -540,6 +744,11 @@ function Empty({ waitingForChannels, layout }: { waitingForChannels: boolean; la
           ? "A grown-up is picking your channels. Check back soon!"
           : "We're checking your videos. This only takes a moment."}
       </Text>
+      {onSwitchProfile ? (
+        <Tap style={styles.endBtn} onPress={onSwitchProfile} accessibilityLabel="Who's watching?">
+          <Text style={styles.endBtnText}>Who's watching?</Text>
+        </Tap>
+      ) : null}
     </View>
   );
 }
@@ -551,6 +760,7 @@ const styles = StyleSheet.create({
   band: { flexDirection: "row", alignItems: "flex-start" },
   me: { flexDirection: "row", alignItems: "center", marginTop: 16, paddingRight: 8 },
   meDivider: { width: 2, borderRadius: 1, backgroundColor: colors.surfacePressed, marginLeft: 14 },
+  meSwitch: { borderRadius: 20, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" },
   bubble: {
     alignItems: "center",
     justifyContent: "center",
@@ -563,16 +773,27 @@ const styles = StyleSheet.create({
 
   // big — header
   header: { position: "absolute", top: 0, left: 0, right: 0, backgroundColor: colors.bg, zIndex: 2 },
-  greetRow: { flexDirection: "row", alignItems: "center" },
+  greetRow: { flexDirection: "row", alignItems: "center", paddingTop: 8 },
   greetAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     backgroundColor: colors.brand,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    marginRight: 14,
   },
+  switchBadge: {
+    position: "absolute",
+    right: -5,
+    bottom: -5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: colors.bg,
+    backgroundColor: colors.focus,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  switchBadgeText: { color: colors.ink, fontFamily: fonts.bodyHeavy, fontSize: 14, lineHeight: 18 },
   greetText: { color: colors.text, flexShrink: 1 },
   chip: {
     height: 48,
@@ -620,6 +841,9 @@ const styles = StyleSheet.create({
   endBtnText: { color: colors.text, fontFamily: fonts.display, fontSize: 17 },
 
   // channel page
+  page: { backgroundColor: colors.bg, zIndex: 5 },
+  skeleton: { flexDirection: "row", flexWrap: "wrap" },
+  skeletonTile: { borderRadius: radius.tile, backgroundColor: colors.surface, marginBottom: 56 },
   pageHeader: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 16 },
   pageAvatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12, backgroundColor: colors.surface },
   pageTitle: { color: colors.text, flexShrink: 1 },
