@@ -29,6 +29,7 @@ export interface ApprovedVideo {
   thumbnail: string;
   publishedAt: Timestamp;
   durationSeconds: number | null;
+  isShort?: boolean; // a YouTube Short (verdicts since profile v7)
 }
 
 // Parent's viewing rules (child doc → viewing): stay at least this long on a video

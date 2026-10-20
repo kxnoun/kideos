@@ -212,8 +212,12 @@ summary, "No captions — rated from the title, description and a few still imag
 only allow those two fields and require `approved` to match.
 
 ### Watching + remote control
-Kid feed: `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first, filtered to
-currently whitelisted channels; channel names filled from the whitelist).
+Kid feed (`FeedScreen`): `subscribeToApprovedVideos` (child's verdicts, `approved == true`, newest first,
+filtered to currently whitelisted channels; channel names filled from the whitelist), laid out like YouTube
+Kids: **✨ New** (latest 15 long videos across channels), **⚡ Shorts** (tall tiles; only if the child has any —
+none with "No Shorts"; uses the verdict's `isShort`), then **one row per channel** (latest 12 long videos,
+channels with the newest video first). Tapping a channel's name → its page with all its videos (grid);
+Android back returns home. Everything is live — no refresh needed (pull-to-refresh is only the gesture).
 
 Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe`):
 - Inside YouTube's iframe, `HIDE_IN_PLAYER` hides the share button, the YouTube logo / "Watch on YouTube"
@@ -381,7 +385,7 @@ everything under `users/{their uid}`; server-only collections are default-deny. 
 **Kid app (`apps/Kideos`)** — `App.tsx` (anonymous auth gate → Pairing / Feed / Player / Time's up;
 reopens a video still owed), `src/viewing.ts` (viewing rules, the owed video in AsyncStorage),
 `hooks/useSession.ts` (paired session in AsyncStorage), `screens/PairingScreen.tsx`,
-`screens/FeedScreen.tsx` (grid, channel names, remote stop), `screens/PlayerScreen.tsx`,
+`screens/FeedScreen.tsx` (New / Shorts / per-channel rows, channel pages), `screens/PlayerScreen.tsx`,
 `services/firebase.ts` (`subscribeToWhitelistedChannels`, `subscribeToApprovedVideos`,
 `subscribeToPlaySignal`, `writeNowPlaying`, watch sessions).
 

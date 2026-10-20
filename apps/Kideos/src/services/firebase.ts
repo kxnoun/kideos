@@ -56,6 +56,7 @@ export function subscribeToApprovedVideos(
           thumbnail: data.thumbnail,
           publishedAt: data.publishedAt,
           durationSeconds: data.durationSeconds ?? null,
+          isShort: data.isShort === true,
         }));
       onUpdate(videos);
     }, (err) => console.warn("[videoVerdicts] listener error:", err));
