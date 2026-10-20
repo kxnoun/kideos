@@ -171,11 +171,13 @@ function Root() {
     [child, session?.childName, session?.childAge]
   );
 
-  // Young mode stays landscape (a portrait strip wastes most of the screen); older kids rotate
+  // Landscape only: young mode always (a portrait strip wastes most of the screen), and
+  // everyone while a long video plays (full screen). Older kids rotate freely otherwise.
   const littleMode = Boolean(session?.paired) && modeForAge(profile.age) === "little";
+  const longVideoOpen = Boolean(currentVideo && !currentVideo.isShort && !locked);
   useEffect(() => {
-    setLandscapeOnly(littleMode);
-  }, [littleMode]);
+    setLandscapeOnly(littleMode || longVideoOpen);
+  }, [littleMode, longVideoOpen]);
 
   const upNext = useMemo(
     () => (currentVideo ? pickNext(pool, currentVideo, watched) : []),

@@ -82,8 +82,24 @@ Native: `MainActivity.kt` (`hideSystemBars`, re-applied on focus) and `KideosWin
 
 ## Player
 
-Dark screen: a big orange ← and the title on top; the player as large as the window allows (landscape fits
-the height — nothing cut off); in portrait, "More from <channel>" underneath. Banners ("Watch a little
+**Full screen from the first tap** (agreed Oct 20). Our own full screen — an app can't trigger YouTube's
+fullscreen button, and doesn't need to. Long videos lock to landscape while playing (everyone; App.tsx);
+Shorts fill the height. **Nothing is drawn on the playing video** (YouTube's terms): the orange ← sits in
+the black space beside it (wider-than-16:9 phones) or above it (4:3 / 16:10 tablets); on an exactly 16:9
+screen the video shrinks a little to make room.
+
+- **Swipe down** on the video → it drops away and the feed comes back. While the minimum watch time is
+  owed it bounces back with "Watch a little more!".
+- **Swipe up** → the video shrinks to the top and "More from <channel>" (3 videos) slides in underneath —
+  the video moves out of the way, nothing covers it. Swipe down, ↓ or Android back → full screen again.
+  No swipe-to-next-video (the endless-feed pattern).
+- Swipes start on the video (a swipe from the very top edge is Android's notification shade). They're seen
+  by `SWIPE_IN_PLAYER`, a passive listener inside YouTube's iframe (never blocks a touch; ignores the seek
+  bar, menus and ads), which reports through the library's `onPlaybackRateChange` as a `kideos:swipe:*`
+  string — the library has no custom-message hook. Same YouTube-terms grey area as `HIDE_IN_PLAYER`.
+- Opening zooms the video in; Reduce Motion skips the animations.
+
+Banners ("Watch a little
 more! 0:12 left", "Nice try 😄") are yellow pills. When a video ends: an end card over everything — ↻ Watch
 again / 🏠 My videos / up to 3 more from the same channel (older ones first, unwatched first). A parent's
 Hide or a video that won't play returns to the feed with a friendly yellow note (no system pop-ups).

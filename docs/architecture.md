@@ -236,8 +236,10 @@ Player (`apps/Kideos/src/screens/PlayerScreen.tsx`, `react-native-youtube-iframe
   (`expiresAt` +90 days); closes the video if its verdict stops being approved ("Hide this video").
 - If YouTube refuses to play a video (`embed_not_allowed` / `video_not_found`), the player closes it and
   the feed shows "That video can't play here. Pick another one!" (Hide → "A grown-up took that video away").
-- Sized to the window (landscape fits the height). In portrait, "More from <channel>" underneath. When a
-  video ends: an end card — Watch again / My videos / up to 3 more from the same channel (App.tsx
+- Full screen from the first tap (long videos lock to landscape); the ← sits in the black space beside or
+  above the video, never on it. Swipe down → back to the feed (bounces while time is owed); swipe up →
+  the video shrinks up with "More from <channel>" underneath (`SWIPE_IN_PLAYER`, a passive touch listener
+  in YouTube's iframe, reported via `onPlaybackRateChange`). When a video ends: an end card — Watch again / My videos / up to 3 more from the same channel (App.tsx
   `pickNext`: older first, unwatched first). No autoplay.
 
 **Viewing rules** — parent app Settings → a child → **Viewing** → "Before switching videos, stay at
