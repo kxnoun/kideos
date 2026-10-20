@@ -21,16 +21,20 @@ import { APP_CONFIG, OPENAI_API_KEY } from "./config";
 import { PROFILE_VERSION, MIN_USABLE_PROFILE_VERSION } from "./aiAnalysis";
 import { evaluateProfile, effectiveDims } from "./contentFilter";
 import { loadValueFiltersForChild } from "./analyzeVideo";
+import { CHECK_VERSION, applyVideoFloors, fitForChild, type ChannelReport } from "./channelCheck";
 import { DIMS, LEVEL_LABELS, HOLIDAY_LABELS, VALUE_FLAG_LABELS, type Dim } from "./prefs";
 import type { ContentProfile } from "./types";
 
 type Db = FirebaseFirestore.Firestore;
 
-const VIDEOS_PER_CHANNEL = 50;
+// The catalog's view of a channel: its latest long videos + a few Shorts (most creators'
+// newest 50 uploads are ~90% Shorts, which said little about the channel)
+const CATALOG_LONG = 40;
+const CATALOG_SHORTS = 10;
 const MAX_SUGGESTIONS = 25;
 const BACKFILL_PER_CALL = 10;
 // Bump to rewrite every overview (e.g. when the overview prompt changes)
-const OVERVIEW_VERSION = 3; // v3: + who the channel is made for (audience ages)
+const OVERVIEW_VERSION = 4; // v4: ages = who it suits (youngest age it's suitable & interesting for), not "made for" (SmarterEveryDay was 12+). v3: + audience ages
 // A child is suggested channels made for their age, give or take this many years
 const AGE_SLACK = 1;
 
@@ -88,17 +92,28 @@ export async function buildCatalogEntry(db: Db, channelId: string, openAiApiKey:
   const stubs = await db
     .collection(`channelLibraryCache/${channelId}/videos`)
     .orderBy("publishedAt", "desc")
-    .limit(VIDEOS_PER_CHANNEL)
+    .limit(300)
     .get();
   if (stubs.empty) return;
 
-  const profileSnaps = await db.getAll(...stubs.docs.map((d) => db.doc(`videoProfiles/${d.id}`)));
+  const allSnaps = await db.getAll(...stubs.docs.map((d) => db.doc(`videoProfiles/${d.id}`)));
+  // Newest first: up to CATALOG_LONG long videos and CATALOG_SHORTS Shorts
+  // (a Short = the profile's isShort, else the stub's kind from the Shorts playlist)
+  const picked: number[] = [];
+  let longs = 0;
+  let shorts = 0;
+  stubs.docs.forEach((stub, i) => {
+    const isShort = (allSnaps[i].data()?.isShort as boolean | undefined) ?? stub.data().kind === "short";
+    if (isShort ? shorts++ < CATALOG_SHORTS : longs++ < CATALOG_LONG) picked.push(i);
+  });
+  const pickedStubs = picked.map((i) => stubs.docs[i]);
+  const profileSnaps = picked.map((i) => allSnaps[i]);
   const videos: CatalogVideo[] = [];
   const topicCounts = new Map<string, number>();
   const summaries: string[] = [];
   let educationalCount = 0;
 
-  stubs.docs.forEach((stub, i) => {
+  pickedStubs.forEach((stub, i) => {
     const snap = profileSnaps[i];
     if (!snap.exists) return;
     const prof = snap.data() as ContentProfile;
@@ -203,9 +218,13 @@ async function writeOverview(
             "videos have it (roughly 1 in 5 or more), or any are at the strongest level, say so plainly in the last " +
             "sentence (e.g. \"Many videos include heavy drinking and strong swearing.\"). Never describe a channel as " +
             "family-friendly or light-hearted if the counts say otherwise.\n" +
-            "Also say who the channel is MADE FOR (its intended audience, not who it's safe for): e.g. Ms Rachel → 1–4, " +
-            "Blippi → 2–6, SciShow Kids → 5–9, SciShow → 12 and up, a channel for adults → 18 and up. Use null for both " +
-            "only if it's truly for all ages.\n" +
+"Also give the AGE RANGE it suits: minAge = the youngest age its videos are suitable for AND interesting to; " +
+            "maxAge = the oldest age it still appeals to (set it only for clearly little-kid channels). Judge the AUDIENCE, not " +
+            "how strict a parent might be — the app checks each video's content against the parent's settings separately. A " +
+            "general-audience channel that's fine for kids gets the age kids start enjoying it, not 12 or 18. Examples: Ms " +
+            "Rachel → 1–5, Blippi → 2–7, SciShow Kids → 5–10, a general science or engineering channel → around 8 and up, a " +
+            "channel only adults should watch (drinking, sexual content) → 18 and up. Use null for both only if it truly " +
+            "suits every age.\n" +
             'Respond with JSON only: {"overview": "…", "minAge": number | null, "maxAge": number | null (null = and up)}',
         },
         {
@@ -260,6 +279,10 @@ export interface ChannelSuggestion {
   educational: number;
   hiddenReasons: { label: string; count: number }[]; // why the other videos wouldn't show, top 3
   ratings: { dim: Dim; maxLevel: number; count: number }[]; // what's in the videos that WOULD show
+  // From the channel's saved channel check, if anyone has checked it (thumbnails + what people say)
+  check?: { fit: "good" | "caution"; thingsToKnow: string[]; overall: ChannelReport["verdict"] };
+  longOnly: boolean; // true = fitting/analyzed count long videos only (Shorts below)
+  shorts?: { fitting: number; analyzed: number }; // the channel's Shorts, on their own (absent if "No Shorts")
   samples: { videoId: string; title: string; thumbnail: string }[];
 }
 
@@ -303,7 +326,11 @@ export function isSuggestable(s: ChannelSuggestion): boolean {
 export function whyNot(s: ChannelSuggestion): string {
   if (s.analyzed < MIN_ANALYZED) return `only ${s.analyzed} checked videos`;
   if (s.severe > MAX_SEVERE) return `${s.severe} severe video(s): ${(s.severeExamples ?? []).join(" | ")}`;
-  return `fit ${s.fitting}/${s.analyzed} (${Math.round((100 * s.fitting) / s.analyzed)}%) < ${MIN_FIT * 100}%`;
+  const why = s.hiddenReasons.map((r) => `${r.label} (${r.count})`).join(", ");
+  return (
+    `fit ${s.fitting}/${s.analyzed}${s.longOnly ? " long videos" : ""} (${Math.round((100 * s.fitting) / s.analyzed)}%) < ${MIN_FIT * 100}%` +
+    (why ? ` — hidden for: ${why}` : "")
+  );
 }
 
 // The worst of the worst, whatever the child's settings: the top of a ladder the
@@ -319,18 +346,24 @@ function severeDims(p: CompactProfile, prefs: Parameters<typeof evaluateProfile>
 }
 
 export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evaluateProfile>[1]): ChannelSuggestion {
+  // Long videos decide whether a channel is suggested; Shorts are counted on their own line
+  // (and not at all if the child has "No Shorts" — a format, not a reason the channel doesn't fit).
+  // Channels with too few checked long videos are scored on everything instead.
+  const ok = entry.videos.filter((v) => v.p.status === "ok");
+  const longs = ok.filter((v) => !v.p.isShort);
+  const shortsOk = ok.filter((v) => v.p.isShort);
+  const mainSet = longs.length >= MIN_ANALYZED || prefs.hideShorts ? longs : ok;
+  const shortsSet = mainSet === longs && !prefs.hideShorts ? shortsOk : [];
+
   let fitting = 0;
   let severe = 0;
-  let checked = 0;
   const severeExamples: string[] = [];
   const severeCounts = new Map<string, number>();
   const reasonCounts = new Map<string, number>();
   const ratings = new Map<Dim, { maxLevel: number; count: number }>();
   const samples: ChannelSuggestion["samples"] = [];
 
-  for (const v of entry.videos) {
-    if (v.p.status !== "ok") continue; // no transcript — unknown, not counted either way
-    checked++;
+  for (const v of mainSet) {
     const decision = evaluateProfile(v.p as ContentProfile, prefs);
     if (decision.status === "approved") {
       fitting++;
@@ -359,6 +392,7 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
       }
     }
   }
+  const shortsFitting = shortsSet.filter((v) => evaluateProfile(v.p as ContentProfile, prefs).status === "approved").length;
 
   return {
     channelId: entry.channelId,
@@ -369,8 +403,8 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     audienceMinAge: entry.audienceMinAge ?? null,
     audienceMaxAge: entry.audienceMaxAge ?? null,
     topics: entry.topics,
-    analyzed: checked,
-    unchecked: entry.videos.length - checked,
+    analyzed: mainSet.length,
+    unchecked: entry.videos.length - ok.length,
     fitting,
     severe,
     severeExamples,
@@ -379,6 +413,8 @@ export function scoreChannel(entry: CatalogEntry, prefs: Parameters<typeof evalu
     hiddenReasons: [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([label, count]) => ({ label, count })),
     ratings: [...ratings.entries()].sort((a, b) => b[1].count - a[1].count).map(([dim, r]) => ({ dim, ...r })),
     samples,
+    longOnly: mainSet === longs,
+    ...(shortsSet.length ? { shorts: { fitting: shortsFitting, analyzed: shortsSet.length } } : {}),
   };
 }
 
@@ -421,18 +457,50 @@ export const getChannelSuggestions = onCall(
     const skip = new Set([...whitelisted.docs, ...dismissed.docs].map((d) => d.id));
     const age = Number(childSnap.data()?.age) || prefs.ageGroup;
 
-    const scored = catalog.docs
-      .filter((d) => !skip.has(d.id))
-      .map((d) => scoreChannel(d.data() as CatalogEntry, prefs));
+    const entries = new Map(catalog.docs.map((d) => [d.id, d.data() as CatalogEntry]));
+    const candidates = catalog.docs.filter((d) => !skip.has(d.id));
+    // Saved channel checks (only ones someone already made — no AI here)
+    const checkSnaps = candidates.length ? await db.getAll(...candidates.map((d) => db.doc(`channelChecks/${d.id}`))) : [];
+    const savedChecks = new Map<string, Omit<ChannelReport, "createdAt">>();
+    checkSnaps.forEach((snap) => {
+      if (!snap.exists || snap.data()!.version !== CHECK_VERSION) return;
+      const { createdAt: _c, ...saved } = snap.data() as ChannelReport;
+      savedChecks.set(snap.id, saved);
+    });
+    const scored = candidates.map((d) => {
+      const s = scoreChannel(d.data() as CatalogEntry, prefs);
+      // The channel check's ages are backed by a Google search — prefer them
+      const c = savedChecks.get(d.id);
+      return c ? { ...s, audienceMinAge: c.audienceMinAge, audienceMaxAge: c.audienceMaxAge } : s;
+    });
     const ok = (x: ChannelSuggestion) => fitsAge(x, age) && isSuggestable(x);
     for (const s of scored.filter((x) => !ok(x))) {
       const why = fitsAge(s, age)
         ? whyNot(s)
-        : `made for ages ${s.audienceMinAge ?? 0}–${s.audienceMaxAge ?? "up"}, child is ${age}`;
+        : `suits ages ${s.audienceMinAge ?? 0}–${s.audienceMaxAge ?? "up"}, child is ${age}`;
       logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — ${why}`);
     }
-    const suggestions = scored
-      .filter(ok)
+
+    // Saved channel checks (only ones someone already made — no AI here): a channel that's
+    // "not a fit" for this child isn't suggested; otherwise its things-to-know go on the card
+    const passing = scored.filter(ok);
+    const withChecks: ChannelSuggestion[] = [];
+    passing.forEach((s) => {
+      const saved = savedChecks.get(s.channelId);
+      if (!saved) {
+        withChecks.push(s);
+        return;
+      }
+      const report = applyVideoFloors(saved, entries.get(s.channelId)?.videos ?? []);
+      const { fit, conflicts } = fitForChild(report, prefs);
+      if (fit === "not_fit") {
+        logger.info(`[getChannelSuggestions] Not suggested: ${s.name} — channel check: not a fit (${conflicts.join(" | ")})`);
+        return;
+      }
+      withChecks.push({ ...s, check: { fit, thingsToKnow: conflicts, overall: report.verdict } });
+    });
+
+    const suggestions = withChecks
       .map(({ severeExamples: _drop, ...s }) => s)
       .sort((a, b) => {
         const fit = b.fitting / b.analyzed - a.fitting / a.analyzed;

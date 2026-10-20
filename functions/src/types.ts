@@ -187,6 +187,7 @@ export interface CachedVideo {
   publishedAt: Timestamp;
   durationSeconds: number | null;
   lastSeenAt: Timestamp;
+  kind?: "long" | "short"; // which playlist it came from (long-videos / Shorts); absent = the mixed uploads list
   // Set by analyzeAndTagVideo during seeding / refresh
   approved: boolean | null; // null = not yet analyzed
   analyzedAt: Timestamp | null;

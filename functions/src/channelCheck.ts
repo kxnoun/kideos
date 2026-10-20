@@ -41,7 +41,7 @@ import type { ContentProfile, Framing } from "./types";
 import { LADDER_GUIDE } from "./aiAnalysis";
 import type { CatalogEntry } from "./channelCatalog";
 
-export const CHECK_VERSION = 4; // v4: same ladder definitions as videos + targeted searches. v3: full profile. Bump when the criteria change → re-checked on next add
+export const CHECK_VERSION = 5; // v5: ages = who it suits, not "made for". v4: same ladder definitions as videos + targeted searches. v3: full profile. Bump when the criteria change → re-checked on next add
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const THUMBNAILS = 50;
 
@@ -127,7 +127,7 @@ Respond with ONLY a JSON object, no other text:
 Flags: ${VALUE_FLAGS.map((f) => `${f} = ${VALUE_FLAG_LABELS[f]}`).join("; ")}.
 - verdict (your general opinion for kids): "not_recommended" = clearly not for kids (sexualized, disturbing, Elsagate, adult content dressed as kids' content). "caution" = fine for some ages or has some concerns. "good" = a normal, well-regarded channel for its audience.
 - wellKnown: false if you found little or nothing about it online (small channel) — then judge from thumbnails only and say so in "reputation".
-- audienceMinAge / audienceMaxAge: who the channel is made for (null max = and up; both null = all ages).
+- audienceMinAge / audienceMaxAge: the ages it SUITS — minAge = the youngest age its videos are suitable for and interesting to; maxAge = the oldest age it still appeals to (only for clearly little-kid channels). Judge the audience, not strictness: the app checks content against each parent's settings separately, so a general-audience channel that's fine for kids gets the age kids start enjoying it (e.g. a general science or engineering channel → around 8), not 12 or 18. Ms Rachel → 1–5, Blippi → 2–7, SciShow Kids → 5–10; adult-only channels → 18. Both null = suits every age.
 - Thumbnails can only raise a rating, never excuse one. holidays / music / lgbtq / religion: what the channel regularly features.`;
 
 // ── Gemini call ────────────────────────────────────────────────
@@ -379,6 +379,39 @@ export function fitForChild(r: Omit<ChannelReport, "createdAt">, prefs: ValueFil
   return { fit, conflicts, findings };
 }
 
+// ── Fit of the channels a child already has (Channels screen) ──
+// Saved checks only (no AI): after a parent changes their settings, the Channels
+// screen shows which channels now conflict.
+
+export const getChannelFits = onCall(
+  { region: APP_CONFIG.FUNCTIONS_REGION, timeoutSeconds: 30, memory: "256MiB" },
+  async (request): Promise<{ fits: Record<string, { fit: "good" | "caution" | "not_fit"; conflicts: string[] }> }> => {
+    const { parentId, childId } = request.data as { parentId?: string; childId?: string };
+    if (!parentId || !childId) throw new HttpsError("invalid-argument", "parentId and childId are required");
+    if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
+
+    const db = getFirestore();
+    const channels = await db.collection(`users/${parentId}/children/${childId}/whitelistedChannels`).select().get();
+    if (channels.empty) return { fits: {} };
+    const ids = channels.docs.map((d) => d.id);
+    const [prefs, checks, catalogs] = await Promise.all([
+      loadValueFiltersForChild(parentId, childId),
+      db.getAll(...ids.map((id) => db.doc(`channelChecks/${id}`))),
+      db.getAll(...ids.map((id) => db.doc(`channelCatalog/${id}`))),
+    ]);
+    const fits: Record<string, { fit: "good" | "caution" | "not_fit"; conflicts: string[] }> = {};
+    ids.forEach((id, i) => {
+      const snap = checks[i];
+      if (!snap.exists || snap.data()!.version !== CHECK_VERSION) return; // never checked (added before checks existed)
+      const { createdAt: _c, ...saved } = snap.data() as ChannelReport;
+      const videos = (catalogs[i].data() as CatalogEntry | undefined)?.videos ?? [];
+      const { fit, conflicts } = fitForChild(applyVideoFloors(saved, videos), prefs);
+      fits[id] = { fit, conflicts };
+    });
+    return { fits };
+  }
+);
+
 // ── Callable ───────────────────────────────────────────────────
 
 export const checkChannel = onCall(
@@ -435,9 +468,9 @@ export const checkChannel = onCall(
     const name = String(child?.name ?? child?.profile?.name ?? "your child");
     let ageNote = "";
     if (report.audienceMinAge !== null && age < report.audienceMinAge) {
-      ageNote = `Made for ages ${report.audienceMinAge}+ — ${name} is ${age}`;
+      ageNote = `Suits ages ${report.audienceMinAge}+ — ${name} is ${age}`;
     } else if (report.audienceMaxAge !== null && age > report.audienceMaxAge + 1) {
-      ageNote = `Made for ages up to ${report.audienceMaxAge} — ${name} is ${age}`;
+      ageNote = `Suits ages up to ${report.audienceMaxAge} — ${name} is ${age}`;
     }
     return { channel, alreadyAdded, report, fit: fit === "good" && ageNote ? "caution" : fit, conflicts, findings, ageNote };
   }

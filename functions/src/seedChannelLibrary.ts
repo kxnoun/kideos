@@ -5,10 +5,12 @@
 //   1. resolveAndAddChannel (callable) — channels.list (1 unit), creates the
 //      whitelist doc with seedingStatus "pending", returns immediately
 //   2. onChannelWhitelisted (trigger on that create) — seedVideoMetadata
-//      (playlistItems.list, 1-5 units) + batchAnalyzeChannel (5 videos at a time,
-//      analyzeAndTagVideo each) → seedingStatus "ready"
+//      (40 latest long videos + 10 latest Shorts, 2 units) + batchAnalyzeChannel
+//      (5 videos at a time, analyzeAndTagVideo each) → seedingStatus "ready"
 // Also here: onFiltersChanged (re-apply answers), refreshChannelLibraries
-// (nightly new uploads), seedChannelLibrary (legacy callable, unused by the app).
+// (nightly new uploads + a one-time long-video top-up for channels added before
+// Oct 20), loadMoreVideos + onMoreVideosRequested ("Load more videos": the next 50
+// older long videos for one child), seedChannelLibrary (legacy callable, unused).
 //
 // Each video gets a shared content profile; each child gets their own verdict in
 // users/{p}/children/{c}/videoVerdicts (the kid feed reads approved == true there).
@@ -17,12 +19,20 @@
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/v2";
 import { getFirestore, Timestamp, WriteBatch } from "firebase-admin/firestore";
 import { YOUTUBE_API_KEY, SUPADATA_API_KEY, OPENAI_API_KEY } from "./config";
 import { APP_CONFIG } from "./config";
-import { getChannelDetails, getChannelVideos, verifyChannelHandles } from "./youtube";
+import {
+  getChannelDetails,
+  getChannelVideos,
+  getPlaylistPage,
+  longVideosPlaylist,
+  shortsPlaylist,
+  verifyChannelHandles,
+  type YouTubePlaylistItem,
+} from "./youtube";
 import {
   analyzeAndTagVideo,
   loadValueFiltersForChild,
@@ -41,28 +51,22 @@ import type {
 
 // ── Seed video metadata into channelLibraryCache ───────────────
 // Does NOT run analysis — that's done by batchAnalyzeChannel.
+// A channel's newest 50 uploads are ~90% Shorts for most creators, so we seed its
+// CHANNEL_SEED_LONG latest long videos + CHANNEL_SEED_SHORTS latest Shorts from YouTube's
+// per-type playlists (2 units). If YouTube doesn't know those playlists, fall back to
+// the 50 latest uploads. The long-videos page token is kept for "Load more videos".
 
-async function seedVideoMetadata(
+type Db = FirebaseFirestore.Firestore;
+
+async function writeStubs(
+  db: Db,
   channelId: string,
-  uploadsPlaylistId: string,
-  apiKey: string,
-  db: FirebaseFirestore.Firestore
-): Promise<string[]> {
-  const videos = await getChannelVideos(
-    uploadsPlaylistId,
-    apiKey,
-    APP_CONFIG.CHANNEL_SEED_MAX_VIDEOS,
-    APP_CONFIG.CHANNEL_SEED_MAX_PAGES
-  );
-
-  // Write video metadata in batches of 400 (Firestore batch limit is 500)
-  const BATCH_SIZE = 400;
-  for (let i = 0; i < videos.length; i += BATCH_SIZE) {
+  videos: YouTubePlaylistItem[],
+  kind?: "long" | "short"
+): Promise<void> {
+  for (let i = 0; i < videos.length; i += 400) {
     const batch: WriteBatch = db.batch();
-    const chunk = videos.slice(i, i + BATCH_SIZE);
-
-    for (const video of chunk) {
-      const videoRef = db.doc(`channelLibraryCache/${channelId}/videos/${video.videoId}`);
+    for (const video of videos.slice(i, i + 400)) {
       const cachedVideo: CachedVideo = {
         videoId: video.videoId,
         title: video.title,
@@ -70,17 +74,58 @@ async function seedVideoMetadata(
         publishedAt: Timestamp.fromDate(new Date(video.publishedAt)),
         durationSeconds: null,
         lastSeenAt: Timestamp.now(),
-        approved: null,    // not yet analyzed
-        analyzedAt: null,  // not yet analyzed
+        ...(kind ? { kind } : {}),
+        approved: null, // not yet analyzed
+        analyzedAt: null, // not yet analyzed
       };
-      batch.set(videoRef, cachedVideo, { merge: true });
+      batch.set(db.doc(`channelLibraryCache/${channelId}/videos/${video.videoId}`), cachedVideo, { merge: true });
     }
-
     await batch.commit();
   }
+}
 
-  logger.info(`[seedVideoMetadata] Seeded ${videos.length} video stubs for channel ${channelId}`);
-  return videos.map((v) => v.videoId);
+// Long videos + Shorts (or the mixed fallback). Returns the IDs to analyze.
+export async function seedLongAndShorts(
+  db: Db,
+  channelId: string,
+  uploadsPlaylistId: string,
+  apiKey: string,
+  opts: { long?: number; shorts?: number } = {}
+): Promise<string[]> {
+  const longN = opts.long ?? APP_CONFIG.CHANNEL_SEED_LONG;
+  const shortsN = opts.shorts ?? APP_CONFIG.CHANNEL_SEED_SHORTS;
+  const [long, shorts] = await Promise.all([
+    getPlaylistPage(longVideosPlaylist(uploadsPlaylistId), apiKey, longN),
+    shortsN ? getPlaylistPage(shortsPlaylist(uploadsPlaylistId), apiKey, shortsN) : Promise.resolve(null),
+  ]);
+  const cacheRef = db.doc(`channelLibraryCache/${channelId}`);
+
+  if (!long.ok && !shorts?.ok) {
+    logger.warn(`[seedVideoMetadata] No long/Shorts playlists for ${channelId} — using the mixed uploads list`);
+    const videos = await getChannelVideos(
+      uploadsPlaylistId,
+      apiKey,
+      APP_CONFIG.CHANNEL_SEED_MAX_VIDEOS,
+      APP_CONFIG.CHANNEL_SEED_MAX_PAGES
+    );
+    await writeStubs(db, channelId, videos);
+    return videos.map((v) => v.videoId);
+  }
+
+  await writeStubs(db, channelId, long.videos, "long");
+  if (shorts?.ok) await writeStubs(db, channelId, shorts.videos, "short");
+  await cacheRef.set(
+    { longSeededAt: Timestamp.now(), longPageToken: long.nextPageToken ?? null, longExhausted: !long.nextPageToken },
+    { merge: true }
+  );
+  logger.info(
+    `[seedVideoMetadata] ${channelId}: ${long.videos.length} long videos + ${shorts?.videos.length ?? 0} Shorts`
+  );
+  return [...long.videos, ...(shorts?.videos ?? [])].map((v) => v.videoId);
+}
+
+async function seedVideoMetadata(channelId: string, uploadsPlaylistId: string, apiKey: string, db: Db): Promise<string[]> {
+  return seedLongAndShorts(db, channelId, uploadsPlaylistId, apiKey);
 }
 
 // ── Batch analyze all videos in a channel ─────────────────────
@@ -431,6 +476,135 @@ async function seedAndAnalyzeInBackground(
   }
 }
 
+// ── "Load more videos" ──────────────────────────────────────────
+// Parent taps "Load more videos" on a channel → loadMoreVideos (callable) marks the
+// child's whitelist doc → onMoreVideosRequested (trigger, full CPU, 9 min) seeds the
+// next LOAD_MORE_VIDEOS (20) older long videos (continuing YouTube's page token) and
+// analyzes them for that child. Paid only for videos nobody analyzed before (profiles are
+// shared). Limits (loadMoreVideos): only while the child has < 20 shown from the channel,
+// once per channel per day, 10 per family per day, never past the channel's last video.
+
+export type LoadMoreRefusal = "no_more" | "busy" | "enough" | "today" | "daily_limit";
+
+export const loadMoreVideos = onCall(
+  { region: APP_CONFIG.FUNCTIONS_REGION, timeoutSeconds: 30, memory: "256MiB" },
+  async (request): Promise<{ queued: boolean; reason?: LoadMoreRefusal }> => {
+    const { parentId, childId, channelId } = request.data as { parentId?: string; childId?: string; channelId?: string };
+    if (!parentId || !childId || !channelId) throw new HttpsError("invalid-argument", "parentId, childId, channelId are required");
+    if (request.auth?.uid !== parentId) throw new HttpsError("permission-denied", "Not authorized");
+    const db = getFirestore();
+    const childPath = `users/${parentId}/children/${childId}`;
+    const ref = db.doc(`${childPath}/whitelistedChannels/${channelId}`);
+    const wl = await ref.get();
+    if (!wl.exists) throw new HttpsError("not-found", "That channel isn't on this child's list");
+    const w = wl.data()!;
+    if (w.seedingStatus === "pending") return { queued: false, reason: "busy" };
+    if (w.moreExhausted) return { queued: false, reason: "no_more" };
+    const cache = (await db.doc(`channelLibraryCache/${channelId}`).get()).data();
+    if (cache?.longSeededAt && cache.longExhausted) {
+      await ref.set({ moreExhausted: true }, { merge: true });
+      return { queued: false, reason: "no_more" };
+    }
+    // Only when it's needed: the child already has plenty from this channel
+    let shown = Number(w.videoCount) || 0;
+    try {
+      shown = (
+        await db.collection(`${childPath}/videoVerdicts`).where("channelId", "==", channelId).where("approved", "==", true).count().get()
+      ).data().count;
+    } catch (err) {
+      logger.warn("[loadMoreVideos] Count query failed, using videoCount:", err);
+    }
+    if (shown >= APP_CONFIG.LOAD_MORE_BELOW) return { queued: false, reason: "enough" };
+    // Once per channel per day (per child)
+    const last = w.moreRequestedAt?.toMillis?.() ?? 0;
+    if (Date.now() - last < 24 * 60 * 60 * 1000) return { queued: false, reason: "today" };
+    // LOAD_MORE_PER_DAY per family per day (UTC day), counted on the parent doc
+    const day = new Date().toISOString().slice(0, 10);
+    const parentRef = db.doc(`users/${parentId}`);
+    const allowed = await db.runTransaction(async (tx) => {
+      const used = (await tx.get(parentRef)).data()?.loadMore;
+      const count = used?.day === day ? Number(used.count) || 0 : 0;
+      if (count >= APP_CONFIG.LOAD_MORE_PER_DAY) return false;
+      tx.set(parentRef, { loadMore: { day, count: count + 1 } }, { merge: true });
+      return true;
+    });
+    if (!allowed) return { queued: false, reason: "daily_limit" };
+    await ref.set({ seedingStatus: "pending", moreRequestedAt: Timestamp.now() }, { merge: true });
+    return { queued: true };
+  }
+);
+
+export const onMoreVideosRequested = onDocumentUpdated(
+  {
+    document: "users/{parentId}/children/{childId}/whitelistedChannels/{channelId}",
+    region: APP_CONFIG.FUNCTIONS_REGION,
+    secrets: [YOUTUBE_API_KEY, SUPADATA_API_KEY, OPENAI_API_KEY],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after?.moreRequestedAt || before?.moreRequestedAt?.isEqual?.(after.moreRequestedAt)) return;
+    try {
+      await getFirestore().doc(`triggerEvents/${event.id}`).create({ at: Timestamp.now() });
+    } catch {
+      return; // duplicate delivery
+    }
+    const { parentId, childId, channelId } = event.params;
+    const db = getFirestore();
+    const ref = event.data!.after.ref;
+    try {
+      const details = await getChannelDetails(channelId, YOUTUBE_API_KEY.value());
+      if (!details) throw new Error(`Channel ${channelId} not found`);
+      const cacheRef = db.doc(`channelLibraryCache/${channelId}`);
+      const cache = (await cacheRef.get()).data() ?? {};
+      const existing = new Set((await db.collection(`channelLibraryCache/${channelId}/videos`).select().get()).docs.map((d) => d.id));
+
+      // Continue after the long videos we already have; channels seeded before this
+      // feature start from the newest long videos (skipping ones we already have)
+      const page = await getPlaylistPage(
+        longVideosPlaylist(details.uploadsPlaylistId),
+        YOUTUBE_API_KEY.value(),
+        APP_CONFIG.LOAD_MORE_VIDEOS,
+        cache.longSeededAt ? cache.longPageToken ?? undefined : undefined
+      );
+      const fresh = page.videos.filter((v) => !existing.has(v.videoId));
+      await writeStubs(db, channelId, fresh, "long");
+      await cacheRef.set(
+        { longSeededAt: Timestamp.now(), longPageToken: page.nextPageToken ?? null, longExhausted: !page.nextPageToken },
+        { merge: true }
+      );
+      const { approved } = fresh.length
+        ? await batchAnalyzeChannel({
+            channelId,
+            videoIds: fresh.map((v) => v.videoId),
+            parentId,
+            childId,
+            youtubeApiKey: YOUTUBE_API_KEY.value(),
+            supadataApiKey: SUPADATA_API_KEY.value(),
+            openAiApiKey: OPENAI_API_KEY.value(),
+          })
+        : { approved: 0 };
+      await ref.set(
+        {
+          seedingStatus: "ready",
+          videoCount: (Number(after.videoCount) || 0) + approved,
+          moreAddedCount: approved,
+          moreExhausted: !page.nextPageToken,
+        },
+        { merge: true }
+      );
+      // The suggestions catalog picks the latest long videos — refresh it with the new ones
+      if (fresh.length) await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
+      logger.info(`[onMoreVideosRequested] ${channelId} for ${parentId}/${childId}: ${fresh.length} more long videos, ${approved} fit`);
+    } catch (err) {
+      logger.error(`[onMoreVideosRequested] Failed for ${channelId}:`, err);
+      await ref.set({ seedingStatus: "ready" }, { merge: true });
+    }
+  }
+);
+
 // ── Scheduled: nightly channel library refresh ─────────────────
 // Runs every night at 3am UTC.
 // Detects NEW videos from whitelisted channels (not yet in Firestore).
@@ -447,6 +621,9 @@ export const refreshChannelLibraries = onSchedule(
   },
   async () => {
     const db = getFirestore();
+    const started = Date.now();
+    const TOPUPS_PER_NIGHT = 2;
+    let topUps = 0;
     logger.info("[refreshChannelLibraries] Starting nightly refresh");
 
     // Get all unique whitelisted channel IDs across all parents/children
@@ -498,10 +675,42 @@ export const refreshChannelLibraries = onSchedule(
         );
 
         // Find only NEW videos (not yet in Firestore)
-        const newVideos = currentVideos.filter((v) => !existingVideoIds.has(v.videoId));
+        const newVideos: YouTubePlaylistItem[] = currentVideos.filter((v) => !existingVideoIds.has(v.videoId));
+
+        // One-time top-up for channels added before Oct 20 (their 50 videos were
+        // mostly Shorts): add their latest long videos too. At most TOPUPS_PER_NIGHT
+        // channels a night, early in the run; the flag is set only after analysis, so a
+        // run that times out just redoes it next night (profiles already made are reused).
+        let topUpDone: (() => Promise<void>) | null = null;
+        const cacheDoc = (await db.doc(`channelLibraryCache/${channelId}`).get()).data();
+        if (!cacheDoc?.longSeededAt && topUps < TOPUPS_PER_NIGHT && Date.now() - started < 4 * 60 * 1000) {
+          topUps++;
+          const page = await getPlaylistPage(
+            longVideosPlaylist(channelDetails.uploadsPlaylistId),
+            YOUTUBE_API_KEY.value(),
+            APP_CONFIG.CHANNEL_SEED_LONG
+          );
+          if (page.ok) {
+            const seen = new Set(newVideos.map((v) => v.videoId));
+            const topUp = page.videos.filter((v) => !seen.has(v.videoId));
+            await writeStubs(db, channelId, topUp, "long");
+            newVideos.push(...topUp);
+            logger.info(`[refreshChannelLibraries] Long-video top-up for ${channelId}: ${topUp.length}`);
+          }
+          topUpDone = () =>
+            db.doc(`channelLibraryCache/${channelId}`).set(
+              {
+                longSeededAt: Timestamp.now(),
+                longPageToken: page.ok ? page.nextPageToken ?? null : null,
+                longExhausted: page.ok ? !page.nextPageToken : true,
+              },
+              { merge: true }
+            ).then(() => undefined);
+        }
 
         if (newVideos.length === 0) {
           logger.info(`[refreshChannelLibraries] No new videos for channel ${channelId}`);
+          if (topUpDone) await topUpDone();
           successCount++;
           continue;
         }
@@ -548,6 +757,7 @@ export const refreshChannelLibraries = onSchedule(
           });
         }
         await buildCatalogEntrySafe(channelId, OPENAI_API_KEY.value());
+        if (topUpDone) await topUpDone();
 
         successCount++;
         // (No stagger: sleeping between channels inside a 9-minute function made the

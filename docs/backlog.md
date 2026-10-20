@@ -7,29 +7,30 @@ What's next, in rough priority order. Update this file as things land.
 1. **Compilations switch** — waiting for the sister's examples of the compilations she means (Ms Rachel's
    "+ MORE Nursery Rhymes" ones are fine). Likely reupload channels stitching others' clips ("BEST Peppa Pig
    moments 3 HOURS"). Needs a profile field → one `PROFILE_VERSION` bump.
-2. **Kid player: standard YouTube player + a grown-up gate** (agreed Oct 18) instead of hiding YouTube's
+2. **Kid screen layout** (agreed Oct 20): YouTube Kids style — a "New" row, one row per channel (tap the
+   name → all its videos), a separate Shorts row; still live-updating.
+3. **Several kids on one device** (agreed Oct 20): pairing links the device to the family (parent picks which
+   children use it), a "Who's watching?" screen, optional 4-digit PIN per profile (so a younger sibling
+   can't use an older one's looser settings), "Switch profile" in the kid app; remote control / history
+   stay per child.
+4. **Kid player: standard YouTube player + a grown-up gate** (agreed Oct 18) instead of hiding YouTube's
    buttons (`HIDE_IN_PLAYER`, against YouTube's terms — see Security → kid player): links (share, Watch on
    YouTube, More videos, title) work again but first ask a grown-up question / passcode, then open the
    YouTube app. Apple *requires* a parental gate before links leave a Kids-category app. Plus a short
    "lock your kid's phone to Kideos" guide in parent setup (Guided Access on iPhone, screen pinning on
    Android — free, built in).
-3. **Channel conflicts after filter changes** — a ⚠️ badge on the Channels screen next to channels whose
-   saved check conflicts with the child's *current* settings (code only, from `channelChecks/{id}` via
-   `fitForChild`; no AI).
-4. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
+5. **Watch history screen** in the parent app (Home → "{child}'s history": what, when, how long). The kid
    app already writes `watchHistory` sessions (kept 90 days); there's just no screen for them.
-5. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
+6. **Fix the weekly digest** (see Confirmed bugs) and build it **in code, without AI**: watch time, top
    channels, shown/hidden counts. Today it sends a child's watch history to OpenAI — avoid that (COPPA:
    children's data to a third party). In-app screen only, no push.
-6. **Redo device binding** (see Security).
-7. **Compliance pack before launch** — see section 7.
+7. **Redo device binding** (see Security).
+8. **Compliance pack before launch** — see section 7.
 
 Smaller follow-ups:
 - **Clean up a removed channel's results**: removing a channel keeps its `videoVerdicts` (hidden in the
   parent app since Oct 19, never in the kid feed). Delete them ~1 month after removal if the channel wasn't
   re-added (re-adding within that time keeps the parent's Hide / Show anyway choices).
-- **Channel check on the Suggestions swipe cards** too (they add directly today — those channels are
-  already analyzed, so lower priority).
 - **Tune the image-moderation thresholds** (`visualCheck.ts`) from the `visual=` numbers in real logs —
   they're a first guess, and the moderation model is trained mostly on photos (cartoons may score lower).
 - **Tune pace**: watch for calm explainers rated 3 or hyper channels rated 2; add channels to
@@ -107,7 +108,7 @@ analyse 500 channels with a prompt we're about to change.
   (controls, fullscreen, skip ad, title) is YouTube's as normal. **Changing the player is against YouTube's
   terms** (Required Minimum Functionality: "You must not make changes to the YouTube player that are not
   explicitly described by the API documentation") — risks at launch: losing API access, store rejection.
-  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #2). Also: "Made for
+  **Decided Oct 18:** go back to the standard player and put a grown-up gate in front of links (Next up #4). Also: "Made for
   Kids" videos must have tracking off (Developer Policies III.E.4.j); the player page is hosted on the
   library author's GitHub Pages (`lonelycpp.github.io`) — host our own.
   The title, channel name and channel picture are untappable; YouTube links never open (web view level
@@ -201,7 +202,7 @@ COPPA's amended rule is in force since Apr 22, 2026:
 YouTube API Services policies (reviewed Oct 18 with Adam — he accepts the risk at 100–200 families, but
 these are the known gaps):
 - **Player changes** — hiding share / YouTube logo / More videos and blocking links breaks "don't modify or
-  block the standard player". Plan: Next up #2 (standard player + grown-up gate).
+  block the standard player". Plan: Next up #4 (standard player + grown-up gate).
 - **"Safe / suitable" claims and custom scores** — the policies forbid claiming a video/channel is safe or
   suitable, custom channel scores, and inferring content categories. Ratings are our own analysis of what's
   said and shown; word them as findings ("mentions gambling, shown once"), not verdicts ("safe"). Adam
@@ -213,6 +214,24 @@ these are the known gaps):
   exact rules), so prompt tricks can't reach other families.
 
 ## Done (Oct 2026)
+
+Oct 20 (same branch): **Load more limits** — 20 videos per tap, only while the child has < 20 shown from
+the channel and YouTube has more, once per channel per day, 10 per family per day. **Ages = who a channel
+suits** (youngest age it's suitable & interesting for), not "made for" — SmarterEveryDay / MrBeast came out
+12+; saved channel-check ages preferred (`OVERVIEW_VERSION` 4, `CHECK_VERSION` 5).
+
+Oct 20 (same branch): **long videos first** — a channel is seeded with its 40 latest long videos + 10
+latest Shorts (YouTube's `UULF…` / `UUSH…` playlists) instead of its 50 newest uploads (~90% Shorts);
+suggestions are scored on long videos (Shorts on their own line, ignored with "No Shorts" — they were
+counting as "doesn't fit": Mark Rober was 12% for Simon); `Not suggested` logs list the hidden reasons;
+**"Load more videos"** per channel (next 50 older long videos); one-time nightly long-video top-up for
+channels added earlier.
+
+Oct 19 (branch `channel-check-everywhere`): every way of adding a channel shows the channel check review
+(suggested-channel cards and the older AI suggestions too); suggestions use saved channel checks ("not a
+fit" → not suggested, otherwise "things to know" on the card); the Channels screen shows "⚠️ N things to
+know" / "⛔ Not a fit with current settings" from saved checks vs current settings (`getChannelFits`). No
+new AI calls.
 
 Oct 19 (branch `cooldowns`): **minimum time on a video per child** (Settings → Viewing: "Before switching
 videos, stay at least" Off / 30 s / 1 min / 2 min / Whole). Back / Android back keep the kid on the video

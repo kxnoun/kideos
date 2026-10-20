@@ -232,6 +232,24 @@ export async function checkChannel(parentId: string, childId: string, input: str
   return callFunction<CheckChannelResult>("checkChannel", { parentId, childId, input });
 }
 
+// "Load more videos": the next 50 older long videos of a channel, analyzed for this child
+// (paid per new video, shared after). reason: "no_more" = that's all of them; "busy" = still analyzing.
+export async function loadMoreVideos(
+  parentId: string,
+  childId: string,
+  channelId: string
+): Promise<{ queued: boolean; reason?: "no_more" | "busy" | "enough" | "today" | "daily_limit" }> {
+  return callFunction("loadMoreVideos", { parentId, childId, channelId });
+}
+
+// How the child's current channels fit their CURRENT settings, from saved channel checks
+// (no AI). Channels never checked (added before checks existed) aren't in the result.
+export type ChannelFit = { fit: "good" | "caution" | "not_fit"; conflicts: string[] };
+export async function getChannelFits(parentId: string, childId: string): Promise<Record<string, ChannelFit>> {
+  const res = await callFunction<{ fits: Record<string, ChannelFit> }>("getChannelFits", { parentId, childId });
+  return res.fits;
+}
+
 // ─── Suggested channels ──────────────────────────────────────
 
 export async function getChannelSuggestions(parentId: string, childId: string): Promise<SuggestedChannel[]> {

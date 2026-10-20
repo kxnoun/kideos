@@ -39,7 +39,8 @@ Two terminals per app. **Don't use `npx react-native run-android`** on Windows.
 | Images failing | `"retrying text-only"` = one of the 4 images didn't load in time for OpenAI (the profile is still made, without images) |
 | Channel checks | `firebase functions:log --only checkChannel \| Select-String "\[checkChannel\]"` → per channel: verdict, `wellKnown`, thumbnails checked, every non-zero level, and `Gemini tokens in=… out=…` (the real cost); `Cached:` = the shared report was reused (no AI) |
 | "Too hyper" reports | `firebase functions:log --only onPaceReport` → `N "too hyper" report(s)` per video |
-| Why a channel isn't suggested | `firebase functions:log --only getChannelSuggestions \| Select-String "Not suggested"` → fit %, severe videos (title + rating + evidence), or the channel's audience ages |
+| Why a channel isn't suggested | `firebase functions:log --only getChannelSuggestions \| Select-String "Not suggested"` → fit % of long videos + the top hidden reasons, severe videos (title + rating + evidence), the channel's audience ages, or `channel check: not a fit (…)` |
+| Seeding / Load more | `… --only onChannelWhitelisted \| Select-String "seedVideoMetadata"` → `N long videos + M Shorts` (or "using the mixed uploads list"); `… --only onMoreVideosRequested` → `N more long videos, M fit`; nightly top-up: `… --only refreshChannelLibraries \| Select-String "top-up"` |
 | Profile upgrades | `firebase functions:log --only reprofileOutdated \| Select-String "upgraded="` → `— done` or `— out of time` (Force run again) |
 | Transcripts | `… \| Select-String "Supadata\|transcriptCache"` — `Unexpected status 429` = rate limit **or out of credits** (Supadata uses 429 for both; the log line includes their error message) |
 | Save to a file to share | `… \| Out-File something.txt` (UTF-16) |
@@ -114,7 +115,10 @@ changing those doesn't need a bump.
 
 Per new video: 1 YouTube unit (free quota), 1 Supadata credit, one GPT-4o-mini call with transcript + 4
 low-detail images (~15k input tokens ≈ $0.002–0.003), free image moderation, one HEAD request for the
-Shorts check. A new 50-video channel ≈ 50 credits + ~10–15¢. Plus, the first time anyone checks a channel:
+Shorts check. A new channel (40 long videos + 10 Shorts) ≈ 50 credits + ~10–15¢; "Load more videos" ≈ 20
+credits + ~5¢ per tap, only for videos nobody analyzed before (limited: < 20 shown, once per channel per
+day, 10 per family per day); the one-time nightly top-up of older channels ≈ up
+to 40 credits per channel. Plus, the first time anyone checks a channel:
 one Gemini Flash-Lite call (measured ~16k in / ~1k out ≈ 0.5–0.7¢) + one grounded Google Search.
 Re-adding channels, other families, filter changes, repeat channel checks: free. A `PROFILE_VERSION` bump
 re-rates every profiled video once (OpenAI only).

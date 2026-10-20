@@ -8,7 +8,8 @@
 // - Long-press to remove a channel
 // ─────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -30,7 +31,10 @@ import {
   subscribeToChannelSuggestions,
   addChannel,
   checkChannel,
+  getChannelFits,
+  loadMoreVideos,
   type CheckChannelResult,
+  type ChannelFit,
   removeChannel,
   respondToSuggestion,
 } from "../../services/firebase";
@@ -55,12 +59,62 @@ export default function ChannelsScreen() {
   const [adding, setAdding] = useState(false); // checking the channel
   const [review, setReview] = useState<CheckChannelResult | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [fromSuggestion, setFromSuggestion] = useState<string | null>(null); // old AI suggestion being added
+  const [fits, setFits] = useState<Record<string, ChannelFit>>({});
 
   const parentId = user?.uid;
   const closeAdd = () => {
     setAddModalVisible(false);
     setReview(null);
+    setFromSuggestion(null);
   };
+
+  // Saved channel checks vs the child's CURRENT settings (refreshed when the tab is opened,
+  // e.g. after changing filters in Settings, and when the channel list changes)
+  const channelIdsKey = useMemo(() => channels.map((c) => c.channelId).sort().join(","), [channels]);
+  const loadFits = useCallback(() => {
+    if (!parentId || !selectedChildId) return;
+    getChannelFits(parentId, selectedChildId)
+      .then(setFits)
+      .catch(() => {});
+  }, [parentId, selectedChildId]);
+  useFocusEffect(loadFits);
+  useEffect(loadFits, [loadFits, channelIdsKey]);
+
+  const moreVideos = (channel: WhitelistedChannel) => {
+    if (!parentId || !selectedChildId) return;
+    Alert.alert(
+      "Load more videos?",
+      `We'll check ${channel.name}'s next 20 older videos. Ones that fit ${selectedChild?.profile.name ?? "your child"}'s settings show up in a few minutes.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Load more",
+          onPress: async () => {
+            try {
+              const r = await loadMoreVideos(parentId, selectedChildId, channel.channelId);
+              const msg: Record<string, [string, string]> = {
+                no_more: ["That's everything", `We've already checked all of ${channel.name}'s videos.`],
+                busy: ["Still working", `${channel.name} is still being analyzed — try again in a few minutes.`],
+                enough: ["Plenty already", `${channel.name} already has 20 or more videos in the feed.`],
+                today: ["Once a day", `You loaded more from ${channel.name} today — try again tomorrow.`],
+                daily_limit: ["That's today's limit", "You can load more videos for up to 10 channels a day. Try again tomorrow."],
+              };
+              if (r.reason && msg[r.reason]) Alert.alert(...msg[r.reason]);
+            } catch {
+              Alert.alert("Couldn't do that", "Check your connection and try again.");
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const showFit = (name: string, f: ChannelFit) =>
+    Alert.alert(
+      f.fit === "not_fit" ? `${name}: not a fit anymore` : `${name}: things to know`,
+      `With ${selectedChild?.profile.name ?? "your child"}'s current settings:\n\n${f.conflicts.map((c) => `• ${c}`).join("\n")}\n\nVideos past the settings are hidden either way.`
+    );
 
   useEffect(() => {
     if (!parentId || !selectedChildId) return;
@@ -102,7 +156,12 @@ export default function ChannelsScreen() {
     if (!review || !parentId || !selectedChildId) return;
     setConfirming(true);
     try {
-      await addChannel(parentId, selectedChildId, review.channel.channelId);
+      // An old AI suggestion is marked approved (which also adds it)
+      if (fromSuggestion === review.channel.channelId) {
+        await respondToSuggestion(parentId, selectedChildId, review.channel.channelId, "approved");
+      } else {
+        await addChannel(parentId, selectedChildId, review.channel.channelId);
+      }
       setInput("");
       closeAdd();
     } catch (e: unknown) {
@@ -110,7 +169,7 @@ export default function ChannelsScreen() {
     } finally {
       setConfirming(false);
     }
-  }, [review, parentId, selectedChildId]);
+  }, [review, parentId, selectedChildId, fromSuggestion]);
 
   const handleRemove = useCallback(
     (channel: WhitelistedChannel) => {
@@ -136,6 +195,26 @@ export default function ChannelsScreen() {
   const handleSuggestion = useCallback(
     async (suggestion: ChannelSuggestion, response: "approved" | "denied") => {
       if (!parentId || !selectedChildId) return;
+      // Adding goes through the same channel check review as typing a channel in
+      if (response === "approved") {
+        setInput(suggestion.channelName);
+        setFromSuggestion(suggestion.channelId);
+        setAddModalVisible(true);
+        setAdding(true);
+        try {
+          const result = await checkChannel(parentId, selectedChildId, suggestion.channelId);
+          if (result.alreadyAdded) {
+            closeAdd();
+            Alert.alert("Already added", `${result.channel.name} is already on the list.`);
+          } else setReview(result);
+        } catch (e: unknown) {
+          closeAdd();
+          Alert.alert("Error", e instanceof Error ? e.message : "Couldn't check that channel.");
+        } finally {
+          setAdding(false);
+        }
+        return;
+      }
       try {
         await respondToSuggestion(
           parentId,
@@ -184,6 +263,25 @@ export default function ChannelsScreen() {
               <Text style={styles.videoCount}> · {item.videoCount} videos</Text>
             )}
           </View>
+          {/* Only when it'd help: fewer than 20 videos shown, YouTube has more, not already today */}
+          {item.seedingStatus === "ready" && item.videoCount < 20 && !item.moreExhausted ? (
+            item.moreRequestedAt && Date.now() - item.moreRequestedAt.toMillis() < 24 * 60 * 60 * 1000 ? (
+              <Text style={styles.moreDone}>More videos available tomorrow</Text>
+            ) : (
+              <TouchableOpacity onPress={() => moreVideos(item)} hitSlop={6}>
+                <Text style={styles.moreLink}>＋ Load more videos</Text>
+              </TouchableOpacity>
+            )
+          ) : null}
+          {fits[item.channelId] && fits[item.channelId].fit !== "good" ? (
+            <TouchableOpacity onPress={() => showFit(item.name, fits[item.channelId])} hitSlop={6}>
+              <Text style={[styles.fitBadge, fits[item.channelId].fit === "not_fit" && styles.fitBadgeBad]}>
+                {fits[item.channelId].fit === "not_fit"
+                  ? "⛔ Not a fit with current settings"
+                  : `⚠️ ${fits[item.channelId].conflicts.length} ${fits[item.channelId].conflicts.length === 1 ? "thing" : "things"} to know`}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
         <Text style={styles.removeHint}>hold to remove</Text>
       </TouchableOpacity>
@@ -453,6 +551,10 @@ const styles = StyleSheet.create({
   channelInfo: { flex: 1 },
   channelName: { fontSize: 15, fontWeight: "700", color: "#1A1A2E", marginBottom: 4 },
   channelMeta: { flexDirection: "row", alignItems: "center" },
+  fitBadge: { fontSize: 12, fontWeight: "700", color: "#8A5A00", marginTop: 4 },
+  moreLink: { fontSize: 12, fontWeight: "700", color: "#6C63FF", marginTop: 4 },
+  moreDone: { fontSize: 12, color: "#999", marginTop: 4 },
+  fitBadgeBad: { color: "#C62828" },
   statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
   statusLabel: { fontSize: 12, fontWeight: "600" },
   videoCount: { fontSize: 12, color: "#888" },
