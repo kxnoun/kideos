@@ -395,19 +395,28 @@ export default function PlayerScreen({ video, session, minWatchSeconds, resume, 
         onMoveShouldSetPanResponder: (_e, g) => {
           const h = handlers.current;
           if (h.ended || leavingRef.current) return false;
+          // The direction is decided HERE: at grant the responder resets dx/dy to 0
           const vertical = Math.abs(g.dy) > 10 && Math.abs(g.dy) > 2 * Math.abs(g.dx);
-          if (h.showMore) return vertical; // the row scrolls sideways
+          if (h.showMore) {
+            mode.current = "more";
+            return vertical; // the row scrolls sideways
+          }
           const { playerX, playerY, playerW, playerH } = geo.current;
           const onControls =
             g.y0 > playerY + playerH * 0.78 && g.y0 < playerY + playerH && g.x0 > playerX && g.x0 < playerX + playerW;
-          if (onControls) return vertical;
-          const down = g.dy > 8 && g.dy >= 0.2 * Math.abs(g.dx);
           const up = h.upNext.length > 0 && -g.dy > 10 && -g.dy > Math.abs(g.dx);
-          return down || up;
+          const down = onControls ? vertical && g.dy > 0 : g.dy > 8 && g.dy >= 0.2 * Math.abs(g.dx);
+          if (up && (!onControls || vertical)) {
+            mode.current = "up";
+            return true;
+          }
+          if (down) {
+            mode.current = "down";
+            return true;
+          }
+          return false;
         },
-        onPanResponderGrant: (_e, g) => {
-          const h = handlers.current;
-          mode.current = h.showMore ? "more" : g.dy < 0 ? "up" : "down";
+        onPanResponderGrant: () => {
           if (mode.current === "up") setShowMore(true); // the row comes in with the video
         },
         onPanResponderMove: (_e, g) => {
