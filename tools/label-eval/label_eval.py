@@ -14,6 +14,7 @@ AI = os.path.join(HERE, "ai_ratings.json")        # the AI's levels: don't open 
 HUMAN = os.path.join(HERE, "human_ratings.csv")   # your levels
 RESULTS = os.path.join(HERE, "results.md")          # per-dimension scores only: safe to commit
 DISAGREE = os.path.join(HERE, "disagreements.md")  # per-video AI levels: local only (never in the repo)
+FINDINGS = "## What the pilot found"  # hand-written section at the end of results.md, kept by score
 
 PROJECT = os.environ.get("KIDEOS_PROJECT", "kideos-io")
 # Only profiles from the current prompt (PROFILE_VERSION in functions/src/aiAnalysis.ts). Older ones are
@@ -157,7 +158,8 @@ def score():
              "- The AI levels are what Kideos stores, so they include the code-applied floors (counted "
              "swearing, image moderation, known high-energy channels), not only the model's answer.",
              f"- Profiles from the current prompt only (profile version {PROFILE_VERSION}).",
-             "- Sample: half picked where the AI rated some dimension 2+, half random, one video per channel. "
+             f"- Sample: half picked where the AI rated some dimension 2+, half random, spread across "
+             f"{len({v['channel'] for v in titles.values()})} channels (one per channel until channels run out). "
              "That over-represents non-zero videos on purpose, which tends to give a higher kappa than a "
              "typical mix of kids' videos would.",
              "- Per-video disagreements are kept out of the repo: no AI ratings of individual videos are "
@@ -183,8 +185,13 @@ def score():
     k = weighted_kappa(all_h, all_a)
     lines.append(f"| **all (pooled)** | {len(all_a)} | {'n/a' if k is None else f'{k:.2f}'} | | | | |")
     out = "\n".join(lines) + "\n"
+    notes = ""  # keep the hand-written findings when re-scoring
+    if os.path.exists(RESULTS):
+        old = open(RESULTS, encoding="utf-8").read()
+        if FINDINGS in old:
+            notes = "\n" + old[old.index(FINDINGS):]
     with open(RESULTS, "w", encoding="utf-8") as f:
-        f.write(out)
+        f.write(out + notes)
 
     lines = ["# Biggest disagreements (local only: don't commit)\n",
              "| Video | Dimension | AI | Human | Note |", "|---|---|---|---|---|"]
