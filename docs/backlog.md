@@ -75,8 +75,19 @@ ladders (pace & stimulation, junk) and some no-caption videos (rated from metada
    and/or make its default limit more conservative. Bump `PROFILE_VERSION` → `reprofileOutdated` re-rates
    everything from cached transcripts (OpenAI only).
 
-Plan: build a small labeling page (one video at a time, same questions, saves answers, outputs the
-agreement table). See [questionnaire-research.md](questionnaire-research.md) → Known limits.
+**Pilot done (Nov 19):** `tools/label-eval` (40 videos, 6 dimensions, 1 rater) — pooled weighted kappa
+0.61, see [results.md](../tools/label-eval/results.md). Mostly a protocol problem: without `sexual` /
+`substances` in the round, that content landed in other dimensions, and the rater scored overall
+suitability instead of each ladder. The full round needs all dimensions, fresh videos, a written "rate the
+ladder, not suitability" rule, and more channels (the database only had 11).
+
+Real misses from the pilot (prompt problems, fix → bump `PROFILE_VERSION`):
+- **Sexualized Minecraft-style animation Shorts not rated junk 4** (the ladder covers "characters in …
+  sexualized situations"). Little or no transcript, so the rating rests on title + images — check how
+  junk is judged for short, caption-less videos. Most important: this is what Kideos exists to catch.
+- **Swearing in song lyrics missed** (language low on a music video) — lyrics often aren't in captions.
+
+See [questionnaire-research.md](questionnaire-research.md) → Known limits.
 
 Found in real data (Oct 17): gambling was present/absent only, so passing mentions counted as the worst
 level — SciShow's "Power Pose" video (a study using a bet), Casually Explained's "Sports II" ("mention of
